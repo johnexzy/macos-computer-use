@@ -13,15 +13,21 @@ This skill provides the standard operating procedures, decision trees, and failu
 
 1. **Semantic-First, Never Guess Coordinates**:
    * **Always prefer `click_text` and `find_text`** over raw $(x, y)$ `mouse_click`.
-   * Apple Vision OCR runs in sub-$30\text{ ms}$ on the Apple Neural Engine. It guarantees zero-drift clicking on buttons, labels, and input fields.
+   * Use `matchMode: "word"` or `"exact"` for actions. If multiple equally ranked matches exist, inspect candidates and pass `occurrence`.
    
 2. **Preserve User Focus (Non-Intrusive by Default)**:
    * **Always pass `appName` or `windowId`** to tool calls (`screenshot`, `click_text`, `find_text`, `mouse_click`, `type_text`).
-   * Specifying the target application directs events straight to that process queue (`postToPid`) and captures background buffers without stealing the user's active keyboard focus or moving their physical mouse cursor.
+   * Prefer `windowId` in multi-window applications. It is authoritative and fails closed if stale or inconsistent with `appName`.
+   * Targeted clicks and scrolling use Accessibility actions. Exact-window typing focuses the requested AX window before process delivery.
+   * The live agent cursor is a click-through visual indicator. It does not move or replace the user's physical pointer.
 
 3. **Reactive Polling Over Blind Sleeps**:
    * **Never call `screenshot` immediately after an action that triggers an async network request or animation** (e.g., submitting a search query, opening a modal, waiting for a dropdown).
    * **Always use `wait_for_text`** with the expected text label and an appropriate timeout.
+
+4. **Verify Every Mutation**:
+   * Action delivery is reported as `delivered_unverified` because dispatch success is not proof of the intended UI state.
+   * After clicking, typing, or scrolling, verify the expected state with `wait_for_text`, `find_text`, or `screenshot`.
 
 ---
 
@@ -29,7 +35,7 @@ This skill provides the standard operating procedures, decision trees, and failu
 
 | Intent | Recommended Tool | Why |
 | :--- | :--- | :--- |
-| **Click a button, link, or tab with text** | `click_text({ text: "Submit", appName: "Safari" })` | Locates the exact bounding box center via OCR and clicks non-intrusively. |
+| **Click a button, link, or tab with text** | `click_text({ text: "Submit", appName: "Safari", matchMode: "word" })` | Locates OCR text and invokes the matching Accessibility control. |
 | **Inspect elements / coordinates** | `find_text({ text: "Search", appName: "Google Chrome" })` | Returns exact bounding box `{ x, y, width, height, centerX, centerY }` in logical points. |
 | **Wait for async UI transition** | `wait_for_text({ text: "Results", appName: "Google Chrome", timeoutSeconds: 5.0 })` | Polls target window buffer at $100\text{ ms}$ intervals until text renders. |
 | **Take a background visual snapshot** | `screenshot({ appName: "Google Chrome", cursor: {x, y} })` | Captures only the target window buffer without bringing it to front. |
@@ -98,4 +104,5 @@ When an element has no text label:
    * **Synonym / Alternate Wording**: Search for a substring or alternate label (e.g. `"Search or type a URL"` vs `"Search"`).
 
 2. **Input Not Registering Keystrokes**:
-   * Ensure the text field was clicked first via `click_text` to guarantee cursor focus before calling `type_text`.
+   * Check whether `click_text` returned an AX action or a fail-closed error before calling `type_text`.
+   * For multi-window apps, pass the exact `windowId` to both calls and verify the intended window changed.
