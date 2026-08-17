@@ -43,10 +43,27 @@ Built with a compiled Swift core leveraging Apple's native **CoreGraphics**, **V
 
 ## 🚀 Installation & Setup
 
+### Run with npx
+
+Configure an MCP client to download, build, and launch the latest public package:
+
+```json
+{
+  "mcpServers": {
+    "macos-computer-use": {
+      "command": "npx",
+      "args": ["-y", "macos-computer-use-mcp"]
+    }
+  }
+}
+```
+
+The package includes an ad-hoc-signed universal Swift helper for Apple Silicon and Intel Macs, so `npx` does not require a local Swift compiler or install-script approval.
+
 ### 1. Prerequisites
 * **macOS 13.0+** (Apple Silicon or Intel)
-* **Node.js 18+**
-* **Xcode Command Line Tools** (for compiling the native Swift binary):
+* **Node.js 20+**
+* **Xcode Command Line Tools** only when building from source:
   ```bash
   xcode-select --install
   ```
@@ -56,8 +73,8 @@ Built with a compiled Swift core leveraging Apple's native **CoreGraphics**, **V
 git clone https://github.com/johnexzy/macos-computer-use.git
 cd macos-computer-use
 npm install
+npm run build
 ```
-*(The `postinstall` script automatically compiles `native_helper.swift` into an optimized native binary).*
 
 ---
 
