@@ -1,0 +1,32 @@
+{
+  "name": "macos-computer-use",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Ultra-fast, non-intrusive native macOS Computer Use MCP server with Apple Vision OCR and background process event routing.",
+  "main": "server.mjs",
+  "bin": {
+    "macos-computer-use": "./server.mjs"
+  },
+  "scripts": {
+    "build": "swiftc -O native_helper.swift -o native_helper",
+    "postinstall": "npm run build",
+    "start": "node server.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "macos",
+    "computer-use",
+    "automation",
+    "vision",
+    "ocr",
+    "antigravity",
+    "claude",
+    "openclaw"
+  ],
+  "author": "John Oba <obajohn75@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.1"
+  }
+}
