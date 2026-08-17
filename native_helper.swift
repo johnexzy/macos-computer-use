@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import AppKit
+import ApplicationServices
 import ImageIO
 import Vision
 
@@ -176,6 +177,372 @@ func getWindowBounds(windowId: Int) {
 // Non-Intrusive Targeted Event Dispatch (postToPid) & Virtual Cursor
 // -------------------------------------------------------------------------
 
+func copyAXAttribute(_ element: AXUIElement, _ attribute: CFString) -> CFTypeRef? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
+        return nil
+    }
+    return value
+}
+
+func axFrame(_ element: AXUIElement) -> CGRect? {
+    guard let positionValue = copyAXAttribute(element, kAXPositionAttribute as CFString),
+          let sizeValue = copyAXAttribute(element, kAXSizeAttribute as CFString),
+          CFGetTypeID(positionValue) == AXValueGetTypeID(),
+          CFGetTypeID(sizeValue) == AXValueGetTypeID() else {
+        return nil
+    }
+
+    var position = CGPoint.zero
+    var size = CGSize.zero
+    guard AXValueGetValue(positionValue as! AXValue, .cgPoint, &position),
+          AXValueGetValue(sizeValue as! AXValue, .cgSize, &size) else {
+        return nil
+    }
+    return CGRect(origin: position, size: size)
+}
+
+func axRole(_ element: AXUIElement) -> String {
+    return copyAXAttribute(element, kAXRoleAttribute as CFString) as? String ?? ""
+}
+
+func isEditableAXElement(_ element: AXUIElement) -> Bool {
+    let role = axRole(element)
+    return role == kAXTextFieldRole as String
+        || role == kAXTextAreaRole as String
+        || role == "AXSearchField"
+        || role == "AXComboBox"
+}
+
+func axChildren(_ element: AXUIElement) -> [AXUIElement] {
+    return copyAXAttribute(element, kAXChildrenAttribute as CFString) as? [AXUIElement] ?? []
+}
+
+func firstEditableElement(in element: AXUIElement, depth: Int = 0) -> AXUIElement? {
+    guard depth < 40 else { return nil }
+    if isEditableAXElement(element) { return element }
+    for child in axChildren(element) {
+        if let editable = firstEditableElement(in: child, depth: depth + 1) {
+            return editable
+        }
+    }
+    return nil
+}
+
+func axElement(from value: CFTypeRef?) -> AXUIElement? {
+    guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+    return unsafeBitCast(value, to: AXUIElement.self)
+}
+
+func windowMetadata(windowId: Int) -> (pid: pid_t, bounds: CGRect, appName: String, title: String)? {
+    let options = CGWindowListOption(arrayLiteral: .optionAll)
+    guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+        return nil
+    }
+
+    for win in windowList where (win[kCGWindowNumber as String] as? Int) == windowId {
+        let boundsDict = win[kCGWindowBounds as String] as? [String: Any] ?? [:]
+        let bounds = CGRect(
+            x: boundsDict["X"] as? Double ?? 0,
+            y: boundsDict["Y"] as? Double ?? 0,
+            width: boundsDict["Width"] as? Double ?? 0,
+            height: boundsDict["Height"] as? Double ?? 0
+        )
+        return (
+            pid: win[kCGWindowOwnerPID as String] as? pid_t ?? 0,
+            bounds: bounds,
+            appName: win[kCGWindowOwnerName as String] as? String ?? "",
+            title: win[kCGWindowName as String] as? String ?? ""
+        )
+    }
+    return nil
+}
+
+func matchingAXWindow(pid: pid_t, windowId: Int) -> AXUIElement? {
+    guard let metadata = windowMetadata(windowId: windowId), metadata.pid == pid else {
+        return nil
+    }
+
+    let app = AXUIElementCreateApplication(pid)
+    guard let windows = copyAXAttribute(app, kAXWindowsAttribute as CFString) as? [AXUIElement] else {
+        return nil
+    }
+
+    var best: (window: AXUIElement, score: Double)?
+    for window in windows {
+        guard let frame = axFrame(window) else { continue }
+        let distance = abs(frame.origin.x - metadata.bounds.origin.x)
+            + abs(frame.origin.y - metadata.bounds.origin.y)
+            + abs(frame.size.width - metadata.bounds.size.width)
+            + abs(frame.size.height - metadata.bounds.size.height)
+        let title = copyAXAttribute(window, kAXTitleAttribute as CFString) as? String ?? ""
+        let titlePenalty = !metadata.title.isEmpty && !title.isEmpty && title != metadata.title ? 20.0 : 0.0
+        let score = distance + titlePenalty
+        if best == nil || score < best!.score {
+            best = (window, score)
+        }
+    }
+
+    guard let best, best.score < 80.0 else { return nil }
+    return best.window
+}
+
+@discardableResult
+func focusAXWindow(pid: pid_t, windowId: Int) -> Bool {
+    guard let window = matchingAXWindow(pid: pid, windowId: windowId) else {
+        return false
+    }
+
+    let app = AXUIElementCreateApplication(pid)
+    let focusedWindowResult = AXUIElementSetAttributeValue(
+        app,
+        kAXFocusedWindowAttribute as CFString,
+        window
+    )
+    let mainResult = AXUIElementSetAttributeValue(
+        window,
+        kAXMainAttribute as CFString,
+        kCFBooleanTrue
+    )
+    let focusedResult = AXUIElementSetAttributeValue(
+        window,
+        kAXFocusedAttribute as CFString,
+        kCFBooleanTrue
+    )
+
+    usleep(30000)
+    let windowFrame = axFrame(window)
+    let currentFocusedElement = axElement(
+        from: copyAXAttribute(app, kAXFocusedUIElementAttribute as CFString)
+    )
+    let currentFocusIsUsable = currentFocusedElement.map { element in
+        guard isEditableAXElement(element) else { return false }
+        guard let windowFrame, let elementFrame = axFrame(element) else { return true }
+        return windowFrame.intersects(elementFrame)
+    } ?? false
+
+    var editableFocusResult: AXError?
+    if !currentFocusIsUsable, let editable = firstEditableElement(in: window) {
+        editableFocusResult = AXUIElementSetAttributeValue(
+            editable,
+            kAXFocusedAttribute as CFString,
+            kCFBooleanTrue
+        )
+    }
+
+    return currentFocusIsUsable
+        || editableFocusResult == .success
+        || focusedWindowResult == .success
+        || mainResult == .success
+        || focusedResult == .success
+}
+
+func axActionNames(_ element: AXUIElement) -> [String] {
+    var names: CFArray?
+    guard AXUIElementCopyActionNames(element, &names) == .success else { return [] }
+    return names as? [String] ?? []
+}
+
+func actionableElement(at point: CGPoint, in element: AXUIElement, depth: Int = 0) -> AXUIElement? {
+    guard depth < 40 else { return nil }
+    if depth > 0, let frame = axFrame(element), !frame.contains(point) {
+        return nil
+    }
+
+    for child in axChildren(element).reversed() {
+        if let match = actionableElement(at: point, in: child, depth: depth + 1) {
+            return match
+        }
+    }
+
+    let actions = axActionNames(element)
+    let role = axRole(element)
+    if actions.contains(kAXPressAction as String)
+        || role == kAXTextFieldRole as String
+        || role == kAXTextAreaRole as String
+        || role == "AXSearchField" {
+        return element
+    }
+    return nil
+}
+
+func dispatchAccessibilityClick(
+    x: Double,
+    y: Double,
+    button: String,
+    count: Int,
+    targetPid: pid_t,
+    windowId: Int
+) {
+    guard button == "left" else {
+        printJson([
+            "status": "error",
+            "code": "UNSUPPORTED_TARGETING",
+            "error": "Background Accessibility clicks support only the left button"
+        ])
+        return
+    }
+    guard AXIsProcessTrusted() else {
+        printJson([
+            "status": "error",
+            "code": "ACCESSIBILITY_PERMISSION_REQUIRED",
+            "error": "Accessibility permission is required"
+        ])
+        return
+    }
+    guard let window = matchingAXWindow(pid: targetPid, windowId: windowId) else {
+        printJson([
+            "status": "error",
+            "code": "TARGET_NOT_FOUND",
+            "error": "Could not resolve AX window for windowId \(windowId)"
+        ])
+        return
+    }
+    guard let element = actionableElement(at: CGPoint(x: x, y: y), in: window) else {
+        printJson([
+            "status": "error",
+            "code": "ACTIONABLE_ELEMENT_NOT_FOUND",
+            "error": "No actionable Accessibility element exists at (\(x), \(y))"
+        ])
+        return
+    }
+
+    let actions = axActionNames(element)
+    let role = axRole(element)
+    if actions.contains(kAXPressAction as String) {
+        for _ in 0..<max(1, count) {
+            let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
+            if result != .success {
+                printJson([
+                    "status": "error",
+                    "code": "ACTION_FAILED",
+                    "error": "AXPress failed with code \(result.rawValue)"
+                ])
+                return
+            }
+        }
+        printJson([
+            "status": "ok",
+            "method": "accessibility",
+            "action": "AXPress",
+            "role": role,
+            "windowId": windowId,
+            "pid": targetPid,
+            "x": x,
+            "y": y
+        ])
+        return
+    }
+
+    let focusResult = AXUIElementSetAttributeValue(
+        element,
+        kAXFocusedAttribute as CFString,
+        kCFBooleanTrue
+    )
+    if focusResult == .success {
+        printJson([
+            "status": "ok",
+            "method": "accessibility",
+            "action": "AXFocus",
+            "role": role,
+            "windowId": windowId,
+            "pid": targetPid,
+            "x": x,
+            "y": y
+        ])
+    } else {
+        printJson([
+            "status": "error",
+            "code": "ACTION_FAILED",
+            "error": "AX focus failed with code \(focusResult.rawValue)"
+        ])
+    }
+}
+
+func scrollArea(at point: CGPoint, in element: AXUIElement, depth: Int = 0) -> AXUIElement? {
+    guard depth < 40 else { return nil }
+    if depth > 0, let frame = axFrame(element), !frame.contains(point) {
+        return nil
+    }
+    for child in axChildren(element).reversed() {
+        if let match = scrollArea(at: point, in: child, depth: depth + 1) {
+            return match
+        }
+    }
+    return axRole(element) == kAXScrollAreaRole as String ? element : nil
+}
+
+func adjustAXScrollbar(_ scrollArea: AXUIElement, attribute: CFString, delta: Int32) -> Bool {
+    guard delta != 0,
+          let rawScrollbar = copyAXAttribute(scrollArea, attribute),
+          CFGetTypeID(rawScrollbar) == AXUIElementGetTypeID() else {
+        return false
+    }
+    let scrollbar = unsafeBitCast(rawScrollbar, to: AXUIElement.self)
+    guard let currentValue = copyAXAttribute(scrollbar, kAXValueAttribute as CFString) as? NSNumber else {
+        return false
+    }
+
+    let magnitude = min(1.0, max(0.08, Double(abs(delta)) / 1000.0))
+    let direction = delta < 0 ? 1.0 : -1.0
+    let nextValue = min(1.0, max(0.0, currentValue.doubleValue + (direction * magnitude)))
+    return AXUIElementSetAttributeValue(
+        scrollbar,
+        kAXValueAttribute as CFString,
+        NSNumber(value: nextValue)
+    ) == .success
+}
+
+func dispatchAccessibilityScroll(
+    x: Double,
+    y: Double,
+    deltaY: Int32,
+    deltaX: Int32,
+    targetPid: pid_t,
+    windowId: Int
+) {
+    guard AXIsProcessTrusted() else {
+        printJson([
+            "status": "error",
+            "code": "ACCESSIBILITY_PERMISSION_REQUIRED",
+            "error": "Accessibility permission is required"
+        ])
+        return
+    }
+    guard let window = matchingAXWindow(pid: targetPid, windowId: windowId),
+          let area = scrollArea(at: CGPoint(x: x, y: y), in: window) else {
+        printJson([
+            "status": "error",
+            "code": "SCROLL_AREA_NOT_FOUND",
+            "error": "No Accessibility scroll area exists at (\(x), \(y))"
+        ])
+        return
+    }
+
+    let verticalChanged = adjustAXScrollbar(area, attribute: kAXVerticalScrollBarAttribute as CFString, delta: deltaY)
+    let horizontalChanged = adjustAXScrollbar(area, attribute: kAXHorizontalScrollBarAttribute as CFString, delta: deltaX)
+    guard verticalChanged || horizontalChanged else {
+        printJson([
+            "status": "error",
+            "code": "ACTION_NO_EFFECT",
+            "error": "The target scroll area did not expose a settable scrollbar"
+        ])
+        return
+    }
+
+    printJson([
+        "status": "ok",
+        "method": "accessibility",
+        "action": "AXSetScrollbarValue",
+        "windowId": windowId,
+        "pid": targetPid,
+        "x": x,
+        "y": y,
+        "deltaY": deltaY,
+        "deltaX": deltaX
+    ])
+}
+
 func dispatchMouseClick(x: Double, y: Double, button: String = "left", count: Int = 1, targetPid: pid_t? = nil) {
     let point = CGPoint(x: x, y: y)
     
@@ -229,12 +596,28 @@ func dispatchMouseClick(x: Double, y: Double, button: String = "left", count: In
     ])
 }
 
-func dispatchTypeText(text: String, targetPid: pid_t? = nil) {
+func dispatchTypeText(text: String, targetPid: pid_t? = nil, windowId: Int? = nil) {
+    if let pid = targetPid, pid > 0, let wid = windowId {
+        guard focusAXWindow(pid: pid, windowId: wid) else {
+            printJson([
+                "status": "error",
+                "code": "WINDOW_TARGETING_UNSUPPORTED",
+                "error": "Could not focus AX window for windowId \(wid)"
+            ])
+            return
+        }
+        usleep(40000)
+    }
+
     let utf16Chars = Array(text.utf16)
     
     guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
           let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
-        printJson(["error": "Could not create keyboard event"])
+        printJson([
+            "status": "error",
+            "code": "ACTION_FAILED",
+            "error": "Could not create keyboard event"
+        ])
         return
     }
     
@@ -245,6 +628,7 @@ func dispatchTypeText(text: String, targetPid: pid_t? = nil) {
         down.postToPid(pid)
         usleep(20000)
         up.postToPid(pid)
+        usleep(120000)
     } else {
         down.post(tap: .cghidEventTap)
         usleep(20000)
@@ -256,6 +640,8 @@ func dispatchTypeText(text: String, targetPid: pid_t? = nil) {
         "action": "type_text",
         "text": text,
         "targetPid": targetPid ?? 0,
+        "windowId": windowId ?? 0,
+        "method": (targetPid ?? 0) > 0 ? "accessibility_focus_then_process_event" : "global_event",
         "nonIntrusive": (targetPid ?? 0) > 0
     ])
 }
@@ -282,8 +668,348 @@ func dispatchScroll(x: Double, y: Double, deltaY: Int32, deltaX: Int32 = 0, targ
 }
 
 // -------------------------------------------------------------------------
-// Virtual Cursor Marker (Draws agent cursor badge onto screenshot)
+// Agent Cursor (Live click-through overlay and matching screenshot marker)
 // -------------------------------------------------------------------------
+
+enum AgentCursorFeedback {
+    case idle
+    case click
+    case scroll
+    case error
+}
+
+func drawAgentCursor(
+    context: CGContext,
+    tip: CGPoint,
+    scale: CGFloat = 1.0,
+    feedback: AgentCursorFeedback = .idle,
+    feedbackProgress: CGFloat = 0.0
+) {
+    context.saveGState()
+    context.setLineJoin(.round)
+    context.setLineCap(.round)
+
+    let arrow = CGMutablePath()
+    arrow.move(to: tip)
+    arrow.addLine(to: CGPoint(x: tip.x, y: tip.y - (34 * scale)))
+    arrow.addLine(to: CGPoint(x: tip.x + (9 * scale), y: tip.y - (25 * scale)))
+    arrow.addLine(to: CGPoint(x: tip.x + (16 * scale), y: tip.y - (42 * scale)))
+    arrow.addLine(to: CGPoint(x: tip.x + (24 * scale), y: tip.y - (38 * scale)))
+    arrow.addLine(to: CGPoint(x: tip.x + (16 * scale), y: tip.y - (22 * scale)))
+    arrow.addLine(to: CGPoint(x: tip.x + (31 * scale), y: tip.y - (22 * scale)))
+    arrow.closeSubpath()
+
+    context.setShadow(
+        offset: CGSize(width: 0, height: -2 * scale),
+        blur: 4 * scale,
+        color: CGColor(gray: 0, alpha: 0.28)
+    )
+    context.addPath(arrow)
+    context.setFillColor(CGColor(red: 0.98, green: 0.99, blue: 1.0, alpha: 1.0))
+    context.setStrokeColor(CGColor(red: 0.04, green: 0.07, blue: 0.14, alpha: 1.0))
+    context.setLineWidth(2.6 * scale)
+    context.drawPath(using: .fillStroke)
+    context.setShadow(offset: .zero, blur: 0, color: nil)
+
+    let badgeCenter = CGPoint(x: tip.x + (30 * scale), y: tip.y - (37 * scale))
+    let badgeRadius = 9.5 * scale
+    let badgeRect = CGRect(
+        x: badgeCenter.x - badgeRadius,
+        y: badgeCenter.y - badgeRadius,
+        width: badgeRadius * 2,
+        height: badgeRadius * 2
+    )
+    let badgeColor = feedback == .error
+        ? CGColor(red: 0.95, green: 0.20, blue: 0.25, alpha: 1.0)
+        : CGColor(red: 0.10, green: 0.55, blue: 1.0, alpha: 1.0)
+    context.setFillColor(badgeColor)
+    context.fillEllipse(in: badgeRect)
+    context.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.95))
+    context.setLineWidth(1.5 * scale)
+    context.strokeEllipse(in: badgeRect)
+
+    let spark = CGMutablePath()
+    spark.move(to: CGPoint(x: badgeCenter.x, y: badgeCenter.y + (5 * scale)))
+    spark.addLine(to: CGPoint(x: badgeCenter.x + (1.7 * scale), y: badgeCenter.y + (1.7 * scale)))
+    spark.addLine(to: CGPoint(x: badgeCenter.x + (5 * scale), y: badgeCenter.y))
+    spark.addLine(to: CGPoint(x: badgeCenter.x + (1.7 * scale), y: badgeCenter.y - (1.7 * scale)))
+    spark.addLine(to: CGPoint(x: badgeCenter.x, y: badgeCenter.y - (5 * scale)))
+    spark.addLine(to: CGPoint(x: badgeCenter.x - (1.7 * scale), y: badgeCenter.y - (1.7 * scale)))
+    spark.addLine(to: CGPoint(x: badgeCenter.x - (5 * scale), y: badgeCenter.y))
+    spark.addLine(to: CGPoint(x: badgeCenter.x - (1.7 * scale), y: badgeCenter.y + (1.7 * scale)))
+    spark.closeSubpath()
+    context.addPath(spark)
+    context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+    context.fillPath()
+
+    if feedback == .click || feedback == .error {
+        let progress = min(1, max(0, feedbackProgress))
+        let radius = (12 + (14 * progress)) * scale
+        context.setStrokeColor(
+            feedback == .error
+                ? CGColor(red: 1.0, green: 0.18, blue: 0.22, alpha: 1.0 - progress)
+                : CGColor(red: 0.10, green: 0.65, blue: 1.0, alpha: 1.0 - progress)
+        )
+        context.setLineWidth(2.5 * scale)
+        context.strokeEllipse(
+            in: CGRect(
+                x: tip.x - radius,
+                y: tip.y - radius,
+                width: radius * 2,
+                height: radius * 2
+            )
+        )
+    } else if feedback == .scroll {
+        context.setStrokeColor(CGColor(red: 0.10, green: 0.65, blue: 1.0, alpha: 0.95))
+        context.setLineWidth(2.5 * scale)
+        for offset in [CGFloat(-5), CGFloat(5)] {
+            let chevron = CGMutablePath()
+            let centerY = tip.y - (45 * scale) + (offset * scale)
+            chevron.move(to: CGPoint(x: tip.x + (43 * scale), y: centerY + (3 * scale)))
+            chevron.addLine(to: CGPoint(x: tip.x + (47 * scale), y: centerY - (1 * scale)))
+            chevron.addLine(to: CGPoint(x: tip.x + (51 * scale), y: centerY + (3 * scale)))
+            context.addPath(chevron)
+            context.strokePath()
+        }
+    }
+
+    context.restoreGState()
+}
+
+final class AgentCursorView: NSView {
+    private var feedback: AgentCursorFeedback = .idle
+    private var feedbackStartedAt = CFAbsoluteTimeGetCurrent()
+    private var animationTimer: Timer?
+
+    override var isOpaque: Bool { false }
+
+    func showFeedback(_ value: AgentCursorFeedback) {
+        feedback = value
+        feedbackStartedAt = CFAbsoluteTimeGetCurrent()
+        animationTimer?.invalidate()
+
+        let duration = value == .error ? 0.55 : 0.38
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            if CFAbsoluteTimeGetCurrent() - self.feedbackStartedAt >= duration {
+                self.feedback = .idle
+                timer.invalidate()
+            }
+            self.needsDisplay = true
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        animationTimer = timer
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let duration = feedback == .error ? 0.55 : 0.38
+        let progress = CGFloat(min(1.0, (CFAbsoluteTimeGetCurrent() - feedbackStartedAt) / duration))
+        let clickCompression = feedback == .click
+            ? 1.0 - (0.07 * CGFloat(sin(.pi * min(1.0, Double(progress) * 2.0))))
+            : 1.0
+        drawAgentCursor(
+            context: context,
+            tip: CGPoint(x: 20, y: 56),
+            scale: clickCompression,
+            feedback: feedback,
+            feedbackProgress: progress
+        )
+    }
+}
+
+final class AgentCursorOverlayController {
+    private let panel: NSPanel
+    private let cursorView: AgentCursorView
+    private var currentScreenPoint: CGPoint?
+    private var hideWorkItem: DispatchWorkItem?
+
+    init() {
+        cursorView = AgentCursorView(frame: CGRect(x: 0, y: 0, width: 76, height: 76))
+        panel = NSPanel(
+            contentRect: cursorView.frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentView = cursorView
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.hidesOnDeactivate = false
+        panel.level = .screenSaver
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        panel.alphaValue = 0
+    }
+
+    private func cocoaPoint(for screenPoint: CGPoint) -> CGPoint? {
+        for screen in NSScreen.screens {
+            guard let displayNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+                continue
+            }
+            let displayBounds = CGDisplayBounds(CGDirectDisplayID(displayNumber.uint32Value))
+            if displayBounds.contains(screenPoint) {
+                return CGPoint(
+                    x: screen.frame.minX + (screenPoint.x - displayBounds.minX),
+                    y: screen.frame.maxY - (screenPoint.y - displayBounds.minY)
+                )
+            }
+        }
+        return nil
+    }
+
+    private func cancelScheduledHide() {
+        hideWorkItem?.cancel()
+        hideWorkItem = nil
+    }
+
+    private func scheduleHide(after delay: TimeInterval) {
+        cancelScheduledHide()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.hide(duration: 0.22)
+        }
+        hideWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    func move(to screenPoint: CGPoint, duration: TimeInterval, completion: @escaping (Bool) -> Void) {
+        guard let cocoaPoint = cocoaPoint(for: screenPoint) else {
+            completion(false)
+            return
+        }
+        cancelScheduledHide()
+
+        let origin = CGPoint(x: cocoaPoint.x - 20, y: cocoaPoint.y - 56)
+        let firstPosition = currentScreenPoint == nil
+        currentScreenPoint = screenPoint
+        panel.orderFrontRegardless()
+
+        if firstPosition || duration <= 0 {
+            panel.setFrameOrigin(origin)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.10
+                panel.animator().alphaValue = 1
+            } completionHandler: {
+                self.scheduleHide(after: 3.0)
+                completion(true)
+            }
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
+            panel.animator().setFrameOrigin(origin)
+            panel.animator().alphaValue = 1
+        } completionHandler: {
+            self.scheduleHide(after: 3.0)
+            completion(true)
+        }
+    }
+
+    func showFeedback(_ feedback: AgentCursorFeedback) {
+        cancelScheduledHide()
+        panel.orderFrontRegardless()
+        panel.alphaValue = 1
+        cursorView.showFeedback(feedback)
+        scheduleHide(after: feedback == .error ? 1.4 : 0.9)
+    }
+
+    func hide(duration: TimeInterval = 0.18) {
+        cancelScheduledHide()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
+            panel.animator().alphaValue = 0
+        } completionHandler: {
+            self.panel.orderOut(nil)
+        }
+    }
+}
+
+func emitCursorOverlayMessage(_ message: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: message),
+          var line = String(data: data, encoding: .utf8)?.data(using: .utf8) else {
+        return
+    }
+    line.append(0x0A)
+    FileHandle.standardOutput.write(line)
+}
+
+func runCursorOverlay() {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    app.finishLaunching()
+    let controller = AgentCursorOverlayController()
+
+    emitCursorOverlayMessage(["status": "ready"])
+
+    DispatchQueue.global(qos: .userInitiated).async {
+        while let line = readLine(strippingNewline: true) {
+            guard let data = line.data(using: .utf8),
+                  let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+            DispatchQueue.main.async {
+                let id = message["id"] as? String ?? ""
+                let action = message["action"] as? String ?? ""
+                let respond: ([String: Any]) -> Void = { response in
+                    var payload = response
+                    payload["id"] = id
+                    emitCursorOverlayMessage(payload)
+                }
+
+                switch action {
+                case "move":
+                    guard let x = message["x"] as? Double,
+                          let y = message["y"] as? Double else {
+                        respond(["status": "error", "error": "move requires x and y"])
+                        return
+                    }
+                    let duration = max(0, (message["durationMs"] as? Double ?? 160) / 1000.0)
+                    controller.move(to: CGPoint(x: x, y: y), duration: duration) { visible in
+                        if visible {
+                            respond(["status": "ok", "action": "move", "visible": true])
+                        } else {
+                            respond([
+                                "status": "error",
+                                "action": "move",
+                                "visible": false,
+                                "error": "Target coordinate is outside connected displays"
+                            ])
+                        }
+                    }
+                case "click":
+                    controller.showFeedback(.click)
+                    respond(["status": "ok", "action": "click"])
+                case "scroll":
+                    controller.showFeedback(.scroll)
+                    respond(["status": "ok", "action": "scroll"])
+                case "error":
+                    controller.showFeedback(.error)
+                    respond(["status": "ok", "action": "error"])
+                case "hide":
+                    controller.hide()
+                    respond(["status": "ok", "action": "hide"])
+                case "quit":
+                    respond(["status": "ok", "action": "quit"])
+                    NSApp.terminate(nil)
+                default:
+                    respond(["status": "error", "error": "Unknown overlay action \(action)"])
+                }
+            }
+        }
+        DispatchQueue.main.async {
+            NSApp.terminate(nil)
+        }
+    }
+
+    app.run()
+}
 
 func markCursor(imagePath: String, x: Double, y: Double, displayWidth: Double = 1800.0) {
     guard let image = NSImage(contentsOfFile: imagePath),
@@ -308,33 +1034,7 @@ func markCursor(imagePath: String, x: Double, y: Double, displayWidth: Double = 
     let targetY = Double(height) - (y * scale)
     let center = CGPoint(x: targetX, y: targetY)
     
-    // Outer glowing cyan ring (Virtual Agent Cursor)
-    ctx.setLineWidth(max(2.0, 3.0 * scale))
-    ctx.setStrokeColor(CGColor(red: 0.05, green: 0.85, blue: 1.0, alpha: 0.95))
-    ctx.addArc(center: center, radius: 14.0 * scale, startAngle: 0, endAngle: .pi * 2, clockwise: true)
-    ctx.strokePath()
-    
-    // Inner pulse dot (neon magenta/pink)
-    ctx.setFillColor(CGColor(red: 1.0, green: 0.15, blue: 0.45, alpha: 0.95))
-    ctx.addArc(center: center, radius: 5.0 * scale, startAngle: 0, endAngle: .pi * 2, clockwise: true)
-    ctx.fillPath()
-    
-    // Crosshair lines
-    ctx.setLineWidth(max(1.5, 2.0 * scale))
-    ctx.setStrokeColor(CGColor(red: 0.05, green: 0.85, blue: 1.0, alpha: 0.85))
-    
-    let lineLen = 8.0 * scale
-    let lineGap = 16.0 * scale
-    
-    ctx.move(to: CGPoint(x: targetX - lineGap - lineLen, y: targetY))
-    ctx.addLine(to: CGPoint(x: targetX - lineGap, y: targetY))
-    ctx.move(to: CGPoint(x: targetX + lineGap, y: targetY))
-    ctx.addLine(to: CGPoint(x: targetX + lineGap + lineLen, y: targetY))
-    ctx.move(to: CGPoint(x: targetX, y: targetY + lineGap))
-    ctx.addLine(to: CGPoint(x: targetX, y: targetY + lineGap + lineLen))
-    ctx.move(to: CGPoint(x: targetX, y: targetY - lineGap - lineLen))
-    ctx.addLine(to: CGPoint(x: targetX, y: targetY - lineGap))
-    ctx.strokePath()
+    drawAgentCursor(context: ctx, tip: center, scale: scale)
     
     guard let newImage = ctx.makeImage() else {
         printJson(["error": "Could not finalize image"])
@@ -342,8 +1042,12 @@ func markCursor(imagePath: String, x: Double, y: Double, displayWidth: Double = 
     }
     
     let destUrl = URL(fileURLWithPath: imagePath)
-    if let dest = CGImageDestinationCreateWithURL(destUrl as CFURL, "public.jpeg" as CFString, 1, nil) {
-        let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.88]
+    let isPNG = destUrl.pathExtension.lowercased() == "png"
+    let destinationType = isPNG ? "public.png" : "public.jpeg"
+    if let dest = CGImageDestinationCreateWithURL(destUrl as CFURL, destinationType as CFString, 1, nil) {
+        let options: [CFString: Any] = isPNG
+            ? [:]
+            : [kCGImageDestinationLossyCompressionQuality: 0.88]
         CGImageDestinationAddImage(dest, newImage, options as CFDictionary)
         CGImageDestinationFinalize(dest)
         printJson(["status": "ok", "action": "mark_cursor", "x": x, "y": y])
@@ -424,32 +1128,128 @@ func ocrCommand(imagePath: String, query: String? = nil, logicalWidth: Double? =
     }
 }
 
-func findTextInWindow(targetText: String, windowId: Int? = nil, appName: String? = nil) {
+func normalizedText(_ text: String) -> String {
+    return text.folding(
+        options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+        locale: .current
+    )
+}
+
+func isWordCodeUnit(_ value: unichar) -> Bool {
+    guard let scalar = UnicodeScalar(value) else { return false }
+    return CharacterSet.alphanumerics.contains(scalar) || value == 95
+}
+
+func queryRanges(in text: String, query: String, matchMode: String) -> [(range: NSRange, type: String, rank: Int)] {
+    let source = text as NSString
+    let queryLength = (query as NSString).length
+    guard queryLength > 0 else { return [] }
+
+    var results: [(range: NSRange, type: String, rank: Int)] = []
+    var searchRange = NSRange(location: 0, length: source.length)
+    while searchRange.length >= queryLength {
+        let found = source.range(
+            of: query,
+            options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+            range: searchRange
+        )
+        if found.location == NSNotFound { break }
+
+        let isExact = found.location == 0
+            && found.length == source.length
+            && normalizedText(text) == normalizedText(query)
+        let beforeIsWord = found.location > 0 && isWordCodeUnit(source.character(at: found.location - 1))
+        let afterIndex = found.location + found.length
+        let afterIsWord = afterIndex < source.length && isWordCodeUnit(source.character(at: afterIndex))
+        let isWord = !beforeIsWord && !afterIsWord
+        let isPrefix = found.location == 0
+
+        let matchType: String
+        let rank: Int
+        if isExact {
+            matchType = "exact"
+            rank = 4
+        } else if isWord {
+            matchType = "word"
+            rank = 3
+        } else if isPrefix {
+            matchType = "prefix"
+            rank = 2
+        } else {
+            matchType = "substring"
+            rank = 1
+        }
+
+        let accepted: Bool
+        switch matchMode {
+        case "exact":
+            accepted = isExact
+        case "word":
+            accepted = isExact || isWord
+        case "prefix":
+            accepted = isExact || isPrefix
+        default:
+            accepted = true
+        }
+        if accepted {
+            results.append((found, matchType, rank))
+        }
+
+        let nextLocation = found.location + max(1, found.length)
+        if nextLocation >= source.length { break }
+        searchRange = NSRange(location: nextLocation, length: source.length - nextLocation)
+    }
+    return results
+}
+
+func findTextInWindow(
+    targetText: String,
+    windowId: Int? = nil,
+    appName: String? = nil,
+    matchMode: String = "substring"
+) {
     var wid = windowId
     var pid: pid_t = 0
     var windowBounds: [String: Double]? = nil
     
-    if wid == nil, let app = appName {
+    if let w = wid {
+        guard let metadata = windowMetadata(windowId: w) else {
+            printJson([
+                "status": "error",
+                "code": "TARGET_NOT_FOUND",
+                "error": "Window ID \(w) not found"
+            ])
+            return
+        }
+        if let app = appName,
+           !metadata.appName.localizedCaseInsensitiveContains(app),
+           !metadata.title.localizedCaseInsensitiveContains(app) {
+            printJson([
+                "status": "error",
+                "code": "TARGET_MISMATCH",
+                "error": "Window ID \(w) does not belong to \(app)"
+            ])
+            return
+        }
+        pid = metadata.pid
+        windowBounds = [
+            "x": metadata.bounds.origin.x,
+            "y": metadata.bounds.origin.y,
+            "width": metadata.bounds.size.width,
+            "height": metadata.bounds.size.height
+        ]
+    } else if let app = appName {
         if let target = findTargetWindowInfo(targetApp: app) {
             wid = target.wid
             pid = target.pid
             windowBounds = target.bounds
-        }
-    } else if let w = wid {
-        let options = CGWindowListOption(arrayLiteral: .optionAll)
-        if let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] {
-            for win in windowList {
-                if (win[kCGWindowNumber as String] as? Int) == w {
-                    pid = win[kCGWindowOwnerPID as String] as? pid_t ?? 0
-                    let boundsDict = win[kCGWindowBounds as String] as? [String: Any] ?? [:]
-                    let width = boundsDict["Width"] as? Double ?? 0
-                    let height = boundsDict["Height"] as? Double ?? 0
-                    let x = boundsDict["X"] as? Double ?? 0
-                    let y = boundsDict["Y"] as? Double ?? 0
-                    windowBounds = ["x": x, "y": y, "width": width, "height": height]
-                    break
-                }
-            }
+        } else {
+            printJson([
+                "status": "error",
+                "code": "TARGET_NOT_FOUND",
+                "error": "No window found matching \(app)"
+            ])
+            return
         }
     }
     
@@ -461,8 +1261,21 @@ func findTextInWindow(targetText: String, windowId: Int? = nil, appName: String?
     } else {
         proc.arguments = ["-x", "-t", "jpg", tmpFile]
     }
-    try? proc.run()
+    do {
+        try proc.run()
+    } catch {
+        printJson(["status": "error", "code": "CAPTURE_FAILED", "error": error.localizedDescription])
+        return
+    }
     proc.waitUntilExit()
+    guard proc.terminationStatus == 0, FileManager.default.fileExists(atPath: tmpFile) else {
+        printJson([
+            "status": "error",
+            "code": "CAPTURE_FAILED",
+            "error": "screencapture exited with status \(proc.terminationStatus)"
+        ])
+        return
+    }
     
     defer {
         try? FileManager.default.removeItem(atPath: tmpFile)
@@ -473,18 +1286,55 @@ func findTextInWindow(targetText: String, windowId: Int? = nil, appName: String?
     var matches: [[String: Any]] = []
     for item in elements {
         let text = item["text"] as? String ?? ""
-        if text.localizedCaseInsensitiveContains(targetText) {
+        let ranges = queryRanges(in: text, query: targetText, matchMode: matchMode)
+        for queryMatch in ranges {
             var itemCopy = item
-            if let bounds = item["bounds"] as? [String: Double], let winB = windowBounds {
-                let globalCenterX = (bounds["centerX"] ?? 0) + (winB["x"] ?? 0)
-                let globalCenterY = (bounds["centerY"] ?? 0) + (winB["y"] ?? 0)
+            if let lineBounds = item["bounds"] as? [String: Double] {
+                let sourceLength = max(1, (text as NSString).length)
+                let startFraction = Double(queryMatch.range.location) / Double(sourceLength)
+                let widthFraction = Double(queryMatch.range.length) / Double(sourceLength)
+                let matchX = (lineBounds["x"] ?? 0) + ((lineBounds["width"] ?? 0) * startFraction)
+                let matchWidth = (lineBounds["width"] ?? 0) * widthFraction
+                let matchBounds: [String: Double] = [
+                    "x": matchX,
+                    "y": lineBounds["y"] ?? 0,
+                    "width": matchWidth,
+                    "height": lineBounds["height"] ?? 0,
+                    "centerX": matchX + (matchWidth / 2.0),
+                    "centerY": lineBounds["centerY"] ?? 0
+                ]
+                itemCopy["lineBounds"] = lineBounds
+                itemCopy["bounds"] = matchBounds
+                itemCopy["matchedText"] = (text as NSString).substring(with: queryMatch.range)
+                itemCopy["matchType"] = queryMatch.type
+                itemCopy["matchRank"] = queryMatch.rank
+                itemCopy["querySimilarity"] = min(1.0, Double(queryMatch.range.length) / Double(sourceLength))
+
+                if let winB = windowBounds {
+                    let globalCenterX = (matchBounds["centerX"] ?? 0) + (winB["x"] ?? 0)
+                    let globalCenterY = (matchBounds["centerY"] ?? 0) + (winB["y"] ?? 0)
+                    itemCopy["globalCoordinates"] = [
+                        "x": globalCenterX,
+                        "y": globalCenterY
+                    ]
+                }
+            }
+            if windowBounds == nil,
+               let bounds = itemCopy["bounds"] as? [String: Double] {
                 itemCopy["globalCoordinates"] = [
-                    "x": globalCenterX,
-                    "y": globalCenterY
+                    "x": bounds["centerX"] ?? 0,
+                    "y": bounds["centerY"] ?? 0
                 ]
             }
             matches.append(itemCopy)
         }
+    }
+
+    matches.sort { lhs, rhs in
+        let lhsRank = lhs["matchRank"] as? Int ?? 0
+        let rhsRank = rhs["matchRank"] as? Int ?? 0
+        if lhsRank != rhsRank { return lhsRank > rhsRank }
+        return (lhs["confidence"] as? Float ?? 0) > (rhs["confidence"] as? Float ?? 0)
     }
     
     if let best = matches.first {
@@ -495,6 +1345,7 @@ func findTextInWindow(targetText: String, windowId: Int? = nil, appName: String?
             "allMatches": matches,
             "windowId": wid ?? 0,
             "pid": pid,
+            "matchMode": matchMode,
             "windowBounds": windowBounds ?? [:]
         ])
     } else {
@@ -504,6 +1355,7 @@ func findTextInWindow(targetText: String, windowId: Int? = nil, appName: String?
             "error": "Text '\(targetText)' not found",
             "windowId": wid ?? 0,
             "pid": pid,
+            "matchMode": matchMode,
             "availableText": elements.prefix(15).map { $0["text"] ?? "" }
         ])
     }
@@ -515,11 +1367,44 @@ func waitForText(targetText: String, windowId: Int? = nil, appName: String? = ni
     var pid: pid_t = 0
     var windowBounds: [String: Double]? = nil
     
-    if wid == nil, let app = appName {
+    if let w = wid {
+        guard let metadata = windowMetadata(windowId: w) else {
+            printJson([
+                "status": "error",
+                "code": "TARGET_NOT_FOUND",
+                "error": "Window ID \(w) not found"
+            ])
+            return
+        }
+        if let app = appName,
+           !metadata.appName.localizedCaseInsensitiveContains(app),
+           !metadata.title.localizedCaseInsensitiveContains(app) {
+            printJson([
+                "status": "error",
+                "code": "TARGET_MISMATCH",
+                "error": "Window ID \(w) does not belong to \(app)"
+            ])
+            return
+        }
+        pid = metadata.pid
+        windowBounds = [
+            "x": metadata.bounds.origin.x,
+            "y": metadata.bounds.origin.y,
+            "width": metadata.bounds.size.width,
+            "height": metadata.bounds.size.height
+        ]
+    } else if let app = appName {
         if let target = findTargetWindowInfo(targetApp: app) {
             wid = target.wid
             pid = target.pid
             windowBounds = target.bounds
+        } else {
+            printJson([
+                "status": "error",
+                "code": "TARGET_NOT_FOUND",
+                "error": "No window found matching \(app)"
+            ])
+            return
         }
     }
     
@@ -532,8 +1417,21 @@ func waitForText(targetText: String, windowId: Int? = nil, appName: String? = ni
         } else {
             proc.arguments = ["-x", "-t", "jpg", tmpFile]
         }
-        try? proc.run()
+        do {
+            try proc.run()
+        } catch {
+            printJson(["status": "error", "code": "CAPTURE_FAILED", "error": error.localizedDescription])
+            return
+        }
         proc.waitUntilExit()
+        guard proc.terminationStatus == 0, FileManager.default.fileExists(atPath: tmpFile) else {
+            printJson([
+                "status": "error",
+                "code": "CAPTURE_FAILED",
+                "error": "screencapture exited with status \(proc.terminationStatus)"
+            ])
+            return
+        }
         
         let elements = recognizeTextInImage(imagePath: tmpFile, logicalWidth: windowBounds?["width"])
         try? FileManager.default.removeItem(atPath: tmpFile)
@@ -611,9 +1509,26 @@ case "find_text":
         let text = args[2]
         let app = args.count >= 4 && args[3] != "nil" ? args[3] : nil
         let wid = args.count >= 5 ? Int(args[4]) : nil
-        findTextInWindow(targetText: text, windowId: wid, appName: app)
+        let matchMode = args.count >= 6 ? args[5] : "substring"
+        findTextInWindow(targetText: text, windowId: wid, appName: app, matchMode: matchMode)
     } else {
         printJson(["error": "Missing target text"])
+        exit(1)
+    }
+case "match_text":
+    if args.count >= 4 {
+        let source = args[2]
+        let query = args[3]
+        let matchMode = args.count >= 5 ? args[4] : "substring"
+        let matches = queryRanges(in: source, query: query, matchMode: matchMode)
+        printJson([
+            "status": "ok",
+            "count": matches.count,
+            "types": matches.map { $0.type },
+            "ranges": matches.map { ["location": $0.range.location, "length": $0.range.length] }
+        ])
+    } else {
+        printJson(["status": "error", "code": "INVALID_ARGUMENTS", "error": "Missing arguments for match_text"])
         exit(1)
     }
 case "wait_for_text":
@@ -637,11 +1552,32 @@ case "click":
         printJson(["error": "Invalid arguments for click"])
         exit(1)
     }
+case "ax_click":
+    if args.count >= 8,
+       let x = Double(args[2]),
+       let y = Double(args[3]),
+       let pid = pid_t(args[6]),
+       let wid = Int(args[7]) {
+        let button = args[4]
+        let count = Int(args[5]) ?? 1
+        dispatchAccessibilityClick(
+            x: x,
+            y: y,
+            button: button,
+            count: count,
+            targetPid: pid,
+            windowId: wid
+        )
+    } else {
+        printJson(["status": "error", "code": "INVALID_ARGUMENTS", "error": "Invalid arguments for ax_click"])
+        exit(1)
+    }
 case "type_text":
     if args.count >= 3 {
         let text = args[2]
         let pid = args.count >= 4 ? pid_t(args[3]) : nil
-        dispatchTypeText(text: text, targetPid: pid)
+        let wid = args.count >= 5 ? Int(args[4]) : nil
+        dispatchTypeText(text: text, targetPid: pid, windowId: wid)
     } else {
         printJson(["error": "Missing text to type"])
         exit(1)
@@ -655,6 +1591,26 @@ case "scroll":
         printJson(["error": "Invalid arguments for scroll"])
         exit(1)
     }
+case "ax_scroll":
+    if args.count >= 8,
+       let x = Double(args[2]),
+       let y = Double(args[3]),
+       let dy = Int32(args[4]),
+       let pid = pid_t(args[6]),
+       let wid = Int(args[7]) {
+        let dx = Int32(args[5]) ?? 0
+        dispatchAccessibilityScroll(
+            x: x,
+            y: y,
+            deltaY: dy,
+            deltaX: dx,
+            targetPid: pid,
+            windowId: wid
+        )
+    } else {
+        printJson(["status": "error", "code": "INVALID_ARGUMENTS", "error": "Invalid arguments for ax_scroll"])
+        exit(1)
+    }
 case "mark_cursor":
     if args.count >= 5, let x = Double(args[3]), let y = Double(args[4]) {
         let path = args[2]
@@ -664,6 +1620,8 @@ case "mark_cursor":
         printJson(["error": "Invalid arguments for mark_cursor"])
         exit(1)
     }
+case "cursor_overlay":
+    runCursorOverlay()
 default:
     printJson(["error": "Unknown command \(command)"])
     exit(1)

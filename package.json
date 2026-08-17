@@ -1,14 +1,16 @@
 {
   "name": "macos-computer-use",
-  "version": "2.0.0",
+  "version": "2.3.0",
   "type": "module",
-  "description": "Ultra-fast, non-intrusive native macOS Computer Use MCP server with Apple Vision OCR and background process event routing.",
+  "description": "Native macOS Computer Use MCP server with a live agent cursor, Apple Vision OCR, fail-closed targeting, and Accessibility actions.",
   "main": "server.mjs",
   "bin": {
     "macos-computer-use": "./server.mjs"
   },
   "scripts": {
     "build": "swiftc -O native_helper.swift -o native_helper",
+    "test": "node --test test/*.test.mjs",
+    "test:live": "node test/live-smoke.mjs",
     "postinstall": "npm run build",
     "start": "node server.mjs"
   },

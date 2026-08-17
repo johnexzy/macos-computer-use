@@ -4,7 +4,8 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -16,6 +17,164 @@ const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const NATIVE_HELPER = path.join(__dirname, "native_helper");
+
+class AgentCursorOverlay {
+  constructor() {
+    this.child = null;
+    this.reader = null;
+    this.readyPromise = null;
+    this.resolveReady = null;
+    this.rejectReady = null;
+    this.readyTimer = null;
+    this.pending = new Map();
+    this.nextId = 1;
+    this.lastError = "";
+  }
+
+  async start() {
+    if (this.child && this.readyPromise) {
+      return this.readyPromise;
+    }
+
+    this.lastError = "";
+    this.readyPromise = new Promise((resolve, reject) => {
+      this.resolveReady = resolve;
+      this.rejectReady = reject;
+    });
+    const child = spawn(NATIVE_HELPER, ["cursor_overlay"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    this.child = child;
+    this.reader = createInterface({ input: child.stdout });
+    this.reader.on("line", (line) => this.handleLine(line));
+    child.stderr.on("data", (chunk) => {
+      this.lastError = `${this.lastError}${chunk}`.slice(-1000);
+    });
+    child.stdin.on("error", (error) => this.handleExit(child, error));
+    child.once("error", (error) => this.handleExit(child, error));
+    child.once("exit", (code, signal) => {
+      this.handleExit(
+        child,
+        new Error(
+          this.lastError.trim() ||
+            `cursor overlay exited${signal ? ` from ${signal}` : ` with code ${code}`}`,
+        ),
+      );
+    });
+    this.readyTimer = setTimeout(() => {
+      this.rejectReady?.(new Error("cursor overlay did not become ready"));
+      this.stop();
+    }, 2000);
+
+    return this.readyPromise;
+  }
+
+  handleLine(line) {
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch (_) {
+      return;
+    }
+
+    if (message.status === "ready") {
+      clearTimeout(this.readyTimer);
+      this.readyTimer = null;
+      this.resolveReady?.(message);
+      this.resolveReady = null;
+      this.rejectReady = null;
+      return;
+    }
+
+    const request = this.pending.get(message.id);
+    if (!request) return;
+    clearTimeout(request.timer);
+    this.pending.delete(message.id);
+    request.resolve(message);
+  }
+
+  handleExit(child, error) {
+    if (this.child !== child) return;
+    clearTimeout(this.readyTimer);
+    this.readyTimer = null;
+    this.rejectReady?.(error);
+    for (const request of this.pending.values()) {
+      clearTimeout(request.timer);
+      request.resolve({ status: "unavailable", error: error.message });
+    }
+    this.pending.clear();
+    this.reader?.close();
+    this.reader = null;
+    this.child = null;
+    this.readyPromise = null;
+    this.resolveReady = null;
+    this.rejectReady = null;
+  }
+
+  async send(command) {
+    try {
+      await this.start();
+      if (!this.child?.stdin.writable) {
+        throw new Error("cursor overlay input is unavailable");
+      }
+
+      const id = String(this.nextId++);
+      const response = new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          this.pending.delete(id);
+          resolve({ status: "unavailable", error: "cursor overlay command timed out" });
+        }, 2500);
+        this.pending.set(id, { resolve, timer });
+      });
+      this.child.stdin.write(`${JSON.stringify({ id, ...command })}\n`);
+      return await response;
+    } catch (error) {
+      return { status: "unavailable", error: error.message };
+    }
+  }
+
+  stop() {
+    clearTimeout(this.readyTimer);
+    this.readyTimer = null;
+    for (const request of this.pending.values()) {
+      clearTimeout(request.timer);
+      request.resolve({ status: "unavailable", error: "cursor overlay stopped" });
+    }
+    this.pending.clear();
+    this.reader?.close();
+    this.reader = null;
+    this.child?.kill();
+    this.child = null;
+    this.readyPromise = null;
+  }
+}
+
+const agentCursor = new AgentCursorOverlay();
+
+async function runPointAction(x, y, helperArgs, successFeedback) {
+  const cursorOverlay = await agentCursor.send({
+    action: "move",
+    x,
+    y,
+    durationMs: 160,
+  });
+
+  try {
+    const { stdout } = await execFileAsync(NATIVE_HELPER, helperArgs);
+    const action = JSON.parse(stdout.trim());
+    if (action.status !== "ok") {
+      throw targetError(action.code || "ACTION_FAILED", action.error || "action could not be delivered");
+    }
+    await agentCursor.send({ action: successFeedback });
+    return { action, cursorOverlay };
+  } catch (error) {
+    await agentCursor.send({ action: "error" });
+    throw error;
+  }
+}
+
+process.once("exit", () => agentCursor.stop());
+process.stdin.once("end", () => agentCursor.stop());
 
 // Key code mapping for macOS System Events
 const KEY_CODES = {
@@ -91,6 +250,64 @@ async function listAllWindows(appName = null) {
   }
 }
 
+function targetError(code, message) {
+  const error = new Error(`${code}: ${message}`);
+  error.code = code;
+  return error;
+}
+
+function normalizeAppName(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/\p{Cf}/gu, "")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function windowMatchesApp(windowInfo, appName) {
+  const query = normalizeAppName(appName);
+  if (!query) return true;
+  return [windowInfo?.appName, windowInfo?.title]
+    .map(normalizeAppName)
+    .some((candidate) => candidate.includes(query));
+}
+
+async function resolveTarget({ windowId = null, appName = null, targetApp = null } = {}) {
+  if (appName && targetApp && normalizeAppName(appName) !== normalizeAppName(targetApp)) {
+    throw targetError("TARGET_MISMATCH", `appName "${appName}" and targetApp "${targetApp}" disagree`);
+  }
+
+  const requestedApp = appName || targetApp;
+
+  if (windowId !== null && windowId !== undefined) {
+    if (!Number.isInteger(windowId) || windowId <= 0) {
+      throw targetError("INVALID_TARGET", `windowId must be a positive integer; received ${windowId}`);
+    }
+
+    const windowInfo = await getWindowBounds(windowId);
+    if (!windowInfo) {
+      throw targetError("TARGET_NOT_FOUND", `windowId ${windowId} does not exist`);
+    }
+    if (requestedApp && !windowMatchesApp(windowInfo, requestedApp)) {
+      throw targetError(
+        "TARGET_MISMATCH",
+        `windowId ${windowId} belongs to "${windowInfo.appName}", not "${requestedApp}"`,
+      );
+    }
+    return windowInfo;
+  }
+
+  if (requestedApp) {
+    const windowInfo = await findWindowByApp(requestedApp);
+    if (!windowInfo) {
+      throw targetError("TARGET_NOT_FOUND", `no window found for application "${requestedApp}"`);
+    }
+    return windowInfo;
+  }
+
+  return null;
+}
+
 async function captureScreenshot({
   maxWidth = 1440,
   format = "jpeg",
@@ -103,14 +320,7 @@ async function captureScreenshot({
   const mimeType = format === "png" ? "image/png" : "image/jpeg";
   const tmpFile = path.join(os.tmpdir(), `mcp_screen_${Date.now()}.${ext}`);
 
-  let windowInfo = null;
-  const searchApp = appName || targetApp;
-
-  if (searchApp) {
-    windowInfo = await findWindowByApp(searchApp);
-  } else if (windowId) {
-    windowInfo = await getWindowBounds(windowId);
-  }
+  const windowInfo = await resolveTarget({ windowId, appName, targetApp });
 
   try {
     const screencaptureArgs = ["-x"];
@@ -166,18 +376,21 @@ async function captureScreenshot({
 async function runAppleScript(script) {
   try {
     const { stdout, stderr } = await execFileAsync("/usr/bin/osascript", ["-e", script]);
-    return { output: stdout.trim(), error: stderr ? stderr.trim() : null };
+    return { output: stdout.trim(), error: stderr ? stderr.trim() : null, exitCode: 0 };
   } catch (err) {
-    return { output: null, error: err.message };
+    return {
+      output: err.stdout?.trim() || null,
+      error: err.stderr?.trim() || err.message,
+      exitCode: typeof err.code === "number" ? err.code : 1,
+    };
   }
 }
 
 async function resolveCoordinatesAndPid(x, y, { relativeCoords, windowId, appName }) {
-  let win = null;
-  if (appName) {
-    win = await findWindowByApp(appName);
-  } else if (windowId) {
-    win = await getWindowBounds(windowId);
+  const win = await resolveTarget({ windowId, appName });
+
+  if (relativeCoords && !win) {
+    throw targetError("INVALID_TARGET", "relativeCoords requires appName or windowId");
   }
 
   const pid = win?.pid || null;
@@ -197,7 +410,7 @@ async function resolveCoordinatesAndPid(x, y, { relativeCoords, windowId, appNam
 const server = new Server(
   {
     name: "macos-computer-use",
-    version: "2.1.0",
+    version: "2.3.0",
   },
   {
     capabilities: {
@@ -244,7 +457,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 x: { type: "number", description: "X coordinate of the cursor to highlight" },
                 y: { type: "number", description: "Y coordinate of the cursor to highlight" },
               },
-              description: "Optional coordinates to draw a custom glowing virtual cursor indicator on the screenshot.",
+              description:
+                "Optional cursor coordinates. For a window screenshot these are window-local logical points; for a display screenshot they are screen logical points.",
             },
           },
         },
@@ -268,6 +482,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               description: "Optional specific window ID to search within.",
             },
+            matchMode: {
+              type: "string",
+              enum: ["exact", "word", "prefix", "substring"],
+              description: "Text matching mode (default: 'substring').",
+            },
           },
           required: ["text"],
         },
@@ -275,7 +494,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "click_text",
         description:
-          "Find any text/button by name using native Apple Vision OCR and smoothly click its exact center. Non-intrusive: targets the process directly without hijacking your hardware mouse.",
+          "Find text using native Apple Vision OCR, glide the live agent cursor to it, and invoke the matching Accessibility control. Targeted actions fail closed when no semantic control exists.",
         inputSchema: {
           type: "object",
           properties: {
@@ -303,6 +522,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             returnScreenshot: {
               type: "boolean",
               description: "Whether to return a new screenshot with virtual cursor highlight after clicking (default: false)",
+            },
+            matchMode: {
+              type: "string",
+              enum: ["exact", "word", "prefix", "substring"],
+              description: "Text matching mode (default: 'word').",
+            },
+            occurrence: {
+              type: "number",
+              description:
+                "One-based match occurrence to click. Required when more than one element matches.",
             },
           },
           required: ["text"],
@@ -352,7 +581,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "mouse_click",
         description:
-          "Click at coordinates (x, y). Automatically routes events directly to the target application PID if appName/windowId is provided, avoiding hardware mouse hijacking.",
+          "Glide the live agent cursor to coordinates and click. With appName/windowId, invokes an Accessibility control without moving the hardware pointer and fails if no semantic control exists. Without a target, performs a global hardware click.",
         inputSchema: {
           type: "object",
           properties: {
@@ -360,11 +589,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             y: { type: "number", description: "Y coordinate in logical points" },
             appName: {
               type: "string",
-              description: "Optional target application name for direct background process delivery.",
+              description: "Optional target application name for Accessibility delivery.",
             },
             windowId: {
               type: "number",
-              description: "Optional window ID for direct background process delivery.",
+              description: "Optional exact window ID for Accessibility delivery.",
             },
             relativeCoords: {
               type: "boolean",
@@ -389,7 +618,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "type_text",
-        description: "Type plain text into the target application without disturbing your active keyboard focus if appName/windowId is provided.",
+        description:
+          "Type plain text. A target is resolved to an exact window before process delivery; unresolved or unsupported window targets fail closed.",
         inputSchema: {
           type: "object",
           properties: {
@@ -432,7 +662,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "scroll",
-        description: "Scroll mouse wheel vertically and horizontally.",
+        description:
+          "Glide the live agent cursor to a scroll target, then scroll vertically or horizontally. Targeted scrolling uses Accessibility scrollbars and fails closed; untargeted scrolling uses the global pointer location.",
         inputSchema: {
           type: "object",
           properties: {
@@ -534,12 +765,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "find_text") {
+      const target = await resolveTarget(args);
       const helperArgs = ["find_text", args.text];
-      if (args.appName) helperArgs.push(args.appName);
-      else if (args.windowId) helperArgs.push("nil", String(args.windowId));
+      helperArgs.push("nil", target ? String(target.windowId) : "nil", args.matchMode || "substring");
 
       const { stdout } = await execFileAsync(NATIVE_HELPER, helperArgs);
       const parsed = JSON.parse(stdout.trim());
+      if (parsed.status === "error") {
+        throw targetError(parsed.code || "OCR_FAILED", parsed.error || "text search failed");
+      }
       return {
         content: [
           {
@@ -551,12 +785,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "click_text") {
+      const target = await resolveTarget(args);
       const helperArgs = ["find_text", args.text];
-      if (args.appName) helperArgs.push(args.appName);
-      else if (args.windowId) helperArgs.push("nil", String(args.windowId));
+      helperArgs.push("nil", target ? String(target.windowId) : "nil", args.matchMode || "word");
 
       const { stdout } = await execFileAsync(NATIVE_HELPER, helperArgs);
       const parsed = JSON.parse(stdout.trim());
+
+      if (parsed.status === "error") {
+        throw targetError(parsed.code || "OCR_FAILED", parsed.error || "text search failed");
+      }
 
       if (!parsed.found || !parsed.bestMatch) {
         return {
@@ -570,36 +808,74 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      const coords = parsed.bestMatch.globalCoordinates || {
-        x: parsed.bestMatch.bounds.centerX,
-        y: parsed.bestMatch.bounds.centerY,
+      const matches = parsed.allMatches || [];
+      const occurrence = args.occurrence || null;
+      if (occurrence !== null && (!Number.isInteger(occurrence) || occurrence < 1 || occurrence > matches.length)) {
+        throw targetError(
+          "INVALID_OCCURRENCE",
+          `occurrence must be between 1 and ${matches.length}; received ${occurrence}`,
+        );
+      }
+      const highestRank = parsed.bestMatch.matchRank || 0;
+      const highestRankMatches = matches.filter((match) => (match.matchRank || 0) === highestRank);
+      if (occurrence === null && highestRankMatches.length > 1) {
+        throw targetError(
+          "AMBIGUOUS_TEXT",
+          `"${args.text}" matched ${highestRankMatches.length} equally ranked elements; pass occurrence to select one`,
+        );
+      }
+
+      const selectedMatch = occurrence === null ? parsed.bestMatch : matches[occurrence - 1];
+      const coords = selectedMatch.globalCoordinates || {
+        x: selectedMatch.bounds.centerX,
+        y: selectedMatch.bounds.centerY,
       };
 
       const button = args.button || "left";
       const count = args.clickCount || 1;
-      const pid = parsed.pid || null;
+      const pid = target?.pid || parsed.pid || null;
 
-      const clickArgs = [
+      const clickArgs = target
+        ? [
+            "ax_click",
+            String(coords.x),
+            String(coords.y),
+            button,
+            String(count),
+            String(target.pid),
+            String(target.windowId),
+          ]
+        : ["click", String(coords.x), String(coords.y), button, String(count)];
+
+      const { action, cursorOverlay } = await runPointAction(
+        coords.x,
+        coords.y,
+        clickArgs,
         "click",
-        String(coords.x),
-        String(coords.y),
-        button,
-        String(count),
-      ];
-      if (pid) clickArgs.push(String(pid));
-
-      await execFileAsync(NATIVE_HELPER, clickArgs);
+      );
 
       const contents = [
         {
           type: "text",
-          text: `Found and clicked text "${parsed.bestMatch.text}" at screen coordinates (${coords.x.toFixed(1)}, ${coords.y.toFixed(1)}) with confidence ${(parsed.bestMatch.confidence * 100).toFixed(0)}% (non-intrusive PID: ${pid || "global"})`,
+          text: JSON.stringify(
+            {
+              status: "delivered_unverified",
+              match: selectedMatch,
+              action,
+              cursorOverlay,
+              target: target || { scope: "global" },
+            },
+            null,
+            2,
+          ),
         },
       ];
 
       if (args.returnScreenshot) {
         const { base64, mimeType } = await captureScreenshot({
-          cursor: coords,
+          cursor: target
+            ? { x: coords.x - target.bounds.x, y: coords.y - target.bounds.y }
+            : coords,
           appName: args.appName,
           windowId: args.windowId,
         });
@@ -610,17 +886,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "wait_for_text") {
+      const target = await resolveTarget(args);
       const helperArgs = ["wait_for_text", args.text];
-      if (args.appName) helperArgs.push(args.appName);
-      else helperArgs.push("nil");
-
-      if (args.windowId) helperArgs.push(String(args.windowId));
-      else helperArgs.push("nil");
+      helperArgs.push("nil", target ? String(target.windowId) : "nil");
 
       helperArgs.push(String(args.timeoutSeconds || 5.0));
 
       const { stdout } = await execFileAsync(NATIVE_HELPER, helperArgs);
       const parsed = JSON.parse(stdout.trim());
+
+      if (parsed.status === "error") {
+        throw targetError(parsed.code || "WAIT_FAILED", parsed.error || "wait_for_text failed");
+      }
 
       return {
         content: [
@@ -645,31 +922,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "mouse_click") {
-      const { x, y, pid } = await resolveCoordinatesAndPid(args.x, args.y, args);
+      const { x, y, pid, windowInfo } = await resolveCoordinatesAndPid(args.x, args.y, args);
       const button = args.button || "left";
       const count = args.clickCount || 1;
 
-      const clickArgs = [
-        "click",
-        String(x),
-        String(y),
-        button,
-        String(count),
-      ];
-      if (pid) clickArgs.push(String(pid));
+      const clickArgs = windowInfo
+        ? [
+            "ax_click",
+            String(x),
+            String(y),
+            button,
+            String(count),
+            String(pid),
+            String(windowInfo.windowId),
+          ]
+        : ["click", String(x), String(y), button, String(count)];
 
-      await execFileAsync(NATIVE_HELPER, clickArgs);
+      const { action, cursorOverlay } = await runPointAction(x, y, clickArgs, "click");
 
       const contents = [
         {
           type: "text",
-          text: `Clicked at (${x}, ${y}) [${button}, count: ${count}] (targeted PID: ${pid || "global"})`,
+          text: JSON.stringify(
+            {
+              status: "delivered_unverified",
+              action,
+              cursorOverlay,
+              target: windowInfo || { scope: "global" },
+            },
+            null,
+            2,
+          ),
         },
       ];
 
       if (args.returnScreenshot) {
         const { base64, mimeType } = await captureScreenshot({
-          cursor: { x, y },
+          cursor: windowInfo
+            ? { x: x - windowInfo.bounds.x, y: y - windowInfo.bounds.y }
+            : { x, y },
           appName: args.appName,
           windowId: args.windowId,
         });
@@ -680,21 +971,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "type_text") {
-      let pid = null;
-      if (args.appName) {
-        const win = await findWindowByApp(args.appName);
-        pid = win?.pid || null;
-      } else if (args.windowId) {
-        const win = await getWindowBounds(args.windowId);
-        pid = win?.pid || null;
-      }
+      const target = await resolveTarget(args);
+      const pid = target?.pid || null;
 
       const typeArgs = ["type_text", args.text];
-      if (pid) typeArgs.push(String(pid));
+      if (pid) typeArgs.push(String(pid), String(target.windowId));
 
-      await execFileAsync(NATIVE_HELPER, typeArgs);
+      const { stdout } = await execFileAsync(NATIVE_HELPER, typeArgs);
+      const action = JSON.parse(stdout.trim());
+      if (action.status !== "ok") {
+        throw targetError(action.code || "ACTION_FAILED", action.error || "text could not be delivered");
+      }
       return {
-        content: [{ type: "text", text: `Typed: "${args.text}" (targeted PID: ${pid || "active app"})` }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                status: "delivered_unverified",
+                action,
+                target: target || { scope: "active_app" },
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     }
 
@@ -734,23 +1036,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "scroll") {
-      const { x, y, pid } = await resolveCoordinatesAndPid(args.x, args.y, args);
+      const { x, y, pid, windowInfo } = await resolveCoordinatesAndPid(args.x, args.y, args);
       const dx = args.deltaX || 0;
-      const scrollArgs = [
-        "scroll",
-        String(x),
-        String(y),
-        String(args.deltaY),
-        String(dx),
-      ];
-      if (pid) scrollArgs.push(String(pid));
+      const scrollArgs = windowInfo
+        ? [
+            "ax_scroll",
+            String(x),
+            String(y),
+            String(args.deltaY),
+            String(dx),
+            String(pid),
+            String(windowInfo.windowId),
+          ]
+        : ["scroll", String(x), String(y), String(args.deltaY), String(dx)];
 
-      await execFileAsync(NATIVE_HELPER, scrollArgs);
+      const { action, cursorOverlay } = await runPointAction(x, y, scrollArgs, "scroll");
       return {
         content: [
           {
             type: "text",
-            text: `Scrolled at (${x}, ${y}) deltaY: ${args.deltaY}, deltaX: ${dx} (PID: ${pid || "global"})`,
+            text: JSON.stringify(
+              {
+              status: "delivered_unverified",
+              action,
+              cursorOverlay,
+              target: windowInfo || { scope: "global" },
+              },
+              null,
+              2,
+            ),
           },
         ],
       };
@@ -799,6 +1113,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { output, error } = await runAppleScript(script);
       if (error) {
         return {
+          isError: true,
           content: [{ type: "text", text: JSON.stringify({ error, note: "Check macOS Accessibility permissions in System Settings > Privacy & Security > Accessibility." }) }],
         };
       }
@@ -815,8 +1130,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === "run_applescript") {
       const res = await runAppleScript(args.script);
+      if (res.error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  code: "APPLESCRIPT_FAILED",
+                  error: res.error,
+                  exitCode: res.exitCode,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
       return {
-        content: [{ type: "text", text: res.output || res.error || "Script executed." }],
+        content: [{ type: "text", text: res.output || "Script executed." }],
       };
     }
 
@@ -824,7 +1158,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   } catch (error) {
     return {
       isError: true,
-      content: [{ type: "text", text: `Error executing ${name}: ${error.message}` }],
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              code: error.code || "TOOL_FAILED",
+              tool: name,
+              error: error.message,
+            },
+            null,
+            2,
+          ),
+        },
+      ],
     };
   }
 });
