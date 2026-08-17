@@ -1,17 +1,27 @@
 {
-  "name": "macos-computer-use",
-  "version": "2.3.0",
+  "name": "macos-computer-use-mcp",
+  "version": "2.3.1",
   "type": "module",
   "description": "Native macOS Computer Use MCP server with a live agent cursor, Apple Vision OCR, fail-closed targeting, and Accessibility actions.",
   "main": "server.mjs",
   "bin": {
-    "macos-computer-use": "./server.mjs"
+    "macos-computer-use-mcp": "server.mjs",
+    "macos-computer-use": "server.mjs"
   },
+  "files": [
+    "server.mjs",
+    "native_helper",
+    "native_helper.swift",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "swiftc -O native_helper.swift -o native_helper",
+    "build:release": "./scripts/build-universal.sh",
     "test": "node --test test/*.test.mjs",
     "test:live": "node test/live-smoke.mjs",
-    "postinstall": "npm run build",
+    "prepack": "npm run build:release",
+    "prepublishOnly": "npm test",
     "start": "node server.mjs"
   },
   "keywords": [
@@ -28,6 +38,23 @@
   ],
   "author": "John Oba <obajohn75@gmail.com>",
   "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnexzy/macos-computer-use.git"
+  },
+  "bugs": {
+    "url": "https://github.com/johnexzy/macos-computer-use/issues"
+  },
+  "homepage": "https://github.com/johnexzy/macos-computer-use#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1"
   }
