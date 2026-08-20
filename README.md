@@ -143,6 +143,12 @@ The MCP server starts one cursor overlay process lazily on the first click or sc
 
 ---
 
+## 📦 Publishing
+
+Pushes to `main` run the npm publishing workflow. To release a new version, update the version in `package.json` and `package-lock.json` before merging. Versions that already exist on npm are tested and skipped.
+
+---
+
 ## 📄 License
 
 MIT © [John Oba](https://github.com/johnexzy)
