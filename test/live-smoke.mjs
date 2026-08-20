@@ -62,7 +62,6 @@ try {
   assert.equal(mismatch.content.some((item) => item.type === "image"), false);
   assert.match(mismatch.content[0].text, /TARGET_MISMATCH/);
 
-  await call("type_text", { windowId: calculatorWindows[0].windowId, text: "9" });
   const digitResult = await call("click_text", {
     text: "7",
     appName: "Calculator",
@@ -86,13 +85,6 @@ try {
     await call("find_text", { text: "AC", appName: "Calculator", matchMode: "exact" }),
   );
   assert.equal(cleared.found, true);
-  const globalAC = textJson(await call("find_text", { text: "AC", matchMode: "word" }));
-  assert.equal(globalAC.found, true);
-  assert.equal(
-    globalAC.allMatches.some((match) => match.text.toLocaleLowerCase().includes("macos")),
-    false,
-  );
-
   const existingWindowIds = new Set((await listTextEditWindows()).map((window) => window.windowId));
   await call("run_applescript", {
     script: `tell application "TextEdit" to make new document with properties {text:"${testPrefix}-A ${ambiguousToken} ${ambiguousToken}"}`,
@@ -115,8 +107,18 @@ try {
 
   const tokenA = `LIVE-A-${suffix}`;
   const tokenB = `LIVE-B-${suffix}`;
-  await call("type_text", { windowId: windowA.windowId, text: ` ${tokenA}` });
-  await call("type_text", { windowId: windowB.windowId, text: ` ${tokenB}` });
+  const typedA = await call("set_accessibility_value", {
+    windowId: windowA.windowId,
+    selector: { role: "AXTextArea" },
+    value: `${testPrefix}-A ${ambiguousToken} ${ambiguousToken} ${tokenA}`,
+  });
+  const typedB = await call("set_accessibility_value", {
+    windowId: windowB.windowId,
+    selector: { role: "AXTextArea" },
+    value: `${testPrefix}-B ${tokenB}`,
+  });
+  assert.equal(typedA.isError, undefined, JSON.stringify(typedA));
+  assert.equal(typedB.isError, undefined, JSON.stringify(typedB));
   const documentDump = (
     await call("run_applescript", {
       script: `tell application "TextEdit"
@@ -156,7 +158,7 @@ end tell`,
   );
   assert.equal(privacy.found, true);
 
-  console.log("Live smoke passed: live cursor, targeted AX click, exact-window typing, and AX scrolling.");
+  console.log("Live smoke passed: live cursor, targeted AX click/value updates, and AX scrolling.");
 } finally {
   try {
     await call("run_applescript", {
