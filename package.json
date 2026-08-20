@@ -1,6 +1,6 @@
 {
   "name": "macos-computer-use-mcp",
-  "version": "2.3.1",
+  "version": "2.4.0",
   "type": "module",
   "description": "Native macOS Computer Use MCP server with a live agent cursor, Apple Vision OCR, fail-closed targeting, and Accessibility actions.",
   "main": "server.mjs",
@@ -19,6 +19,7 @@
     "build": "swiftc -O native_helper.swift -o native_helper",
     "build:release": "./scripts/build-universal.sh",
     "test": "node --test test/*.test.mjs",
+    "test:background": "node test/background-smoke.mjs",
     "test:live": "node test/live-smoke.mjs",
     "prepack": "npm run build:release",
     "prepublishOnly": "npm test",

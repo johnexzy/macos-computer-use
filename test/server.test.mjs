@@ -66,6 +66,47 @@ test("relative coordinates require an explicit target", async () => {
   });
 });
 
+test("background automation exposes semantic Accessibility tools", async () => {
+  await withClient(async (client) => {
+    const result = await client.listTools();
+    const names = new Set(result.tools.map((tool) => tool.name));
+
+    assert.equal(names.has("inspect_accessibility"), true);
+    assert.equal(names.has("wait_for_accessibility"), true);
+    assert.equal(names.has("set_accessibility_value"), true);
+    assert.equal(names.has("perform_accessibility_action"), true);
+
+    const perform = result.tools.find((tool) => tool.name === "perform_accessibility_action");
+    const launch = result.tools.find((tool) => tool.name === "launch_app");
+    assert.equal(perform.inputSchema.properties.action.enum.includes("focus"), true);
+    assert.equal(launch.inputSchema.properties.activate.default, false);
+  });
+});
+
+test("background-required key presses fail closed without a target", async () => {
+  await withClient(async (client) => {
+    const result = await client.callTool({
+      name: "press_key",
+      arguments: { key: "return", executionMode: "background_required" },
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /BACKGROUND_TARGET_REQUIRED/);
+  });
+});
+
+test("semantic waits fail closed without a target", async () => {
+  await withClient(async (client) => {
+    const result = await client.callTool({
+      name: "wait_for_accessibility",
+      arguments: { selector: { role: "AXButton" }, timeoutMs: 100 },
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /BACKGROUND_TARGET_REQUIRED/);
+  });
+});
+
 test("word matching excludes substrings and preserves duplicate occurrences", async () => {
   const helper = path.join(repoDir, "native_helper");
   const excluded = JSON.parse(
@@ -86,8 +127,13 @@ test("word matching excludes substrings and preserves duplicate occurrences", as
   assert.deepEqual(duplicates.types, ["word", "word"]);
 });
 
-test("live cursor overlay accepts movement and feedback commands", { timeout: 5000 }, async () => {
+test("live cursor overlay accepts movement and feedback commands", { timeout: 5000 }, async (context) => {
   const helper = path.join(repoDir, "native_helper");
+  const frontmost = JSON.parse((await execFileAsync(helper, ["frontmost_app"])).stdout);
+  if (frontmost.bundleIdentifier === "com.apple.loginwindow") {
+    context.skip("live cursor overlay requires an unlocked interactive desktop session");
+    return;
+  }
   const display = JSON.parse((await execFileAsync(helper, ["size"])).stdout);
   const child = spawn(helper, ["cursor_overlay"], { stdio: ["pipe", "pipe", "pipe"] });
   const reader = createInterface({ input: child.stdout });

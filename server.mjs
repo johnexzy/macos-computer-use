@@ -178,8 +178,54 @@ async function runPointAction(x, y, helperArgs, successFeedback) {
 process.once("exit", () => agentCursor.stop());
 process.stdin.once("end", () => agentCursor.stop());
 
-// Key code mapping for macOS System Events
+// Hardware key codes for native CoreGraphics key delivery on the standard macOS layout.
 const KEY_CODES = {
+  a: 0,
+  s: 1,
+  d: 2,
+  f: 3,
+  h: 4,
+  g: 5,
+  z: 6,
+  x: 7,
+  c: 8,
+  v: 9,
+  b: 11,
+  q: 12,
+  w: 13,
+  e: 14,
+  r: 15,
+  y: 16,
+  t: 17,
+  "1": 18,
+  "2": 19,
+  "3": 20,
+  "4": 21,
+  "6": 22,
+  "5": 23,
+  "=": 24,
+  "9": 25,
+  "7": 26,
+  "-": 27,
+  "8": 28,
+  "0": 29,
+  "]": 30,
+  o: 31,
+  u: 32,
+  "[": 33,
+  i: 34,
+  p: 35,
+  l: 37,
+  j: 38,
+  "'": 39,
+  k: 40,
+  ";": 41,
+  "\\": 42,
+  ",": 43,
+  "/": 44,
+  n: 45,
+  m: 46,
+  ".": 47,
   return: 36,
   enter: 36,
   tab: 48,
@@ -250,6 +296,190 @@ async function listAllWindows(appName = null) {
   } catch (err) {
     return [];
   }
+}
+
+async function callNativeHelper(args) {
+  const { stdout } = await execFileAsync(NATIVE_HELPER, args);
+  const parsed = JSON.parse(stdout.trim());
+  if (parsed.status === "error") {
+    throw targetError(parsed.code || "NATIVE_HELPER_FAILED", parsed.error || "native operation failed");
+  }
+  return parsed;
+}
+
+async function getFrontmostApplication() {
+  return callNativeHelper(["frontmost_app"]);
+}
+
+async function assertTargetStayedBackground(before, target) {
+  const after = await getFrontmostApplication();
+  if (before.pid !== target.pid && after.pid === target.pid) {
+    throw targetError(
+      "FOREGROUND_CHANGED",
+      `background operation activated "${target.appName}"`,
+    );
+  }
+  return after;
+}
+
+async function runBackgroundStep(target, operation) {
+  const before = await getFrontmostApplication();
+  let result;
+  try {
+    result = await operation();
+  } catch (error) {
+    await assertTargetStayedBackground(before, target);
+    throw error;
+  }
+  const after = await assertTargetStayedBackground(before, target);
+  return {
+    result,
+    foreground: {
+      preserved: before.pid === after.pid,
+      before: { pid: before.pid, appName: before.appName },
+      after: { pid: after.pid, appName: after.appName },
+    },
+  };
+}
+
+async function findApplicationPath(appName) {
+  if (path.isAbsolute(appName) && appName.endsWith(".app")) {
+    await fs.access(appName);
+    return appName;
+  }
+
+  const query = normalizeAppName(appName.replace(/\.app$/i, ""));
+  const roots = ["/Applications", path.join(os.homedir(), "Applications"), "/System/Applications"];
+  const candidates = [];
+  for (const root of roots) {
+    try {
+      await fs.access(root);
+      const { stdout } = await execFileAsync("/usr/bin/find", [
+        root,
+        "-maxdepth",
+        "3",
+        "-type",
+        "d",
+        "-name",
+        "*.app",
+      ]);
+      candidates.push(...stdout.trim().split("\n").filter(Boolean));
+    } catch (_) {}
+  }
+
+  const exact = candidates.find(
+    (candidate) => normalizeAppName(path.basename(candidate, ".app")) === query,
+  );
+  if (exact) return exact;
+  return candidates.find((candidate) =>
+    normalizeAppName(path.basename(candidate, ".app")).includes(query),
+  ) || null;
+}
+
+async function launchApplication(appName, { activate = false } = {}) {
+  const existing = await findWindowByApp(appName);
+  if (existing && !activate) {
+    return { status: "ok", activated: false, alreadyRunning: true, target: existing };
+  }
+
+  const applicationPath = await findApplicationPath(appName);
+  const openArgs = [];
+  if (!activate) openArgs.push("-g");
+  if (applicationPath) openArgs.push(applicationPath);
+  else openArgs.push("-a", appName);
+  await execFileAsync("/usr/bin/open", openArgs);
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const target = await findWindowByApp(appName);
+    if (target) {
+      return { status: "ok", activated: activate, alreadyRunning: Boolean(existing), target };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw targetError("TARGET_NOT_FOUND", `application "${appName}" did not expose a window`);
+}
+
+async function resolveRequiredTarget(args) {
+  const target = await resolveTarget(args);
+  if (!target) {
+    throw targetError("BACKGROUND_TARGET_REQUIRED", "background operation requires appName or windowId");
+  }
+  return target;
+}
+
+function normalizeSelector(selector) {
+  if (!selector || typeof selector !== "object" || Array.isArray(selector)) {
+    throw targetError("INVALID_SELECTOR", "selector must be an object");
+  }
+  if (!["role", "identifier", "title", "description", "query"].some((key) => selector[key])) {
+    throw targetError(
+      "INVALID_SELECTOR",
+      "selector requires role, identifier, title, description, or query",
+    );
+  }
+  return selector;
+}
+
+async function inspectAccessibility(target, options = {}) {
+  return callNativeHelper([
+    "ax_inspect",
+    String(target.pid),
+    String(target.windowId),
+    JSON.stringify(options),
+  ]);
+}
+
+async function setAccessibilityValue(target, selector, value) {
+  return callNativeHelper([
+    "ax_set_value",
+    String(target.pid),
+    String(target.windowId),
+    JSON.stringify(normalizeSelector(selector)),
+    value,
+  ]);
+}
+
+async function performAccessibilityAction(target, selector, action) {
+  return callNativeHelper([
+    "ax_perform",
+    String(target.pid),
+    String(target.windowId),
+    JSON.stringify(normalizeSelector(selector)),
+    action,
+  ]);
+}
+
+async function postBackgroundKey(target, selector, key) {
+  return callNativeHelper([
+    "ax_key",
+    String(target.pid),
+    String(target.windowId),
+    JSON.stringify(normalizeSelector(selector)),
+    key,
+  ]);
+}
+
+async function typeBackgroundText(target, selector, value) {
+  return callNativeHelper([
+    "ax_type",
+    String(target.pid),
+    String(target.windowId),
+    JSON.stringify(normalizeSelector(selector)),
+    value,
+  ]);
+}
+
+async function waitForAccessibilityElements(target, options, minCount = 1, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const result = await inspectAccessibility(target, options);
+    if (result.elements.length >= minCount) return result;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  throw targetError(
+    "ACCESSIBILITY_WAIT_TIMEOUT",
+    `fewer than ${minCount} Accessibility elements matched before timeout`,
+  );
 }
 
 function targetError(code, message) {
@@ -409,10 +639,33 @@ async function resolveCoordinatesAndPid(x, y, { relativeCoords, windowId, appNam
   return { x, y, pid, windowInfo: win };
 }
 
+const ACCESSIBILITY_SELECTOR_SCHEMA = {
+  type: "object",
+  description: "Semantic Accessibility selector. Combine fields to identify one control precisely.",
+  properties: {
+    role: { type: "string", description: "Exact AX role, such as AXButton or AXTextArea." },
+    identifier: { type: "string", description: "Exact Accessibility identifier." },
+    title: { type: "string", description: "Exact Accessibility title." },
+    description: { type: "string", description: "Exact Accessibility description." },
+    query: { type: "string", description: "Substring matched across semantic text attributes." },
+    occurrence: {
+      type: "integer",
+      minimum: 1,
+      description: "One-based occurrence when the selector intentionally matches multiple controls.",
+    },
+  },
+  additionalProperties: false,
+};
+
+const BACKGROUND_TARGET_PROPERTIES = {
+  appName: { type: "string", description: "Application name whose window should remain backgrounded." },
+  windowId: { type: "integer", minimum: 1, description: "Exact target window ID." },
+};
+
 const server = new Server(
   {
     name: "macos-computer-use",
-    version: "2.3.0",
+    version: "2.4.0",
   },
   {
     capabilities: {
@@ -581,6 +834,104 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "inspect_accessibility",
+        description:
+          "Inspect semantic macOS Accessibility controls in a specific window without activating the application. Values are omitted unless includeValues is true.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            ...BACKGROUND_TARGET_PROPERTIES,
+            selector: ACCESSIBILITY_SELECTOR_SCHEMA,
+            roles: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional exact AX roles to include.",
+            },
+            maxDepth: { type: "integer", minimum: 1, maximum: 50, default: 30 },
+            maxResults: { type: "integer", minimum: 1, maximum: 500, default: 100 },
+            includeValues: {
+              type: "boolean",
+              default: false,
+              description: "Include control values. Keep false unless the value is required.",
+            },
+            includeSettableAttributes: { type: "boolean", default: false },
+          },
+          anyOf: [{ required: ["appName"] }, { required: ["windowId"] }],
+        },
+      },
+      {
+        name: "set_accessibility_value",
+        description:
+          "Set the value of a semantic Accessibility control in a background window and verify that the target app did not become frontmost.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            ...BACKGROUND_TARGET_PROPERTIES,
+            selector: ACCESSIBILITY_SELECTOR_SCHEMA,
+            value: { type: "string", description: "Replacement value." },
+          },
+          required: ["selector", "value"],
+          anyOf: [{ required: ["appName"] }, { required: ["windowId"] }],
+        },
+      },
+      {
+        name: "perform_accessibility_action",
+        description:
+          "Perform a semantic Accessibility action in a background window and verify that the target app did not become frontmost.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            ...BACKGROUND_TARGET_PROPERTIES,
+            selector: ACCESSIBILITY_SELECTOR_SCHEMA,
+            action: {
+              type: "string",
+              enum: ["press", "focus", "confirm", "cancel", "increment", "decrement", "show_menu"],
+            },
+          },
+          required: ["selector", "action"],
+          anyOf: [{ required: ["appName"] }, { required: ["windowId"] }],
+        },
+      },
+      {
+        name: "wait_for_accessibility",
+        description:
+          "Wait until semantic Accessibility controls appear in a specific background window without requiring Screen Recording.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            ...BACKGROUND_TARGET_PROPERTIES,
+            selector: ACCESSIBILITY_SELECTOR_SCHEMA,
+            roles: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional exact AX roles to include.",
+            },
+            minCount: {
+              type: "integer",
+              minimum: 1,
+              maximum: 500,
+              default: 1,
+              description: "Minimum matching element count required to finish waiting.",
+            },
+            timeoutMs: {
+              type: "integer",
+              minimum: 100,
+              maximum: 30000,
+              default: 5000,
+            },
+            maxDepth: { type: "integer", minimum: 1, maximum: 50, default: 30 },
+            maxResults: { type: "integer", minimum: 1, maximum: 500, default: 100 },
+            includeValues: {
+              type: "boolean",
+              default: false,
+            },
+            includeSettableAttributes: { type: "boolean", default: false },
+          },
+          required: ["selector"],
+          anyOf: [{ required: ["appName"] }, { required: ["windowId"] }],
+        },
+      },
+      {
         name: "mouse_click",
         description:
           "Glide the live agent cursor to coordinates and click. With appName/windowId, invokes an Accessibility control without moving the hardware pointer and fails if no semantic control exists. Without a target, performs a global hardware click.",
@@ -621,7 +972,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "type_text",
         description:
-          "Type plain text. A target is resolved to an exact window before process delivery; unresolved or unsupported window targets fail closed.",
+          "Type plain text. Targeted calls default to verified background delivery and require a semantic selector; untargeted calls operate on the active app.",
         inputSchema: {
           type: "object",
           properties: {
@@ -634,6 +985,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               description: "Optional target window ID to receive background keystrokes.",
             },
+            selector: ACCESSIBILITY_SELECTOR_SCHEMA,
+            executionMode: {
+              type: "string",
+              enum: ["background_required", "foreground_allowed"],
+              description: "Targeted calls default to background_required; untargeted calls use foreground_allowed.",
+            },
           },
           required: ["text"],
         },
@@ -641,7 +998,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "press_key",
         description:
-          "Press a key or key combination (e.g. return, escape, space, tab, backspace, or shortcuts like Cmd+C, Cmd+Space).",
+          "Press a key or key combination. background_required targets a semantic editable control without activating its app; foreground_allowed operates on the active app.",
         inputSchema: {
           type: "object",
           properties: {
@@ -657,6 +1014,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 enum: ["command", "cmd", "shift", "option", "alt", "control", "ctrl"],
               },
               description: "Optional modifier keys to hold (e.g. ['command'], ['command', 'shift'])",
+            },
+            ...BACKGROUND_TARGET_PROPERTIES,
+            selector: ACCESSIBILITY_SELECTOR_SCHEMA,
+            executionMode: {
+              type: "string",
+              enum: ["background_required", "foreground_allowed"],
+              description: "Targeted calls default to background_required; untargeted calls use foreground_allowed.",
             },
           },
           required: ["key"],
@@ -697,13 +1061,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "launch_app",
-        description: "Launch, focus, or bring a macOS application to the foreground.",
+        description: "Launch a macOS application in the background by default. Set activate=true only when foreground activation is intentional.",
         inputSchema: {
           type: "object",
           properties: {
             appName: {
               type: "string",
-              description: "Name of the application (e.g. 'Google Chrome', 'Safari', 'Finder', 'Slack', 'TextEdit', 'Calculator', 'WhatsApp').",
+              description: "Name of the application (e.g. 'Google Chrome', 'Safari', 'Finder', 'Slack', 'TextEdit', 'Calculator').",
+            },
+            activate: {
+              type: "boolean",
+              default: false,
+              description: "Bring the app to the foreground. Defaults to false.",
             },
           },
           required: ["appName"],
@@ -923,6 +1292,65 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
+    if (name === "inspect_accessibility") {
+      const target = await resolveRequiredTarget(args);
+      const options = {
+        roles: args.roles,
+        maxDepth: args.maxDepth,
+        maxResults: args.maxResults,
+        includeValues: args.includeValues === true,
+        includeSettableAttributes: args.includeSettableAttributes === true,
+      };
+      if (args.selector) options.selector = normalizeSelector(args.selector);
+      const outcome = await runBackgroundStep(target, () => inspectAccessibility(target, options));
+      return {
+        content: [{ type: "text", text: JSON.stringify(outcome.result, null, 2) }],
+      };
+    }
+
+    if (name === "wait_for_accessibility") {
+      const target = await resolveRequiredTarget(args);
+      const options = {
+        selector: normalizeSelector(args.selector),
+        roles: args.roles,
+        maxDepth: args.maxDepth,
+        maxResults: args.maxResults,
+        includeValues: args.includeValues === true,
+        includeSettableAttributes: args.includeSettableAttributes === true,
+      };
+      const outcome = await runBackgroundStep(target, () =>
+        waitForAccessibilityElements(
+          target,
+          options,
+          args.minCount ?? 1,
+          args.timeoutMs ?? 5000,
+        ),
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(outcome.result, null, 2) }],
+      };
+    }
+
+    if (name === "set_accessibility_value") {
+      const target = await resolveRequiredTarget(args);
+      const outcome = await runBackgroundStep(target, () =>
+        setAccessibilityValue(target, args.selector, args.value),
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(outcome, null, 2) }],
+      };
+    }
+
+    if (name === "perform_accessibility_action") {
+      const target = await resolveRequiredTarget(args);
+      const outcome = await runBackgroundStep(target, () =>
+        performAccessibilityAction(target, args.selector, args.action),
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(outcome, null, 2) }],
+      };
+    }
+
     if (name === "mouse_click") {
       const { x, y, pid, windowInfo } = await resolveCoordinatesAndPid(args.x, args.y, args);
       const button = args.button || "left";
@@ -973,6 +1401,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "type_text") {
+      const targetRequested = args.appName || args.windowId;
+      const executionMode = args.executionMode
+        || (targetRequested ? "background_required" : "foreground_allowed");
+      if (executionMode === "background_required") {
+        const target = await resolveRequiredTarget(args);
+        const outcome = await runBackgroundStep(target, () =>
+          typeBackgroundText(target, args.selector, args.text),
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ status: "delivered_verified", ...outcome }, null, 2),
+            },
+          ],
+        };
+      }
+
       const target = await resolveTarget(args);
       const pid = target?.pid || null;
 
@@ -1003,35 +1449,52 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "press_key") {
+      const targetRequested = args.appName || args.windowId;
+      const executionMode = args.executionMode
+        || (targetRequested ? "background_required" : "foreground_allowed");
+      if (executionMode === "background_required") {
+        const target = await resolveRequiredTarget(args);
+        if ((args.modifiers || []).length > 0) {
+          throw targetError(
+            "UNSUPPORTED_BACKGROUND_MODIFIERS",
+            "background-required key presses do not support modifiers",
+          );
+        }
+        const outcome = await runBackgroundStep(target, () =>
+          postBackgroundKey(target, args.selector, args.key),
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ status: "delivered", ...outcome }, null, 2),
+            },
+          ],
+        };
+      }
+
       const rawKey = args.key.toLowerCase();
-      const mods = (args.modifiers || []).map((m) => {
-        const lower = m.toLowerCase();
-        if (lower === "cmd" || lower === "command") return "command down";
-        if (lower === "shift") return "shift down";
-        if (lower === "alt" || lower === "option") return "option down";
-        if (lower === "ctrl" || lower === "control") return "control down";
-        return `${lower} down`;
-      });
-
-      const usingClause = mods.length > 0 ? ` using {${mods.join(", ")}}` : "";
-
-      let script = "";
-      if (KEY_CODES[rawKey] !== undefined) {
-        script = `tell application "System Events" to key code ${KEY_CODES[rawKey]}${usingClause}`;
-      } else {
-        const escaped = args.key.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-        script = `tell application "System Events" to keystroke "${escaped}"${usingClause}`;
+      const modifiers = args.modifiers || [];
+      const keyCode = KEY_CODES[rawKey];
+      if (keyCode === undefined) {
+        if (modifiers.length === 0 && [...args.key].length === 1) {
+          const action = await callNativeHelper(["type_text", args.key]);
+          return {
+            content: [{ type: "text", text: JSON.stringify(action, null, 2) }],
+          };
+        }
+        throw targetError("UNSUPPORTED_KEY", `native key delivery does not support "${args.key}"`);
       }
-
-      const res = await runAppleScript(script);
-      if (res.error) {
-        throw new Error(res.error);
-      }
+      const action = await callNativeHelper([
+        "press_key",
+        String(keyCode),
+        JSON.stringify(modifiers),
+      ]);
       return {
         content: [
           {
             type: "text",
-            text: `Pressed key: ${args.key}${mods.length ? ` with [${args.modifiers.join("+")}]` : ""}`,
+            text: JSON.stringify(action, null, 2),
           },
         ],
       };
@@ -1073,58 +1536,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "launch_app") {
-      let target = args.appName;
-      if (!target.startsWith("/") && !target.endsWith(".app")) {
-        try {
-          const { stdout } = await execFileAsync("/usr/bin/find", [
-            "/Applications",
-            path.join(os.homedir(), "Applications"),
-            "-maxdepth",
-            "2",
-            "-name",
-            `*${args.appName}*.app`,
-          ]);
-          const found = stdout.trim().split("\n").filter(Boolean)[0];
-          if (found) {
-            target = found;
-          }
-        } catch (_) {}
-      }
-      await execFileAsync("/usr/bin/open", [target.startsWith("/") ? target : "-a", target]);
-      return {
-        content: [{ type: "text", text: `Launched / focused application: "${target}"` }],
-      };
-    }
-
-    if (name === "get_active_app") {
-      const script = `
-        tell application "System Events"
-          set frontApp to first application process whose frontmost is true
-          set frontAppName to name of frontApp
-          set windowTitle to ""
-          try
-            tell frontApp
-              if (count of windows) > 0 then
-                set windowTitle to name of front window
-              end if
-            end tell
-          end try
-          return frontAppName & " | " & windowTitle
-        end tell
-      `;
-      const { output, error } = await runAppleScript(script);
-      if (error) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: JSON.stringify({ error, note: "Check macOS Accessibility permissions in System Settings > Privacy & Security > Accessibility." }) }],
-        };
-      }
-      const [appName, windowTitle] = (output || "").split(" | ");
+      const activate = args.activate === true;
+      const before = activate ? null : await getFrontmostApplication();
+      const launched = await launchApplication(args.appName, { activate });
+      const foreground = activate
+        ? null
+        : await assertTargetStayedBackground(before, launched.target);
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify({ activeApp: appName || output, windowTitle: windowTitle || "" }, null, 2),
+            text: JSON.stringify(
+              {
+                ...launched,
+                foregroundPreserved: activate ? null : before.pid === foreground.pid,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    }
+
+    if (name === "get_active_app") {
+      const active = await getFrontmostApplication();
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                activeApp: active.appName,
+                pid: active.pid,
+                bundleIdentifier: active.bundleIdentifier,
+              },
+              null,
+              2,
+            ),
           },
         ],
       };
