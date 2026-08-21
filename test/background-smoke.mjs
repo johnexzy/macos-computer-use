@@ -31,6 +31,11 @@ try {
     arguments: { appName: targetApp, activate: false },
   });
   assert.equal(launch.isError, undefined, JSON.stringify(launch));
+  const launchPayload = textJson(launch);
+  assert.equal(launchPayload.execution.contractVersion, 1);
+  assert.equal(launchPayload.execution.accepted, true);
+  assert.equal(launchPayload.execution.verification, "window_observed");
+  assert.equal(launchPayload.execution.foregroundPreserved, true);
 
   const inspected = await client.callTool({
     name: "inspect_accessibility",

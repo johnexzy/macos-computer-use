@@ -889,6 +889,50 @@ func printFrontmostApplication() {
     ])
 }
 
+func printCapabilities() {
+    let application = NSWorkspace.shared.frontmostApplication
+
+    #if arch(arm64)
+    let architecture = "arm64"
+    #elseif arch(x86_64)
+    let architecture = "x86_64"
+    #else
+    let architecture = "unknown"
+    #endif
+
+    printJson([
+        "status": "ok",
+        "permissionPromptRequested": false,
+        "permissions": [
+            "accessibility": AXIsProcessTrusted(),
+            "screenRecording": CGPreflightScreenCaptureAccess(),
+            "inputPosting": CGPreflightPostEventAccess()
+        ],
+        "system": [
+            "osVersion": ProcessInfo.processInfo.operatingSystemVersionString,
+            "architecture": architecture,
+            "frontmostApplication": [
+                "pid": application?.processIdentifier ?? 0,
+                "appName": application?.localizedName ?? "",
+                "bundleIdentifier": application?.bundleIdentifier ?? "",
+                "isLoginWindow": application?.bundleIdentifier == "com.apple.loginwindow"
+            ]
+        ]
+    ])
+}
+
+func requireScreenCaptureAccess() -> Bool {
+    guard CGPreflightScreenCaptureAccess() else {
+        printJson([
+            "status": "error",
+            "code": "SCREEN_RECORDING_PERMISSION_REQUIRED",
+            "error": "Screen Recording permission is required. Inspect get_capabilities before retrying."
+        ])
+        return false
+    }
+    return true
+}
+
 func actionableElement(at point: CGPoint, in element: AXUIElement, depth: Int = 0) -> AXUIElement? {
     guard depth < 40 else { return nil }
     if depth > 0, let frame = axFrame(element), !frame.contains(point) {
@@ -1839,6 +1883,8 @@ func findTextInWindow(
             return
         }
     }
+
+    guard requireScreenCaptureAccess() else { return }
     
     let tmpFile = "/tmp/mcp_ocr_\(Date().timeIntervalSince1970).jpg"
     let proc = Process()
@@ -1994,6 +2040,8 @@ func waitForText(targetText: String, windowId: Int? = nil, appName: String? = ni
             return
         }
     }
+
+    guard requireScreenCaptureAccess() else { return }
     
     while (CFAbsoluteTimeGetCurrent() - start) < timeoutSeconds {
         let tmpFile = "/tmp/mcp_wait_\(Date().timeIntervalSince1970).jpg"
@@ -2274,6 +2322,8 @@ case "ax_type":
     }
 case "frontmost_app":
     printFrontmostApplication()
+case "capabilities":
+    printCapabilities()
 case "mark_cursor":
     if args.count >= 5, let x = Double(args[3]), let y = Double(args[4]) {
         let path = args[2]
