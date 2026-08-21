@@ -12,6 +12,10 @@ const transport = new StdioClientTransport({
   args: [path.join(repoDir, "server.mjs")],
   cwd: repoDir,
   stderr: "pipe",
+  env: {
+    ...process.env,
+    MACOS_COMPUTER_USE_UNSAFE: "1",
+  },
 });
 const client = new Client({ name: "macos-computer-use-live-smoke", version: "1.0.0" });
 
@@ -71,6 +75,8 @@ try {
   const digitPayload = textJson(digitResult);
   assert.equal(digitPayload.action.action, "AXPress");
   assert.equal(digitPayload.cursorOverlay.status, "ok");
+  assert.equal(digitPayload.execution.contractVersion, 1);
+  assert.equal(digitPayload.execution.accepted, true);
   const clearResult = await call("mouse_click", {
     windowId: calculatorWindows[0].windowId,
     x: 502,
@@ -81,6 +87,7 @@ try {
   const clearPayload = textJson(clearResult);
   assert.equal(clearPayload.action.action, "AXPress");
   assert.equal(clearPayload.cursorOverlay.status, "ok");
+  assert.equal(clearPayload.execution.contractVersion, 1);
   const cleared = textJson(
     await call("find_text", { text: "AC", appName: "Calculator", matchMode: "exact" }),
   );
@@ -119,6 +126,8 @@ try {
   });
   assert.equal(typedA.isError, undefined, JSON.stringify(typedA));
   assert.equal(typedB.isError, undefined, JSON.stringify(typedB));
+  assert.equal(textJson(typedA).execution.verification, "value_readback");
+  assert.equal(textJson(typedB).execution.foregroundPreserved, true);
   const documentDump = (
     await call("run_applescript", {
       script: `tell application "TextEdit"
@@ -148,7 +157,9 @@ end tell`,
     deltaY: -640,
   });
   assert.equal(scrollResult.isError, undefined, JSON.stringify(scrollResult));
-  assert.equal(textJson(scrollResult).cursorOverlay.status, "ok");
+  const scrollPayload = textJson(scrollResult);
+  assert.equal(scrollPayload.cursorOverlay.status, "ok");
+  assert.equal(scrollPayload.execution.contractVersion, 1);
   const privacy = textJson(
     await call("find_text", {
       windowId: settings.windowId,

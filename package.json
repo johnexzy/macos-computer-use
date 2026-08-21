@@ -1,6 +1,6 @@
 {
   "name": "macos-computer-use-mcp",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "type": "module",
   "description": "Native macOS Computer Use MCP server with a live agent cursor, Apple Vision OCR, fail-closed targeting, and Accessibility actions.",
   "main": "server.mjs",

@@ -19,6 +19,8 @@ const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const NATIVE_HELPER = path.join(__dirname, "native_helper");
+const UNSAFE_MODE = process.env.MACOS_COMPUTER_USE_UNSAFE === "1";
+const RESULT_CONTRACT_VERSION = 1;
 
 class AgentCursorOverlay {
   constructor() {
@@ -311,6 +313,10 @@ async function getFrontmostApplication() {
   return callNativeHelper(["frontmost_app"]);
 }
 
+async function getNativeCapabilities() {
+  return callNativeHelper(["capabilities"]);
+}
+
 async function assertTargetStayedBackground(before, target) {
   const after = await getFrontmostApplication();
   if (before.pid !== target.pid && after.pid === target.pid) {
@@ -488,6 +494,47 @@ function targetError(code, message) {
   return error;
 }
 
+function requireUnsafeMode(toolName) {
+  if (UNSAFE_MODE) return;
+  throw targetError(
+    "UNSAFE_MODE_REQUIRED",
+    `${toolName} requires explicit opt-in with MACOS_COMPUTER_USE_UNSAFE=1`,
+  );
+}
+
+async function requireInputPostingAccess(toolName) {
+  const capabilities = await getNativeCapabilities();
+  if (capabilities.permissions?.inputPosting) return;
+  throw targetError(
+    "INPUT_POSTING_PERMISSION_REQUIRED",
+    `${toolName} requires macOS event-synthesizing access. Inspect get_capabilities before retrying.`,
+  );
+}
+
+function executionMetadata({
+  method,
+  verification = "api_acknowledged",
+  foregroundPreserved = null,
+  target = null,
+} = {}) {
+  return {
+    contractVersion: RESULT_CONTRACT_VERSION,
+    accepted: true,
+    verification,
+    method: method || null,
+    foregroundPreserved,
+    target,
+  };
+}
+
+function failedExecutionMetadata() {
+  return {
+    contractVersion: RESULT_CONTRACT_VERSION,
+    accepted: false,
+    verification: "none",
+  };
+}
+
 function normalizeAppName(value) {
   return String(value || "")
     .normalize("NFKC")
@@ -553,6 +600,13 @@ async function captureScreenshot({
   const tmpFile = path.join(os.tmpdir(), `mcp_screen_${Date.now()}.${ext}`);
 
   const windowInfo = await resolveTarget({ windowId, appName, targetApp });
+  const capabilities = await getNativeCapabilities();
+  if (!capabilities.permissions?.screenRecording) {
+    throw targetError(
+      "SCREEN_RECORDING_PERMISSION_REQUIRED",
+      "Screen Recording permission is required. Inspect get_capabilities before retrying.",
+    );
+  }
 
   try {
     const screencaptureArgs = ["-x"];
@@ -662,10 +716,56 @@ const BACKGROUND_TARGET_PROPERTIES = {
   windowId: { type: "integer", minimum: 1, description: "Exact target window ID." },
 };
 
+const READ_ONLY_ANNOTATIONS = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+};
+
+const MUTATING_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: true,
+};
+
+const NAVIGATION_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+};
+
+const LAUNCH_ANNOTATIONS = {
+  ...NAVIGATION_ANNOTATIONS,
+  idempotentHint: true,
+};
+
+const TOOL_ANNOTATIONS = {
+  screenshot: READ_ONLY_ANNOTATIONS,
+  find_text: READ_ONLY_ANNOTATIONS,
+  wait_for_text: READ_ONLY_ANNOTATIONS,
+  list_windows: READ_ONLY_ANNOTATIONS,
+  inspect_accessibility: READ_ONLY_ANNOTATIONS,
+  wait_for_accessibility: READ_ONLY_ANNOTATIONS,
+  get_active_app: READ_ONLY_ANNOTATIONS,
+  get_capabilities: READ_ONLY_ANNOTATIONS,
+  click_text: MUTATING_ANNOTATIONS,
+  set_accessibility_value: MUTATING_ANNOTATIONS,
+  perform_accessibility_action: MUTATING_ANNOTATIONS,
+  mouse_click: MUTATING_ANNOTATIONS,
+  type_text: MUTATING_ANNOTATIONS,
+  press_key: MUTATING_ANNOTATIONS,
+  scroll: MUTATING_ANNOTATIONS,
+  run_applescript: MUTATING_ANNOTATIONS,
+  launch_app: LAUNCH_ANNOTATIONS,
+};
+
 const server = new Server(
   {
     name: "macos-computer-use",
-    version: "2.4.0",
+    version: "2.5.0",
   },
   {
     capabilities: {
@@ -675,8 +775,7 @@ const server = new Server(
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
+  const tools = [
       {
         name: "screenshot",
         description:
@@ -1079,6 +1178,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "get_capabilities",
+        description:
+          "Inspect macOS permission readiness and the active safety policy without requesting any permission.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
         name: "get_active_app",
         description: "Get the frontmost active macOS application name and window title.",
         inputSchema: {
@@ -1097,7 +1205,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["script"],
         },
       },
-    ],
+    ];
+
+  return {
+    tools: tools
+      .filter((tool) => UNSAFE_MODE || tool.name !== "run_applescript")
+      .map((tool) => ({ ...tool, annotations: TOOL_ANNOTATIONS[tool.name] })),
   };
 });
 
@@ -1105,6 +1218,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args = {} } = request.params;
 
   try {
+    if (name === "get_capabilities") {
+      const capabilities = await getNativeCapabilities();
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                ...capabilities,
+                policy: {
+                  unsafeMode: UNSAFE_MODE,
+                  globalInputEnabled: UNSAFE_MODE,
+                  appleScriptEnabled: UNSAFE_MODE,
+                  foregroundActivationEnabled: UNSAFE_MODE,
+                },
+                resultContractVersion: RESULT_CONTRACT_VERSION,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    }
+
     if (name === "screenshot") {
       const { base64, mimeType, display, windowInfo } = await captureScreenshot({
         maxWidth: args.maxWidth !== undefined ? args.maxWidth : 1440,
@@ -1157,6 +1295,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === "click_text") {
       const target = await resolveTarget(args);
+      if (!target) {
+        requireUnsafeMode(name);
+        await requireInputPostingAccess(name);
+      }
       const helperArgs = ["find_text", args.text];
       helperArgs.push("nil", target ? String(target.windowId) : "nil", args.matchMode || "word");
 
@@ -1168,15 +1310,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       if (!parsed.found || !parsed.bestMatch) {
-        return {
-          isError: true,
-          content: [
-            {
-              type: "text",
-              text: `Could not find text "${args.text}" to click. Visible text candidates: ${JSON.stringify(parsed.availableText || [])}`,
-            },
-          ],
-        };
+        throw targetError(
+          "TEXT_NOT_FOUND",
+          `Could not find text "${args.text}" to click. Visible text candidates: ${JSON.stringify(parsed.availableText || [])}`,
+        );
       }
 
       const matches = parsed.allMatches || [];
@@ -1235,6 +1372,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               action,
               cursorOverlay,
               target: target || { scope: "global" },
+              execution: executionMetadata({
+                method: action.action,
+                foregroundPreserved: action.foregroundPreserved ?? null,
+                target: target || { scope: "global" },
+              }),
             },
             null,
             2,
@@ -1337,7 +1479,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         setAccessibilityValue(target, args.selector, args.value),
       );
       return {
-        content: [{ type: "text", text: JSON.stringify(outcome, null, 2) }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                ...outcome,
+                execution: executionMetadata({
+                  method: outcome.result.action,
+                  verification: "value_readback",
+                  foregroundPreserved: outcome.foreground.preserved,
+                  target,
+                }),
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     }
 
@@ -1347,12 +1506,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         performAccessibilityAction(target, args.selector, args.action),
       );
       return {
-        content: [{ type: "text", text: JSON.stringify(outcome, null, 2) }],
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                ...outcome,
+                execution: executionMetadata({
+                  method: outcome.result.action,
+                  foregroundPreserved: outcome.foreground.preserved,
+                  target,
+                }),
+              },
+              null,
+              2,
+            ),
+          },
+        ],
       };
     }
 
     if (name === "mouse_click") {
       const { x, y, pid, windowInfo } = await resolveCoordinatesAndPid(args.x, args.y, args);
+      if (!windowInfo) {
+        requireUnsafeMode(name);
+        await requireInputPostingAccess(name);
+      }
       const button = args.button || "left";
       const count = args.clickCount || 1;
 
@@ -1379,6 +1558,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               action,
               cursorOverlay,
               target: windowInfo || { scope: "global" },
+              execution: executionMetadata({
+                method: action.action,
+                foregroundPreserved: action.foregroundPreserved ?? null,
+                target: windowInfo || { scope: "global" },
+              }),
             },
             null,
             2,
@@ -1413,12 +1597,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ status: "delivered_verified", ...outcome }, null, 2),
+              text: JSON.stringify(
+                {
+                  status: "delivered_verified",
+                  ...outcome,
+                  execution: executionMetadata({
+                    method: outcome.result.action,
+                    verification: "value_readback",
+                    foregroundPreserved: outcome.foreground.preserved,
+                    target,
+                  }),
+                },
+                null,
+                2,
+              ),
             },
           ],
         };
       }
 
+      requireUnsafeMode(name);
+      await requireInputPostingAccess(name);
       const target = await resolveTarget(args);
       const pid = target?.pid || null;
 
@@ -1439,6 +1638,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 status: "delivered_unverified",
                 action,
                 target: target || { scope: "active_app" },
+                execution: executionMetadata({
+                  method: action.action,
+                  target: target || { scope: "active_app" },
+                }),
               },
               null,
               2,
@@ -1467,12 +1670,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ status: "delivered", ...outcome }, null, 2),
+              text: JSON.stringify(
+                {
+                  status: "delivered",
+                  ...outcome,
+                  execution: executionMetadata({
+                    method: outcome.result.action,
+                    foregroundPreserved: outcome.foreground.preserved,
+                    target,
+                  }),
+                },
+                null,
+                2,
+              ),
             },
           ],
         };
       }
 
+      requireUnsafeMode(name);
+      await requireInputPostingAccess(name);
       const rawKey = args.key.toLowerCase();
       const modifiers = args.modifiers || [];
       const keyCode = KEY_CODES[rawKey];
@@ -1480,7 +1697,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (modifiers.length === 0 && [...args.key].length === 1) {
           const action = await callNativeHelper(["type_text", args.key]);
           return {
-            content: [{ type: "text", text: JSON.stringify(action, null, 2) }],
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    ...action,
+                    execution: executionMetadata({
+                      method: action.action,
+                      target: { scope: "active_app" },
+                    }),
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
           };
         }
         throw targetError("UNSUPPORTED_KEY", `native key delivery does not support "${args.key}"`);
@@ -1494,7 +1726,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [
           {
             type: "text",
-            text: JSON.stringify(action, null, 2),
+            text: JSON.stringify(
+              {
+                ...action,
+                execution: executionMetadata({
+                  method: action.action,
+                  target: { scope: "active_app" },
+                }),
+              },
+              null,
+              2,
+            ),
           },
         ],
       };
@@ -1502,6 +1744,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === "scroll") {
       const { x, y, pid, windowInfo } = await resolveCoordinatesAndPid(args.x, args.y, args);
+      if (!windowInfo) {
+        requireUnsafeMode(name);
+        await requireInputPostingAccess(name);
+      }
       const dx = args.deltaX || 0;
       const scrollArgs = windowInfo
         ? [
@@ -1526,6 +1772,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               action,
               cursorOverlay,
               target: windowInfo || { scope: "global" },
+              execution: executionMetadata({
+                method: action.action,
+                foregroundPreserved: action.foregroundPreserved ?? null,
+                target: windowInfo || { scope: "global" },
+              }),
               },
               null,
               2,
@@ -1537,6 +1788,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === "launch_app") {
       const activate = args.activate === true;
+      if (activate) requireUnsafeMode(name);
       const before = activate ? null : await getFrontmostApplication();
       const launched = await launchApplication(args.appName, { activate });
       const foreground = activate
@@ -1550,6 +1802,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               {
                 ...launched,
                 foregroundPreserved: activate ? null : before.pid === foreground.pid,
+                execution: executionMetadata({
+                  method: "/usr/bin/open",
+                  verification: "window_observed",
+                  foregroundPreserved: activate ? null : before.pid === foreground.pid,
+                  target: launched.target,
+                }),
               },
               null,
               2,
@@ -1580,6 +1838,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "run_applescript") {
+      requireUnsafeMode(name);
       const res = await runAppleScript(args.script);
       if (res.error) {
         return {
@@ -1589,9 +1848,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify(
                 {
+                  status: "error",
                   code: "APPLESCRIPT_FAILED",
                   error: res.error,
                   exitCode: res.exitCode,
+                  execution: failedExecutionMetadata(),
                 },
                 null,
                 2,
@@ -1602,6 +1863,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       return {
         content: [{ type: "text", text: res.output || "Script executed." }],
+        structuredContent: {
+          execution: executionMetadata({
+            method: "/usr/bin/osascript",
+            verification: "process_exit_zero",
+          }),
+        },
       };
     }
 
@@ -1614,9 +1881,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           type: "text",
           text: JSON.stringify(
             {
+              status: "error",
               code: error.code || "TOOL_FAILED",
               tool: name,
               error: error.message,
+              execution: failedExecutionMetadata(),
             },
             null,
             2,

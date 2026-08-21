@@ -13,12 +13,16 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const repoDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const execFileAsync = promisify(execFile);
 
-async function withClient(run) {
+async function withClient(run, { unsafe = false } = {}) {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [path.join(repoDir, "server.mjs")],
     cwd: repoDir,
     stderr: "pipe",
+    env: {
+      ...process.env,
+      MACOS_COMPUTER_USE_UNSAFE: unsafe ? "1" : "0",
+    },
   });
   const client = new Client({ name: "macos-computer-use-tests", version: "1.0.0" });
   await client.connect(transport);
@@ -42,7 +46,7 @@ test("invalid window screenshot fails closed without returning an image", async 
   });
 });
 
-test("invalid AppleScript is an MCP error", async () => {
+test("invalid AppleScript is an MCP error when unsafe mode is enabled", async () => {
   await withClient(async (client) => {
     const result = await client.callTool({
       name: "run_applescript",
@@ -51,7 +55,7 @@ test("invalid AppleScript is an MCP error", async () => {
 
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /APPLESCRIPT_FAILED/);
-  });
+  }, { unsafe: true });
 });
 
 test("relative coordinates require an explicit target", async () => {
@@ -75,12 +79,69 @@ test("background automation exposes semantic Accessibility tools", async () => {
     assert.equal(names.has("wait_for_accessibility"), true);
     assert.equal(names.has("set_accessibility_value"), true);
     assert.equal(names.has("perform_accessibility_action"), true);
+    assert.equal(names.has("get_capabilities"), true);
+    assert.equal(names.has("run_applescript"), false);
+
+    for (const tool of result.tools) {
+      assert.equal(typeof tool.annotations?.readOnlyHint, "boolean", `${tool.name} readOnlyHint`);
+      assert.equal(typeof tool.annotations?.destructiveHint, "boolean", `${tool.name} destructiveHint`);
+      assert.equal(typeof tool.annotations?.idempotentHint, "boolean", `${tool.name} idempotentHint`);
+      assert.equal(typeof tool.annotations?.openWorldHint, "boolean", `${tool.name} openWorldHint`);
+    }
 
     const perform = result.tools.find((tool) => tool.name === "perform_accessibility_action");
     const launch = result.tools.find((tool) => tool.name === "launch_app");
     assert.equal(perform.inputSchema.properties.action.enum.includes("focus"), true);
     assert.equal(launch.inputSchema.properties.activate.default, false);
   });
+});
+
+test("capability inspection is read-only and does not request permission", async () => {
+  await withClient(async (client) => {
+    const result = await client.callTool({ name: "get_capabilities", arguments: {} });
+    assert.equal(result.isError, undefined, JSON.stringify(result));
+
+    const capabilities = JSON.parse(result.content[0].text);
+    assert.equal(capabilities.status, "ok");
+    assert.equal(capabilities.permissionPromptRequested, false);
+    assert.equal(typeof capabilities.permissions.accessibility, "boolean");
+    assert.equal(typeof capabilities.permissions.screenRecording, "boolean");
+    assert.equal(typeof capabilities.permissions.inputPosting, "boolean");
+    assert.equal(capabilities.policy.unsafeMode, false);
+    assert.equal(capabilities.policy.globalInputEnabled, false);
+    assert.equal(capabilities.policy.appleScriptEnabled, false);
+    assert.equal(capabilities.policy.foregroundActivationEnabled, false);
+  });
+});
+
+test("unsafe tools and global input require explicit opt-in", async () => {
+  await withClient(async (client) => {
+    const result = await client.callTool({
+      name: "press_key",
+      arguments: { key: "return", executionMode: "foreground_allowed" },
+    });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /UNSAFE_MODE_REQUIRED/);
+
+    const activation = await client.callTool({
+      name: "launch_app",
+      arguments: { appName: "Finder", activate: true },
+    });
+    assert.equal(activation.isError, true);
+    assert.match(activation.content[0].text, /UNSAFE_MODE_REQUIRED/);
+
+    const failure = JSON.parse(result.content[0].text);
+    assert.equal(failure.status, "error");
+    assert.equal(failure.execution.contractVersion, 1);
+    assert.equal(failure.execution.accepted, false);
+  });
+
+  await withClient(async (client) => {
+    const tools = await client.listTools();
+    assert.equal(tools.tools.some((tool) => tool.name === "run_applescript"), true);
+    const capabilities = await client.callTool({ name: "get_capabilities", arguments: {} });
+    assert.equal(JSON.parse(capabilities.content[0].text).policy.unsafeMode, true);
+  }, { unsafe: true });
 });
 
 test("background-required key presses fail closed without a target", async () => {
