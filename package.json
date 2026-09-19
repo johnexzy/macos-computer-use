@@ -10,17 +10,21 @@
   },
   "files": [
     "server.mjs",
+    "dist",
+    "native",
     "native_helper",
-    "native_helper.swift",
+    "scripts",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "swiftc -O native_helper.swift -o native_helper",
-    "build:release": "./scripts/build-universal.sh",
-    "test": "node --test test/*.test.mjs",
-    "test:background": "node test/background-smoke.mjs",
-    "test:live": "node test/live-smoke.mjs",
+    "build": "npm run build:swift && npm run build:ts",
+    "build:swift": "swiftc -O native/*.swift native/*/*.swift -o native_helper",
+    "build:ts": "tsc",
+    "build:release": "./scripts/build-universal.sh && npm run build:ts",
+    "test": "npm run build:ts && node --test test/*.test.mjs",
+    "test:background": "npm run build:ts && node test/background-smoke.mjs",
+    "test:live": "npm run build:ts && node test/live-smoke.mjs",
     "prepack": "npm run build:release",
     "prepublishOnly": "npm test",
     "start": "node server.mjs"
@@ -58,5 +62,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2"
   }
 }
