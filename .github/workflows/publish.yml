@@ -4,6 +4,18 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type (auto, patch, minor, major)'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
@@ -21,6 +33,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -32,33 +46,59 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Resolve and bump version
+        id: package
+        env:
+          INPUT_BUMP: ${{ github.event.inputs.bump || 'auto' }}
+        shell: bash
+        run: |
+          package_name=$(node -p "require('./package.json').name")
+          current_version=$(node -p "require('./package.json').version")
+          bumped=false
+
+          echo "Current package: ${package_name}@${current_version}"
+          echo "Requested bump mode: ${INPUT_BUMP}"
+
+          if [ "$INPUT_BUMP" != "auto" ] && [ -n "$INPUT_BUMP" ]; then
+            echo "Performing manual ${INPUT_BUMP} bump..."
+            npm version "$INPUT_BUMP" --no-git-tag-version
+            bumped=true
+          elif npm view "${package_name}@${current_version}" version >/dev/null 2>&1; then
+            echo "${package_name}@${current_version} is already published on npm."
+            echo "Auto-bumping patch version to avoid version collision..."
+            npm version patch --no-git-tag-version
+            bumped=true
+          else
+            echo "Version ${current_version} is not yet published on npm. Using specified version."
+          fi
+
+          final_version=$(node -p "require('./package.json').version")
+          echo "Target publish version: ${final_version}"
+
+          echo "name=${package_name}" >> "$GITHUB_OUTPUT"
+          echo "version=${final_version}" >> "$GITHUB_OUTPUT"
+          echo "bumped=${bumped}" >> "$GITHUB_OUTPUT"
+
       - name: Build universal native helper
         run: npm run build:release
 
       - name: Run tests
         run: npm test
 
-      - name: Check package version
-        id: package
+      - name: Publish package
+        run: npm publish
+
+      - name: Commit version bump
+        if: steps.package.outputs.bumped == 'true'
+        env:
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
         shell: bash
         run: |
-          package_name=$(node -p "require('./package.json').name")
-          package_version=$(node -p "require('./package.json').version")
-
-          echo "name=${package_name}" >> "$GITHUB_OUTPUT"
-          echo "version=${package_version}" >> "$GITHUB_OUTPUT"
-
-          if npm view "${package_name}@${package_version}" version >/dev/null 2>&1; then
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "${package_name}@${package_version} is already published."
-          else
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "Publishing ${package_name}@${package_version}."
-          fi
-
-      - name: Publish package
-        if: steps.package.outputs.publish == 'true'
-        run: npm publish
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore(release): v${PACKAGE_VERSION} [skip ci]"
+          git push origin HEAD:main
 
       - name: Create GitHub release
         env:
@@ -84,7 +124,7 @@ jobs:
           if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
             release_args+=(--verify-tag)
           else
-            release_args+=(--target "$GITHUB_SHA")
+            release_args+=(--target "main")
           fi
 
           gh release create "${release_args[@]}"

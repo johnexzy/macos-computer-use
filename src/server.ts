@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -51,11 +52,23 @@ export function createToolRegistry(): ToolRegistry {
   return registry;
 }
 
+function getPackageVersion(): string {
+  try {
+    const pkg = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf-8")
+    );
+    return pkg.version || "3.0.0";
+  } catch {
+    return "3.0.0";
+  }
+}
+
 export function createMcpServer(registry: ToolRegistry = createToolRegistry()): Server {
+  const version = getPackageVersion();
   const server = new Server(
     {
       name: "macos-computer-use",
-      version: "2.5.0",
+      version,
     },
     {
       capabilities: {
