@@ -4,4 +4,5 @@ native_helper
 *.log
 *.tmp
 /tmp/
+dist/
 .env
