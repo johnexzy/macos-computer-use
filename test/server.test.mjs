@@ -254,3 +254,32 @@ test("live cursor overlay accepts movement and feedback commands", { timeout: 50
     if (child.exitCode === null) child.kill();
   }
 });
+
+test("open_url is registered and rejects invalid protocol", async () => {
+  await withClient(async (client) => {
+    const tools = await client.listTools();
+    assert.equal(tools.tools.some((tool) => tool.name === "open_url"), true);
+
+    const invalidResult = await client.callTool({
+      name: "open_url",
+      arguments: { url: "javascript:alert(1)" },
+    });
+    assert.equal(invalidResult.isError, true);
+    assert.match(invalidResult.content[0].text, /INVALID_URL/);
+  });
+});
+
+test("list_windows supports curated default and includeAll flag", async () => {
+  await withClient(async (client) => {
+    const result = await client.callTool({
+      name: "list_windows",
+      arguments: {},
+    });
+    assert.equal(result.isError, undefined);
+    const windows = JSON.parse(result.content[0].text);
+    assert.ok(Array.isArray(windows));
+    // Curated list should not include AutoFill or CoreServices daemons
+    assert.ok(!windows.some((w) => w.appName === "AutoFill"));
+  });
+});
+

@@ -37,10 +37,9 @@ export class WindowService {
     return null;
   }
 
-  static async listAllWindows(appName: string | null = null): Promise<WindowInfo[]> {
+  static async listAllWindows(appName: string | null = null, includeAll: boolean = false): Promise<WindowInfo[]> {
     try {
-      const args = ["list_windows"];
-      if (appName) args.push(appName);
+      const args = ["list_windows", appName || "nil", includeAll ? "true" : "false"];
       return await NativeBridge.call(args);
     } catch {
       return [];

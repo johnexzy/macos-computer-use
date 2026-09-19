@@ -2,7 +2,7 @@ import Foundation
 import CoreGraphics
 import AppKit
 
-func listWindows(targetApp: String? = nil, minSize: Double = 80.0) {
+func listWindows(targetApp: String? = nil, minSize: Double = 80.0, includeAll: Bool = false) {
     let options = CGWindowListOption(arrayLiteral: .optionAll)
     guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
         printJson(["windows": []])
@@ -10,6 +10,10 @@ func listWindows(targetApp: String? = nil, minSize: Double = 80.0) {
     }
     
     var results: [[String: Any]] = []
+    let ignoredInternalOwners: Set<String> = [
+        "Dock", "Window Server", "SystemUIServer", "Control Center",
+        "Notification Center", "Spotlight", "TextInputMenuAgent", "AutoFill"
+    ]
     
     for win in windowList {
         let owner = win[kCGWindowOwnerName as String] as? String ?? ""
@@ -26,7 +30,22 @@ func listWindows(targetApp: String? = nil, minSize: Double = 80.0) {
         let x = boundsDict["X"] as? Double ?? 0
         let y = boundsDict["Y"] as? Double ?? 0
         
-        if layer == 0 && width >= minSize && height >= minSize {
+        if layer == 0 {
+            if !includeAll {
+                // Must be on screen
+                if !isOnScreen { continue }
+                // Filter out system background clutter
+                if ignoredInternalOwners.contains(owner) { continue }
+                // Only include regular user applications
+                if let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy != .regular {
+                    continue
+                }
+                // Filter out tiny popovers and status items
+                if width < 120 || height < 80 { continue }
+            } else {
+                if width < minSize || height < minSize { continue }
+            }
+
             if let target = targetApp, !target.isEmpty {
                 if !owner.localizedCaseInsensitiveContains(target) && !name.localizedCaseInsensitiveContains(target) {
                     continue

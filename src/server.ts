@@ -21,6 +21,7 @@ import { typeTextTool } from "./tools/type-text.tool.js";
 import { pressKeyTool } from "./tools/press-key.tool.js";
 import { scrollTool } from "./tools/scroll.tool.js";
 import { launchAppTool } from "./tools/launch-app.tool.js";
+import { openUrlTool } from "./tools/open-url.tool.js";
 import { getCapabilitiesTool } from "./tools/get-capabilities.tool.js";
 import { getActiveAppTool } from "./tools/get-active-app.tool.js";
 import { runAppleScriptTool } from "./tools/run-applescript.tool.js";
@@ -42,6 +43,7 @@ export function createToolRegistry(): ToolRegistry {
   registry.register(pressKeyTool);
   registry.register(scrollTool);
   registry.register(launchAppTool);
+  registry.register(openUrlTool);
   registry.register(getCapabilitiesTool);
   registry.register(getActiveAppTool);
 

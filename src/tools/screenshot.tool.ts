@@ -15,6 +15,7 @@ const screenshotSchema = z.object({
       y: z.number(),
     })
     .optional(),
+  extractText: z.boolean().optional(),
 });
 
 type ScreenshotInput = z.infer<typeof screenshotSchema>;
@@ -58,22 +59,33 @@ export const screenshotTool: ToolDefinition<ScreenshotInput> = {
         description:
           "Optional cursor coordinates. For a window screenshot these are window-local logical points; for a display screenshot they are screen logical points.",
       },
+      extractText: {
+        type: "boolean",
+        description:
+          "If true, runs high-speed Apple Vision OCR on the capture and returns all recognized text lines directly in the text response.",
+      },
     },
   },
   schema: screenshotSchema,
   execute: async (args) => {
-    const { base64, mimeType, display, windowInfo } = await ScreenCaptureService.captureScreenshot({
-      maxWidth: args.maxWidth !== undefined ? args.maxWidth : 1440,
-      format: args.format || "jpeg",
-      cursor: args.cursor,
-      windowId: args.windowId,
-      appName: args.appName,
-      targetApp: args.targetApp,
-    });
+    const { base64, mimeType, display, windowInfo, extractedText } =
+      await ScreenCaptureService.captureScreenshot({
+        maxWidth: args.maxWidth !== undefined ? args.maxWidth : 1440,
+        format: args.format || "jpeg",
+        cursor: args.cursor,
+        windowId: args.windowId,
+        appName: args.appName,
+        targetApp: args.targetApp,
+        extractText: args.extractText,
+      });
 
     let descriptionText = `Screenshot captured. Display: ${display.width}x${display.height} (scale: ${display.scale}x).`;
     if (windowInfo) {
       descriptionText = `Target window captured in background: "${windowInfo.appName}" (ID: ${windowInfo.windowId}, Title: "${windowInfo.title}", Bounds: ${windowInfo.bounds.width}x${windowInfo.bounds.height} at (${windowInfo.bounds.x}, ${windowInfo.bounds.y})).`;
+    }
+
+    if (extractedText && extractedText.length > 0) {
+      descriptionText += `\n\n--- Recognized Text (${extractedText.length} elements) ---\n` + extractedText.join("\n");
     }
 
     return {

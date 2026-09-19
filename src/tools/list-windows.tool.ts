@@ -5,6 +5,12 @@ import type { ToolDefinition } from "../core/tool-registry.js";
 
 const listWindowsSchema = z.object({
   appName: z.string().optional(),
+  includeAll: z
+    .boolean()
+    .optional()
+    .describe(
+      "Include background daemons, accessory status items, and off-screen windows (default: false, returns only user-facing GUI application windows)."
+    ),
 });
 
 type ListWindowsInput = z.infer<typeof listWindowsSchema>;
@@ -12,7 +18,7 @@ type ListWindowsInput = z.infer<typeof listWindowsSchema>;
 export const listWindowsTool: ToolDefinition<ListWindowsInput> = {
   name: "list_windows",
   description:
-    "List visible application windows on macOS, including window IDs, owner app names, process IDs (PID), window titles, and screen bounds in front-to-back Z-order.",
+    "List visible application windows on macOS, including window IDs, owner app names, process IDs (PID), window titles, and screen bounds in front-to-back Z-order. By default, returns only active user-facing applications (excludes system daemons and menu bar popovers).",
   annotations: READ_ONLY_ANNOTATIONS,
   inputSchema: {
     type: "object",
@@ -21,11 +27,19 @@ export const listWindowsTool: ToolDefinition<ListWindowsInput> = {
         type: "string",
         description: "Optional filter by application name (case-insensitive substring).",
       },
+      includeAll: {
+        type: "boolean",
+        description:
+          "Include background daemons, accessory status items, and off-screen windows (default: false).",
+      },
     },
   },
   schema: listWindowsSchema,
   execute: async (args) => {
-    const windows = await WindowService.listAllWindows(args.appName || null);
+    const windows = await WindowService.listAllWindows(
+      args.appName || null,
+      args.includeAll || false
+    );
     return {
       content: [
         {

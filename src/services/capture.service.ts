@@ -18,6 +18,7 @@ export interface CaptureScreenshotOptions {
   windowId?: number | null;
   appName?: string | null;
   targetApp?: string | null;
+  extractText?: boolean;
 }
 
 export interface ScreenshotResult {
@@ -25,6 +26,7 @@ export interface ScreenshotResult {
   mimeType: string;
   display: DisplayInfo;
   windowInfo: WindowTarget | null;
+  extractedText?: string[];
 }
 
 export class ScreenCaptureService {
@@ -35,6 +37,7 @@ export class ScreenCaptureService {
     windowId = null,
     appName = null,
     targetApp = null,
+    extractText = false,
   }: CaptureScreenshotOptions = {}): Promise<ScreenshotResult> {
     const ext = format === "png" ? "png" : "jpg";
     const mimeType = format === "png" ? "image/png" : "image/jpeg";
@@ -86,6 +89,24 @@ export class ScreenCaptureService {
         } catch {}
       }
 
+      // Extract OCR text if requested
+      let extractedText: string[] | undefined = undefined;
+      if (extractText) {
+        try {
+          const baseWidth = windowInfo?.bounds?.width || display.width;
+          const ocrRes = await NativeBridge.call([
+            "ocr",
+            tmpFile,
+            "nil",
+            String(baseWidth),
+            "false",
+          ]);
+          if (ocrRes && Array.isArray(ocrRes.elements)) {
+            extractedText = ocrRes.elements.map((el: any) => el.text).filter(Boolean);
+          }
+        } catch {}
+      }
+
       // Downscale if requested
       if (maxWidth && maxWidth > 0) {
         await execFileAsync("/usr/bin/sips", ["-Z", String(maxWidth), tmpFile]);
@@ -99,6 +120,7 @@ export class ScreenCaptureService {
         mimeType,
         display,
         windowInfo,
+        extractedText,
       };
     } finally {
       await fs.unlink(tmpFile).catch(() => {});

@@ -13,8 +13,9 @@ switch command {
 case "size":
     getDisplaySize()
 case "list_windows":
-    let target = args.count >= 3 ? args[2] : nil
-    listWindows(targetApp: target)
+    let target = args.count >= 3 && args[2] != "nil" ? args[2] : nil
+    let includeAll = args.count >= 4 ? (args[3] == "true" || args[3] == "1") : false
+    listWindows(targetApp: target, includeAll: includeAll)
 case "find_window":
     if args.count >= 3 {
         findWindow(targetApp: args[2])
@@ -33,8 +34,9 @@ case "ocr":
     if args.count >= 3 {
         let path = args[2]
         let query = args.count >= 4 && args[3] != "nil" ? args[3] : nil
-        let lWidth = args.count >= 5 ? Double(args[4]) : nil
-        ocrCommand(imagePath: path, query: query, logicalWidth: lWidth)
+        let lWidth = args.count >= 5 && args[4] != "nil" ? Double(args[4]) : nil
+        let fast = args.count >= 6 ? (args[5] == "true" || args[5] == "1") : false
+        ocrCommand(imagePath: path, query: query, logicalWidth: lWidth, fast: fast)
     } else {
         printJson(["error": "Missing image path for ocr"])
         exit(1)

@@ -3,7 +3,7 @@ import CoreGraphics
 import AppKit
 import Vision
 
-func recognizeTextInImage(imagePath: String, logicalWidth: Double? = nil) -> [[String: Any]] {
+func recognizeTextInImage(imagePath: String, logicalWidth: Double? = nil, fast: Bool = false) -> [[String: Any]] {
     guard let image = NSImage(contentsOfFile: imagePath),
           let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
         return []
@@ -52,15 +52,15 @@ func recognizeTextInImage(imagePath: String, logicalWidth: Double? = nil) -> [[S
         }
     }
     
-    request.recognitionLevel = .accurate
-    request.usesLanguageCorrection = true
+    request.recognitionLevel = fast ? .fast : .accurate
+    request.usesLanguageCorrection = false
     
     try? requestHandler.perform([request])
     return results
 }
 
-func ocrCommand(imagePath: String, query: String? = nil, logicalWidth: Double? = nil) {
-    let allText = recognizeTextInImage(imagePath: imagePath, logicalWidth: logicalWidth)
+func ocrCommand(imagePath: String, query: String? = nil, logicalWidth: Double? = nil, fast: Bool = false) {
+    let allText = recognizeTextInImage(imagePath: imagePath, logicalWidth: logicalWidth, fast: fast)
     
     if let q = query, !q.isEmpty {
         let filtered = allText.filter { item in
@@ -366,7 +366,7 @@ func waitForText(targetText: String, windowId: Int? = nil, appName: String? = ni
             continue
         }
         
-        let elements = recognizeTextInImage(imagePath: tmpFile, logicalWidth: windowBounds?["width"])
+        let elements = recognizeTextInImage(imagePath: tmpFile, logicalWidth: windowBounds?["width"], fast: true)
         try? FileManager.default.removeItem(atPath: tmpFile)
         
         for item in elements {
