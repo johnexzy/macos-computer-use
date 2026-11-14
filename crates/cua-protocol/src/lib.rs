@@ -47,6 +47,11 @@ choices!(Verification {
     Mismatch,
     Unverified
 });
+choices!(DeliveryRoute {
+    AxSetValue,
+    AxSelectedText,
+    AxPress
+});
 choices!(Coverage {
     Complete,
     Partial,
@@ -195,7 +200,7 @@ record!(Screenshot {
 });
 record!(Element {
     reference: String, role: String, label: Option<String>, value: Option<String>,
-    bounds: Rect, enabled: bool, actions: Vec<ElementAction>
+    bounds: Rect, enabled: bool, actions: Vec<ElementAction>, identifier: Option<String>
 });
 record!(ObserveRequest {
     target: TargetKey,
@@ -284,7 +289,7 @@ record!(CheckEvidence {
 });
 record!(StepReceipt {
     action_id: String, delivery: Delivery, verification: Verification,
-    reason: Option<ReceiptReason>, evidence: Vec<CheckEvidence>
+    reason: Option<ReceiptReason>, evidence: Vec<CheckEvidence>, route: Option<DeliveryRoute>
 });
 record!(ActResult {
     observation_id: String, steps: Vec<StepReceipt>, remaining_steps: u16, stop_reason: StopReason
@@ -436,20 +441,43 @@ fn channel_interval(
     )
 }
 fn expectation(step: &ActionStep, receipt: &StepReceipt, settled: bool) -> Result<(), String> {
-    if let Some(expected) = &step.expect {
-        let matches = |matched| {
+    if let Some(route) = receipt.route {
+        require(
+            matches!(
+                (&step.operation, route),
+                (Operation::SetValue(_), DeliveryRoute::AxSetValue)
+                    | (Operation::TypeText(_), DeliveryRoute::AxSelectedText)
+                    | (Operation::Press(_), DeliveryRoute::AxPress)
+            ),
+            "receipt route does not match operation",
+        )?;
+    }
+    let mut required = Vec::new();
+    if let Operation::SetValue(value) = &step.operation {
+        required.push(Condition::ValueEquals(ValueCondition {
+            element_ref: value.element_ref.clone(),
+            value: value.value.clone(),
+        }));
+    }
+    if let Some(expected) = &step.expect
+        && !required.contains(expected)
+    {
+        required.push(expected.clone());
+    }
+    if !required.is_empty() {
+        let matches = |condition: &Condition, matched| {
             receipt
                 .evidence
                 .iter()
-                .any(|e| e.condition == *expected && e.matched == matched)
+                .any(|e| e.condition == *condition && e.matched == matched)
         };
         match receipt.verification {
             Verification::Confirmed => require(
-                matches(true),
+                required.iter().all(|condition| matches(condition, true)),
                 "confirmation does not match requested expectation",
             )?,
             Verification::Mismatch => require(
-                matches(false),
+                required.iter().any(|condition| matches(condition, false)),
                 "mismatch does not match requested expectation",
             )?,
             Verification::Unverified => {
@@ -707,14 +735,6 @@ impl ActResult {
                 require(
                     index + 1 == self.steps.len() && self.stop_reason == expected,
                     "failed step must be terminal with matching stop reason",
-                )?;
-            }
-            if step.delivery == Delivery::NotDispatched
-                && step.verification == Verification::Confirmed
-            {
-                require(
-                    step.reason == Some(ReceiptReason::AlreadySatisfied),
-                    "undispatched confirmation needs alreadySatisfied",
                 )?;
             }
             if step.delivery == Delivery::Unknown {

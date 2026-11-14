@@ -53,36 +53,35 @@ try:
     epoch = hello(process)
     caps = call(process, request("cap", "capabilities", {}, epoch))
     assert caps["epoch"] == epoch
-    assert caps["body"]["data"]["actions"] == []
     assert caps["body"]["data"]["mode"] == "backgroundRequired"
     permissions = caps["body"]["data"]["permissions"]
     assert all(isinstance(value, bool) for value in permissions.values())
+    assert set(caps["body"]["data"]["actions"]) == ({"setValue", "typeText", "press"} if permissions["accessibility"] else set())
     targets = call(process, request("targets", "targets", {"bundleId": None}, epoch))["body"]["data"]
     assert len(targets["targets"]) <= 256
     filtered = call(process, request("filtered", "targets", {"bundleId": "nonexistent.cua.fixture"}, epoch))
     assert filtered["body"]["data"]["targets"] == []
-    if targets["targets"]:
-        target = targets["targets"][0]["key"]
-        observation = call(process, request("observe", "observe", {"target": target,
-            "includeValues": False, "includeScreenshot": False}, epoch))["body"]["data"]
-        assert observation["accessibility"] == "unavailable"
-        assert observation["elements"] == [] and observation["screenshot"] is None
-        assert observation["target"] == target
-        screenshot = call(process, request("screenshot", "observe", {"target": target,
-            "includeValues": False, "includeScreenshot": True}, epoch))
-        assert screenshot["body"]["data"]["code"] == "unsupported"
-        actions = [{"actionId": name, "operation": {"kind": "press", "params": {"elementRef": "not-a-live-element"}},
-                    "precondition": None, "expect": None} for name in ("first", "second")]
-        result = call(process, request("act", "act", {"grantId": "smoke-grant", "observationId": observation["observationId"],
-            "target": target, "steps": actions}, epoch))["body"]["data"]
-        assert result["stopReason"] == "unsupported"
-        assert result["steps"][0]["delivery"] == "not_dispatched" and result["remainingSteps"] == 1
+    # Do not inspect arbitrary user windows in this read-only lifecycle smoke.
+    target = {"pid": 2147483647, "windowId": 4294967295}
+    rejected = call(process, request("observe", "observe", {"target": target,
+        "includeValues": False, "includeScreenshot": False}, epoch))
+    assert rejected["body"]["result"] == "error"
+    assert rejected["body"]["data"]["code"] == "targetNotFound"
+    screenshot = call(process, request("screenshot", "observe", {"target": target,
+        "includeValues": False, "includeScreenshot": True}, epoch))
+    assert screenshot["body"]["data"]["code"] == "unsupported"
+    actions = [{"actionId": name, "operation": {"kind": "press", "params": {"elementRef": "not-a-live-element"}},
+                "precondition": None, "expect": None} for name in ("first", "second")]
+    result = call(process, request("act", "act", {"grantId": "smoke-grant", "observationId": "not-a-live-observation",
+        "target": target, "steps": actions}, epoch))["body"]["data"]
+    assert result["stopReason"] == "unsupported"
+    assert result["steps"][0]["delivery"] == "not_dispatched" and result["remainingSteps"] == 1
     stale = call(process, request("stale", "capabilities", {}, "old-epoch"))
     assert stale["body"]["data"]["code"] == "staleEpoch"
     process.stdin.close()
     process.wait(timeout=5)
     assert process.returncode == 0 and process.stderr.read() == b""
-    checks.append("persistent native preflight/targets/lifecycle observation/unsupported actions/EOF")
+    checks.append("persistent native preflight/targets/invalid-target refusal/unsupported actions/EOF")
 finally:
     if process.poll() is None:
         process.kill()

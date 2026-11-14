@@ -29,12 +29,35 @@ final class FieldRecord {
 @MainActor
 final class FixtureTextField: NSTextField {
     var onAccessibilityWrite: ((String) -> Void)?
+    var selectedRange = NSRange(location: 0, length: 0)
 
     override func accessibilityTitle() -> String? { "Value" }
 
     override func setAccessibilityValue(_ accessibilityValue: Any?) {
         guard let value = accessibilityValue as? String else { return }
         onAccessibilityWrite?(value)
+    }
+
+    override func accessibilitySelectedTextRange() -> NSRange { selectedRange }
+    override func setAccessibilitySelectedTextRange(_ range: NSRange) {
+        let length = (stringValue as NSString).length
+        guard range.location >= 0, range.length >= 0, range.location <= length,
+              range.length <= length - range.location else { return }
+        selectedRange = range
+    }
+    override func accessibilitySelectedText() -> String? {
+        let value = stringValue as NSString
+        guard selectedRange.location <= value.length, selectedRange.length <= value.length - selectedRange.location else { return nil }
+        return value.substring(with: selectedRange)
+    }
+    override func setAccessibilitySelectedText(_ text: String?) {
+        guard let text, isEditable, isEnabled else { return }
+        let value = stringValue as NSString
+        guard selectedRange.location <= value.length, selectedRange.length <= value.length - selectedRange.location else { return }
+        let replacement = value.replacingCharacters(in: selectedRange, with: text)
+        let insertionEnd = selectedRange.location + (text as NSString).length
+        onAccessibilityWrite?(replacement)
+        if stringValue == replacement { selectedRange = NSRange(location: insertionEnd, length: 0) }
     }
 }
 
@@ -46,6 +69,8 @@ final class WindowRecord {
     var stack: NSStackView!
     var fields: [String: FieldRecord] = [:]
     var order = ["first", "second"]
+    var button: NSButton!
+    var pressCount = 0
 
     init(key: String) { self.key = key }
 }
@@ -85,6 +110,7 @@ final class FixtureController: NSObject, NSApplicationDelegate {
 
     func makeWindow(_ record: WindowRecord, title: String, frame: NSRect) {
         let window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.animationBehavior = .none
         window.setFrame(frame, display: false)
         window.title = title
         window.isReleasedWhenClosed = false
@@ -107,8 +133,18 @@ final class FixtureController: NSObject, NSApplicationDelegate {
             let field = record.fields[control]!
             makeControl(field, in: record)
         }
+        let button = NSButton(title: "Press", target: self, action: #selector(pressButton(_:)))
+        button.setAccessibilityIdentifier("\(record.key).press")
+        record.button = button
+        stack.addArrangedSubview(button)
         // Ordering a window is deliberately separate from making it key or activating the app.
         window.orderBack(nil)
+    }
+
+    @objc func pressButton(_ sender: NSButton) {
+        guard let record = windows.values.first(where: { $0.button === sender }) else { return }
+        revision += 1
+        record.pressCount += 1
     }
 
     func makeControl(_ field: FieldRecord, in window: WindowRecord) {
@@ -195,6 +231,7 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                     "title": window.window.title,
                     "visible": window.window.isVisible,
                     "keyWindow": window.window.isKeyWindow,
+                    "pressCount": window.pressCount,
                     "frame": ["x": frame.origin.x, "y": frame.origin.y, "width": frame.width, "height": frame.height],
                     "order": window.order,
                     "controls": window.order.map { key -> [String: Any] in
@@ -208,6 +245,8 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                             "delayMs": field.delayMs,
                             "modelValue": field.modelValue,
                             "controlValue": field.field.stringValue,
+                            "enabled": field.field.isEnabled,
+                            "selection": ["location": field.field.selectedRange.location, "length": field.field.selectedRange.length],
                             "attempts": field.attempts,
                             "appliedWrites": field.appliedWrites,
                             "lastRequestedValue": field.lastRequestedValue as Any? ?? NSNull(),
@@ -248,6 +287,21 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                             guard (0...10_000).contains(delay) else { throw FixtureError("delayMs must be between 0 and 10000") }
                             field.delayMs = delay
                         }
+                        if let enabled = request["enabled"] as? Bool { field.field.isEnabled = enabled }
+                        if let value = request["value"] as? String {
+                            field.pending = [:]
+                            field.modelValue = value
+                            field.field.stringValue = value
+                            field.field.selectedRange = NSRange(location: 0, length: 0)
+                        }
+                        if let selection = request["selection"] as? [String: Int],
+                           let location = selection["location"], let length = selection["length"] {
+                            let count = (field.field.stringValue as NSString).length
+                            guard location >= 0, length >= 0, location <= count, length <= count - location else {
+                                throw FixtureError("selection exceeds UTF-16 value bounds")
+                            }
+                            field.field.selectedRange = NSRange(location: location, length: length)
+                        }
                     }
                     if let title = request["title"] as? String { window.window.title = title }
                     if let raw = request["frame"] as? [String: Double],
@@ -257,12 +311,10 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                     }
                 case "reorder":
                     window.order.reverse()
-                    for control in window.order {
-                        let row = window.fields[control]!.row!
-                        window.stack.removeArrangedSubview(row)
-                        row.removeFromSuperview()
+                    for (index, control) in window.order.enumerated() {
+                        window.stack.insertArrangedSubview(window.fields[control]!.row, at: index)
                     }
-                    for control in window.order { window.stack.addArrangedSubview(window.fields[control]!.row) }
+                    window.stack.layoutSubtreeIfNeeded()
                 case "recreate":
                     let control = request["control"] as? String ?? "first"
                     guard let old = window.fields[control] else { throw FixtureError("unknown control: \(control)") }
@@ -274,12 +326,10 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                     field.delayMs = old.delayMs
                     window.fields[control] = field
                     makeControl(field, in: window)
-                    for key in window.order {
-                        let row = window.fields[key]!.row!
-                        window.stack.removeArrangedSubview(row)
-                        row.removeFromSuperview()
+                    for (index, key) in window.order.enumerated() {
+                        window.stack.insertArrangedSubview(window.fields[key]!.row, at: index)
                     }
-                    for key in window.order { window.stack.addArrangedSubview(window.fields[key]!.row) }
+                    window.stack.layoutSubtreeIfNeeded()
                 default:
                     let previousTitle = window.window.title
                     let frame = window.window.frame

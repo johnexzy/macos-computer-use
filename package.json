@@ -28,6 +28,7 @@
     "test:foundations": "node --test test/baseline/*.test.mjs && cargo test --workspace && swift test --package-path protocol/swift",
     "build:runtime": "sh scripts/build-runtime.sh",
     "test:runtime": "cargo test --workspace && swift test && swift test --package-path protocol/swift && node --test test/runtime/*.test.mjs",
+    "test:semantic:live": "npm run build:runtime && sh test/fixtures/macos/build.sh && node test/runtime/semantic-live.mjs",
     "start:rust": "./.artifacts/runtime-install/cua-host",
     "baseline:build": "npm run build && sh test/fixtures/macos/build.sh",
     "baseline:preflight": "node test/baseline/run.mjs --preflight",

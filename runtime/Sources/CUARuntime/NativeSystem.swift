@@ -6,24 +6,35 @@ import Foundation
 
 public protocol NativeSystem: Sendable {
     func permissions(context: OperationContext) throws -> Permissions
+    func supportedActions(permissions: Permissions) -> [ActionKind]
     func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult
     func window(_ key: TargetKey, context: OperationContext) throws -> Target
     func retainApplication(pid: UInt32, timeoutSeconds: Float, context: OperationContext) throws -> (any RetainedNativeHandle)?
+    func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation
 }
 
-final class AXApplicationHandle: RetainedNativeHandle, @unchecked Sendable {
-    let element: AXUIElement
-    init(pid: pid_t, timeoutSeconds: Float) throws {
-        element = AXUIElementCreateApplication(pid)
-        guard AXUIElementSetMessagingTimeout(element, timeoutSeconds) == .success else {
-            throw NativeFailure(.nativeFailed, "could not install AX messaging timeout")
+public extension NativeSystem {
+    func supportedActions(permissions: Permissions) -> [ActionKind] { [] }
+    func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation {
+        guard !params.includeScreenshot else { throw NativeFailure(.unsupported, "screenshot collection is not implemented") }
+        let start = nativeMilliseconds()
+        let before = try window(params.target, context: context)
+        let handle = try retainApplication(pid: params.target.pid, timeoutSeconds: context.nativeTimeoutSeconds(), context: context)
+        let after = try window(params.target, context: context)
+        guard before.bounds == after.bounds, before.bundleId == after.bundleId else {
+            throw NativeFailure(.staleObservation, "window changed during lifecycle collection")
         }
+        try context.check()
+        return NativeObservation(observation: unavailableObservation(id: observationId, target: after, started: start), handle: handle)
     }
 }
 
-/// Read-only native functions. No activation, selectors, input, or permission requests.
 public struct MacOSSystem: NativeSystem {
-    public init() {}
+    private let backend: any AXReading
+    private let catalog: any WindowCatalog
+    public init(backend: any AXReading = MacOSAXBackend(), catalog: any WindowCatalog = MacOSWindowCatalog()) {
+        self.backend = backend; self.catalog = catalog
+    }
     public func permissions(context: OperationContext) throws -> Permissions {
         try context.check()
         let value = Permissions(accessibility: AXIsProcessTrusted(), screenRecording: CGPreflightScreenCaptureAccess(),
@@ -31,6 +42,28 @@ public struct MacOSSystem: NativeSystem {
         try context.check()
         return value
     }
+    public func supportedActions(permissions: Permissions) -> [ActionKind] {
+        permissions.accessibility && backend is any AXMutating ? [.setValue, .press, .typeText] : []
+    }
+    public func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult { try catalog.targets(bundleId: bundleId, context: context) }
+    public func window(_ key: TargetKey, context: OperationContext) throws -> Target { try catalog.window(key, context: context) }
+    public func retainApplication(pid: UInt32, timeoutSeconds: Float, context: OperationContext) throws -> (any RetainedNativeHandle)? {
+        guard AXIsProcessTrusted() else { return nil }
+        return try backend.application(pid: pid, context: context)
+    }
+    public func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation {
+        guard !params.includeScreenshot else { throw NativeFailure(.unsupported, "screenshot collection is not implemented") }
+        let started = nativeMilliseconds()
+        let target = try catalog.window(params.target, context: context)
+        guard AXIsProcessTrusted() else {
+            return NativeObservation(observation: unavailableObservation(id: observationId, target: target, started: started), handle: nil)
+        }
+        return try SemanticAXObserver(backend: backend, catalog: catalog).observe(params: params, observationId: observationId, context: context)
+    }
+}
+
+public struct MacOSWindowCatalog: WindowCatalog {
+    public init() {}
     public func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult {
         let windows = try windowRecords(context: context)
         var result: [Target] = []
@@ -55,12 +88,15 @@ public struct MacOSSystem: NativeSystem {
         }
         throw NativeFailure(.targetNotFound, "exact visible window/process pair not found")
     }
-    public func retainApplication(pid: UInt32, timeoutSeconds: Float, context: OperationContext) throws -> (any RetainedNativeHandle)? {
-        try context.check()
-        guard AXIsProcessTrusted() else { return nil }
-        let handle = try AXApplicationHandle(pid: pid_t(pid), timeoutSeconds: timeoutSeconds)
-        try context.check()
-        return handle
+    public func processWindows(pid: UInt32, context: OperationContext) throws -> [Target] {
+        var result: [Target] = []
+        for record in try windowRecords(context: context) {
+            try context.check()
+            guard (record[kCGWindowOwnerPID as String] as? UInt32) == pid, let value = target(record) else { continue }
+            guard result.count < 1024 else { throw NativeFailure(.ambiguousTarget, "process window catalog exceeds association bound") }
+            result.append(value)
+        }
+        return result
     }
     private func windowRecords(context: OperationContext) throws -> [[String: Any]] {
         try context.check()
@@ -82,4 +118,11 @@ public struct MacOSSystem: NativeSystem {
                       title: record[kCGWindowName as String] as? String ?? "",
                       bounds: Rect(x: x, y: y, width: width, height: height))
     }
+}
+
+private func nativeMilliseconds() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }
+private func unavailableObservation(id: String, target: Target, started: UInt64) -> Observation {
+    Observation(observationId: id, target: target.key,
+        collected: CollectionInterval(startedUnixMs: started, finishedUnixMs: max(started, nativeMilliseconds())),
+        windowBounds: target.bounds, accessibility: .unavailable, accessibilityCollected: nil, elements: [], screenshot: nil)
 }

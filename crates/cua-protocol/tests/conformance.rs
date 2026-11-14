@@ -242,7 +242,7 @@ fn shared_expectation_correlation_cases_bind_receipts_to_requested_conditions() 
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../protocol/fixtures/correlation.json");
     let cases: Vec<Case> = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
-    assert_eq!(cases.len(), 19);
+    assert_eq!(cases.len(), 33);
     for case in cases {
         case.request.validate().unwrap();
         case.reply.validate().unwrap();
