@@ -136,6 +136,8 @@ external foreground changes. An absent foreground baseline is refused.
 `cua-client` is the reusable typed Rust boundary. `Client::spawn(Config)` installs
 the authority and handshake; `call(body, budget, cancellation)` generates request
 IDs and overwrites internal act grants. Public caller control messages are rejected.
+The host uses `spawn_with_cancellation` so EOF or signals during the handshake
+await native termination and reaping before host exit.
 `shutdown()` closes stdin, allows 250 ms for clean EOF exit, then forces termination
 if necessary and reaps the helper. A dead connection is not
 silently restarted, and mutations are never automatically replayed.
