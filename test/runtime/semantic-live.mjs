@@ -144,6 +144,7 @@ try {
       }
       const before = state, target = targetOf(state), started = performance.now();
       caseStarted = started;
+      episode.oracle = { before };
       measuring = true;
       const observeResponse = await call(session, "observe", { target, includeValues: caseId === "type-selection", budgetMs: 3000 });
       if (caseId === "ambiguous-windows") {
@@ -263,7 +264,13 @@ try {
       assert.equal(after.activationCount, before.activationCount, "Fixture became active");
       episode.foregroundPreserved = true; episode.elapsedMs = performance.now() - started;
       episode.receipt = response ? native(response) : null; episode.oracle = { before, after }; episode.outcome = "passed";
-    } catch (error) { episode.outcome = measuring ? "failed" : "setup_blocked"; episode.error = error.stack; }
+    } catch (error) {
+      episode.outcome = measuring ? "failed" : "setup_blocked"; episode.error = error.stack;
+      if (fixture && episode.oracle) {
+        try { episode.oracle.after = await fixture.call("state"); }
+        catch (oracleError) { episode.oracleError = oracleError.message; }
+      }
+    }
     finally {
       if (caseStarted !== undefined) episode.elapsedMs ??= performance.now() - caseStarted;
       for (const session of sessions) { try { await session.close(); } catch (error) { episode.cleanupError = error.message; process.exitCode = 1; } }

@@ -154,6 +154,9 @@ boundary and does not query a Mac.
 The current runtime associates AX windows using unique PID, exact logical bounds,
 and titles when available, rejecting ties in AX candidates and CG siblings. Public
 AX provides no OS-attested `CGWindowID` association or atomic snapshot guarantee.
+Catalog calls use one running-application bundle map for every CG row; missing
+metadata cannot silently remove a process sibling during association. Exact CG
+absence is distinguished from unavailable process metadata.
 Each reference retains an actual object plus observed role and raw identifier;
 live `CFEqual` tree/window membership, ownership, role, and identifier are checked
 before use. Changed labels, values, or control positions do not remap the reference.

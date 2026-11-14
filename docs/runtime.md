@@ -55,6 +55,14 @@ compatible titles when available. Both AX candidate ties and equivalent CG
 siblings are rejected. A missing AX title cannot distinguish equal-bounds CG
 siblings with different titles. There is no nearest-window scoring or private API.
 
+Each catalog read uses one `NSWorkspace.runningApplications` PID-to-bundle snapshot
+for all rows, alongside one visible CG-window list. It does not reconstruct app
+metadata with a fresh per-window `NSRunningApplication(pid:)` lookup. Process
+association resolves metadata once and rejects incomplete owned layer-zero rows
+instead of silently dropping a sibling. An absent exact CG pair is `targetNotFound`;
+an existing pair with unavailable process metadata is a native metadata failure.
+These coherent per-call inputs still do not form an atomic cross-API snapshot.
+
 Each issued reference retains the actual AX control, its observed role, and its raw
 AX identifier. Before a read or action, the runtime rechecks the exact CG target
 and metadata, the retained window's `CFEqual` membership in current AX windows,

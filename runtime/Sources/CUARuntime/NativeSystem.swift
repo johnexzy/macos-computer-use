@@ -63,14 +63,40 @@ public struct MacOSSystem: NativeSystem {
 }
 
 public struct MacOSWindowCatalog: WindowCatalog {
-    public init() {}
+    private let readWindows: @Sendable () throws -> [[String: Any]]
+    private let readProcessBundles: @Sendable () -> [UInt32: String]
+
+    public init() {
+        self.init(windowRecords: {
+            guard let records = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+                throw NativeFailure(.nativeFailed, "window enumeration unavailable")
+            }
+            return records
+        }, processBundles: {
+            var bundles: [UInt32: String] = [:]
+            for application in NSWorkspace.shared.runningApplications {
+                let pid = application.processIdentifier
+                guard pid > 0, let bundle = application.bundleIdentifier, !bundle.isEmpty else { continue }
+                bundles[UInt32(pid)] = bundle
+            }
+            return bundles
+        })
+    }
+
+    init(windowRecords: @escaping @Sendable () throws -> [[String: Any]],
+         processBundles: @escaping @Sendable () -> [UInt32: String]) {
+        readWindows = windowRecords; readProcessBundles = processBundles
+    }
+
     public func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult {
-        let windows = try windowRecords(context: context)
+        let (windows, bundles) = try snapshot(context: context)
         var result: [Target] = []
         var truncated = false
         for record in windows {
             try context.check()
-            guard let target = target(record), bundleId == nil || target.bundleId == bundleId else { continue }
+            guard let pid = record[kCGWindowOwnerPID as String] as? UInt32,
+                  let bundle = bundles[pid], !bundle.isEmpty,
+                  let target = target(record, bundleId: bundle), bundleId == nil || target.bundleId == bundleId else { continue }
             if result.count == Limits.maxTargets { truncated = true; break }
             result.append(target)
         }
@@ -78,39 +104,52 @@ public struct MacOSWindowCatalog: WindowCatalog {
         return TargetsResult(targets: result, truncated: truncated)
     }
     public func window(_ key: TargetKey, context: OperationContext) throws -> Target {
-        let windows = try windowRecords(context: context)
+        let (windows, bundles) = try snapshot(context: context)
         for record in windows {
             try context.check()
             guard (record[kCGWindowNumber as String] as? UInt32) == key.windowId,
                   (record[kCGWindowOwnerPID as String] as? UInt32) == key.pid,
-                  let value = target(record) else { continue }
+                  (record[kCGWindowLayer as String] as? Int) == 0 else { continue }
+            guard let bundle = bundles[key.pid], !bundle.isEmpty else {
+                throw NativeFailure(.nativeFailed, "process metadata unavailable for exact window")
+            }
+            guard let value = target(record, bundleId: bundle) else {
+                throw NativeFailure(.nativeFailed, "exact window metadata unavailable")
+            }
             return value
         }
         throw NativeFailure(.targetNotFound, "exact visible window/process pair not found")
     }
     public func processWindows(pid: UInt32, context: OperationContext) throws -> [Target] {
+        let (windows, bundles) = try snapshot(context: context)
+        guard let bundle = bundles[pid], !bundle.isEmpty else {
+            throw NativeFailure(.nativeFailed, "process metadata unavailable for window association")
+        }
         var result: [Target] = []
-        for record in try windowRecords(context: context) {
+        for record in windows {
             try context.check()
-            guard (record[kCGWindowOwnerPID as String] as? UInt32) == pid, let value = target(record) else { continue }
+            guard (record[kCGWindowOwnerPID as String] as? UInt32) == pid,
+                  (record[kCGWindowLayer as String] as? Int) == 0 else { continue }
+            guard let value = target(record, bundleId: bundle) else {
+                throw NativeFailure(.ambiguousTarget, "process window metadata is incomplete")
+            }
             guard result.count < 1024 else { throw NativeFailure(.ambiguousTarget, "process window catalog exceeds association bound") }
             result.append(value)
         }
         return result
     }
-    private func windowRecords(context: OperationContext) throws -> [[String: Any]] {
+    private func snapshot(context: OperationContext) throws -> ([[String: Any]], [UInt32: String]) {
         try context.check()
-        guard let records = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-            throw NativeFailure(.nativeFailed, "window enumeration unavailable")
-        }
+        let bundles = readProcessBundles()
         try context.check()
-        return records
+        let records = try readWindows()
+        try context.check()
+        return (records, bundles)
     }
-    private func target(_ record: [String: Any]) -> Target? {
+    private func target(_ record: [String: Any], bundleId: String) -> Target? {
         guard (record[kCGWindowLayer as String] as? Int) == 0,
               let pid = record[kCGWindowOwnerPID as String] as? UInt32, pid > 0, pid <= UInt32(Int32.max),
               let windowId = record[kCGWindowNumber as String] as? UInt32, windowId > 0,
-              let bundleId = NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier, !bundleId.isEmpty,
               let bounds = record[kCGWindowBounds as String] as? [String: Double],
               let x = bounds["X"], let y = bounds["Y"], let width = bounds["Width"], let height = bounds["Height"],
               [x, y, width, height].allSatisfy(\.isFinite), width > 0, height > 0 else { return nil }
