@@ -6,9 +6,11 @@ import XCTest
 
 private final class ProcessSnapshots: @unchecked Sendable {
     var calls = 0
+    var requestedPids: [[UInt32]] = []
     var snapshots: [[UInt32: String]]
     init(_ snapshots: [[UInt32: String]]) { self.snapshots = snapshots }
-    func read() -> [UInt32: String] {
+    func read(_ pids: [UInt32]) -> [UInt32: String] {
+        requestedPids.append(pids)
         let index = min(calls, snapshots.count - 1)
         calls += 1
         return snapshots[index]
@@ -36,6 +38,7 @@ final class WindowCatalogTests: XCTestCase {
         XCTAssertEqual(targets.map(\.key.windowId), [7, 8])
         XCTAssertEqual(targets.map(\.bundleId), ["test.fixture", "test.fixture"])
         XCTAssertEqual(snapshots.calls, 1)
+        XCTAssertEqual(snapshots.requestedPids, [[42]])
         XCTAssertThrowsError(try catalog.processWindows(pid: 42, context: context())) {
             XCTAssertEqual(($0 as? NativeFailure)?.code, .nativeFailed)
         }
@@ -57,7 +60,7 @@ final class WindowCatalogTests: XCTestCase {
 
     func testInvalidOwnedSiblingMetadataRejectsIncompleteAssociationCatalog() throws {
         let records = WindowRows(values: [row(7), row(8, width: 0)])
-        let catalog = MacOSWindowCatalog(windowRecords: records.read, processBundles: { [42: "test.fixture"] })
+        let catalog = MacOSWindowCatalog(windowRecords: records.read, processBundles: { _ in [42: "test.fixture"] })
         XCTAssertThrowsError(try catalog.processWindows(pid: 42, context: context())) {
             XCTAssertEqual(($0 as? NativeFailure)?.code, .ambiguousTarget)
         }
@@ -71,5 +74,6 @@ final class WindowCatalogTests: XCTestCase {
         XCTAssertEqual(snapshots.calls, 1)
         XCTAssertEqual(try catalog.targets(bundleId: nil, context: context()).targets.map(\.key.windowId), [9])
         XCTAssertEqual(snapshots.calls, 2)
+        XCTAssertEqual(snapshots.requestedPids, [[42, 43], [42, 43]])
     }
 }

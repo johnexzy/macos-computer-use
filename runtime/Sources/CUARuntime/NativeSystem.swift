@@ -64,7 +64,7 @@ public struct MacOSSystem: NativeSystem {
 
 public struct MacOSWindowCatalog: WindowCatalog {
     private let readWindows: @Sendable () throws -> [[String: Any]]
-    private let readProcessBundles: @Sendable () -> [UInt32: String]
+    private let readProcessBundles: @Sendable ([UInt32]) -> [UInt32: String]
 
     public init() {
         self.init(windowRecords: {
@@ -72,19 +72,24 @@ public struct MacOSWindowCatalog: WindowCatalog {
                 throw NativeFailure(.nativeFailed, "window enumeration unavailable")
             }
             return records
-        }, processBundles: {
-            var bundles: [UInt32: String] = [:]
-            for application in NSWorkspace.shared.runningApplications {
-                let pid = application.processIdentifier
-                guard pid > 0, let bundle = application.bundleIdentifier, !bundle.isEmpty else { continue }
-                bundles[UInt32(pid)] = bundle
+        }, processBundles: { pids in
+            let snapshot: @Sendable () -> [UInt32: String] = {
+                var bundles: [UInt32: String] = [:]
+                for pid in pids {
+                    guard pid > 0, pid <= UInt32(Int32.max),
+                          let application = NSRunningApplication(processIdentifier: pid_t(pid)),
+                          let bundle = application.bundleIdentifier, !bundle.isEmpty else { continue }
+                    bundles[pid] = bundle
+                }
+                return bundles
             }
-            return bundles
+            // Resolve process metadata on AppKit's main loop, once for each owner in this CG snapshot.
+            return Thread.isMainThread ? snapshot() : DispatchQueue.main.sync(execute: snapshot)
         })
     }
 
     init(windowRecords: @escaping @Sendable () throws -> [[String: Any]],
-         processBundles: @escaping @Sendable () -> [UInt32: String]) {
+         processBundles: @escaping @Sendable ([UInt32]) -> [UInt32: String]) {
         readWindows = windowRecords; readProcessBundles = processBundles
     }
 
@@ -140,9 +145,13 @@ public struct MacOSWindowCatalog: WindowCatalog {
     }
     private func snapshot(context: OperationContext) throws -> ([[String: Any]], [UInt32: String]) {
         try context.check()
-        let bundles = readProcessBundles()
-        try context.check()
         let records = try readWindows()
+        try context.check()
+        let pids = Set(records.compactMap { record -> UInt32? in
+            guard (record[kCGWindowLayer as String] as? Int) == 0 else { return nil }
+            return record[kCGWindowOwnerPID as String] as? UInt32
+        })
+        let bundles = readProcessBundles(pids.sorted())
         try context.check()
         return (records, bundles)
     }

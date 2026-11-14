@@ -55,12 +55,14 @@ compatible titles when available. Both AX candidate ties and equivalent CG
 siblings are rejected. A missing AX title cannot distinguish equal-bounds CG
 siblings with different titles. There is no nearest-window scoring or private API.
 
-Each catalog read uses one `NSWorkspace.runningApplications` PID-to-bundle snapshot
-for all rows, alongside one visible CG-window list. It does not reconstruct app
-metadata with a fresh per-window `NSRunningApplication(pid:)` lookup. Process
-association resolves metadata once and rejects incomplete owned layer-zero rows
-instead of silently dropping a sibling. An absent exact CG pair is `targetNotFound`;
-an existing pair with unavailable process metadata is a native metadata failure.
+Each catalog read takes one visible CG-window list, then resolves its distinct
+owner PIDs once on the AppKit main queue using `NSRunningApplication(pid:)`. All
+rows share that immutable PID-to-bundle map. The main queue performs no explicit
+AX calls or input for this metadata read, and the separate logical deadline stays
+active while the worker waits. No process metadata is cached or retried across
+calls. Process association rejects incomplete owned layer-zero rows instead of
+silently dropping a sibling. An absent exact CG pair is `targetNotFound`; an
+existing pair with unavailable process metadata is a native metadata failure.
 These coherent per-call inputs still do not form an atomic cross-API snapshot.
 
 Each issued reference retains the actual AX control, its observed role, and its raw
@@ -205,8 +207,10 @@ The fixture's `ready` event means native construction completed; it does not pro
 that another process can already read its AX objects. Setup attempts, failures,
 response bytes, and readiness latency are recorded separately from graded cases.
 The runner writes `report.json` and `trace.jsonl` under `.artifacts/semantic-live`
-by default; `--output PATH` selects a destination. See [fixture.md](fixture.md) for
-the independent native oracle and coordinate conventions.
+by default; `--output PATH` selects a destination. The runner's `responseBytes`
+counts encoded native structured content, excluding MCP wrapping and duplicate
+text content; it is not a wire-byte or model-token measurement. See
+[fixture.md](fixture.md) for the independent native oracle and coordinate conventions.
 
 Subprocess fault tests cover framing, response correlation, deadlines, cancellation,
 helper loss, progress receipts and cleanup. Installed-process MCP checks exercise the
