@@ -252,6 +252,15 @@ host budget before the remaining time is handed to the typed client.
 
 ## Verification and measurements
 
+The [PER-7/PER-8 verification record](evidence/per-7-per-8-verification-2026-11-14.json)
+separates implementation from milestone acceptance. The latest automated checks
+passed 186 tests, with one desktop-dependent legacy cursor test skipped while the
+Mac was locked. The corrected native build passed all 12 composition scenarios
+once, including actual Swift-child death at three causal fault boundaries.
+Repeated campaigns and the matched Claude comparison remain pending an unlocked
+desktop. Earlier failed campaigns and both paid model attempts are retained in
+the record; no speed, token, or cost improvement is established yet.
+
 ```sh
 npm run build:runtime
 npm run test:runtime
