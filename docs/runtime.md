@@ -121,3 +121,16 @@ adapter wrapping only; it excludes MCP parsing and response transport. A full MC
 round trip also includes those layers. These timings do not show improved task
 completion or isolate Swift work from pipe overhead. Model usage and monetary cost
 remain unmeasured.
+
+The [2026-11-14 verification record](evidence/per-3-per-4-verification-2026-11-14.json)
+records 91 passing automated tests plus native process smoke checks. Fifty warm
+capability queries used one helper and one epoch:
+
+| Measured interval | Median | p95 |
+| --- | --- | --- |
+| Full MCP round trip | 16.28 ms | 16.76 ms |
+| Typed client including native work | 16.06 ms | 16.55 ms |
+| Adapter wrapping, excluding MCP transport | 0.0102 ms | 0.0183 ms |
+
+The wrapping distribution comes from each request's nested intervals, not a
+subtraction of aggregate percentiles. These results apply to preflight only.

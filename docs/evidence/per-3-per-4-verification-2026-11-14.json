@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-11-14T11:20:01.681Z",
+  "source": {
+    "revision": "ee3b072b7cddb0bff7e1c87ca974b55e1ad339cf",
+    "dirty": false,
+    "hostSha256": "498bad24434b2dfab290f931314487c84101aa195cc434629e88d8be95d8c084",
+    "helperSha256": "7ce4ef5253e19f39ec2c360066dc5ec9f5751f285482abb1fa01fe60f43c58cc"
+  },
+  "environment": {
+    "macOS": "27.2.1",
+    "architecture": "arm64",
+    "cpu": "Apple M5 Pro"
+  },
+  "sdk": "rmcp 3.10.0",
+  "mcpProtocol": "2025-11-25",
+  "privateProtocol": 1,
+  "verification": {
+    "status": "passed",
+    "automatedTests": 91,
+    "groups": {
+      "rustClientSubprocess": 19,
+      "rustHost": 2,
+      "rustProtocol": 11,
+      "swiftRuntime": 15,
+      "swiftProtocol": 11,
+      "installedMcp": 10,
+      "legacyServer": 12,
+      "baselineMetricsAndOracle": 11
+    },
+    "checks": [
+      "cargo clippy --workspace --all-targets -- -D warnings",
+      "cargo fmt --all --check",
+      "cargo test --workspace",
+      "swift test",
+      "swift test --package-path protocol/swift",
+      "python3 runtime/Tests/process-smoke.py",
+      "npm run build",
+      "npm test",
+      "node --test test/baseline/*.test.mjs",
+      "sh scripts/build-runtime.sh",
+      "node --test test/runtime/*.test.mjs"
+    ],
+    "sharedProtocolCorpus": {
+      "validFrames": 37,
+      "invalidFrames": 47,
+      "correlationCases": 19
+    },
+    "independentReview": "No remaining blocking findings after admission, deadline, cancellation, EOF and uncertainty corrections.",
+    "nativeProcessSmoke": {
+      "scope": "New Swift runtime only",
+      "permissions": {
+        "accessibility": true,
+        "screenRecording": true,
+        "inputPosting": true
+      },
+      "visibleTargetsObserved": 28,
+      "mutations": 0,
+      "permissionRequests": 0,
+      "scenarios": [
+        "persistent capabilities/targets/lifecycle observation",
+        "unsupported actions and image requests",
+        "new epoch on restart",
+        "clean EOF and signals with stdin open",
+        "signals during startup/hello",
+        "malformed, CRLF, truncated and oversized input; fixed bounded diagnostics"
+      ]
+    }
+  },
+  "timing": {
+    "operation": "capabilities",
+    "warmupCalls": 5,
+    "recordedCalls": 50,
+    "observedHelperProcesses": 1,
+    "observedEpochs": 1,
+    "metrics": {
+      "mcpRoundtripMs": {
+        "samples": 50,
+        "p50": 16.284334,
+        "p95": 16.761582999999973
+      },
+      "adapterElapsedMs": {
+        "samples": 50,
+        "p50": 16.065209,
+        "p95": 16.557291
+      },
+      "nativeClientElapsedMs": {
+        "samples": 50,
+        "p50": 16.055625,
+        "p95": 16.545875000000002
+      },
+      "adapterWrappingMs": {
+        "samples": 50,
+        "p50": 0.01020899999999969,
+        "p95": 0.018249999999998323
+      },
+      "responseBytes": {
+        "samples": 50,
+        "p50": 619,
+        "p95": 619
+      }
+    },
+    "notes": [
+      "Sequential read-only permission queries; no AX traversal, capture, mutation or model inference.",
+      "MCP roundtrip includes public JSON encoding/decoding, transport, SDK, client IPC and native work.",
+      "Native client timing includes request validation/encoding, queueing, private IPC and native work.",
+      "Adapter wrapping is a per-request difference of nested intervals; it excludes MCP parse and response transport. Scheduling can affect all samples.",
+      "These are warm same-machine preflight timings, not task completion or a matched legacy/new semantic comparison."
+    ]
+  },
+  "limitations": [
+    "The current native runtime advertises no supported actions. Exact AX/control observation, semantic execution and images are later milestones.",
+    "These timings measure warm permission preflight, not task completion or a matched semantic comparison with the legacy driver.",
+    "The native pair is built for this Mac architecture and opt-in through npm run start:rust; default-entry migration and universal distribution remain later work.",
+    "The added runtime CI workflow has not run remotely for this local branch. Foundations PR #8 passed its own CI."
+  ],
+  "model": {
+    "runs": false,
+    "tokens": null,
+    "costUsd": null
+  },
+  "localArtifact": {
+    "path": ".artifacts/per-3-runtime-timing-2026-11-14.json",
+    "sha256": "12345a5b8f38f44b65161206f8ba074aeff8f6e0e30e90996a701b4b0b9ce74e",
+    "contents": "50 attributable timing samples; committed summary omits sample IDs."
+  }
+}
