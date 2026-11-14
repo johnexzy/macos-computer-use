@@ -11,8 +11,9 @@ The Rust + Swift rebuild starts with development foundations alongside the exist
 - [Legacy baseline and measurement boundaries](docs/baseline.md) (PER-1)
 - [Disposable two-window macOS fixture](docs/fixture.md)
 - [Rust–Swift protocol and conformance contract](docs/protocol.md) (PER-2)
+- [Rust MCP host and persistent Swift runtime](docs/runtime.md) (PER-3/PER-4)
 
-Run `npm run test:foundations` for the baseline metric checks and Rust/Swift conformance tests. Run `npm run baseline:build`, then `npm run baseline:preflight` before a live fixture campaign. These foundations do not replace the shipping MCP server; the Rust host and persistent Swift runtime are subsequent issues.
+Run `npm run test:foundations` for the baseline metric checks and Rust/Swift conformance tests. Run `npm run baseline:build`, then `npm run baseline:preflight` before a live fixture campaign. Run `npm run build:runtime` and `npm run start:rust` for the new native pair. Semantic AX observations, imagery and action execution are subsequent milestones.
 
 Built with a compiled Swift core leveraging Apple's native **CoreGraphics**, **Vision OCR (`VNRecognizeTextRequest`)**, and **Accessibility APIs** for semantic background actions. Untargeted input remains an explicit global CoreGraphics fallback.
 

@@ -26,7 +26,14 @@ jobs:
           cargo +stable clippy --workspace --all-targets -- -D warnings
           cargo +stable test --workspace
       - name: Check Swift conformance
-        run: swift test --package-path protocol/swift
+        run: |
+          swift test --package-path protocol/swift
+          swift test
+      - name: Build and verify installed native runtime
+        run: |
+          sh scripts/build-runtime.sh
+          python3 runtime/Tests/process-smoke.py
+          node --test test/runtime/*.test.mjs
       - name: Check baseline metrics and fixture build
         run: |
           node --test test/baseline/*.test.mjs

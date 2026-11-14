@@ -16,7 +16,7 @@ final class ContractTests: XCTestCase {
     }
     func testSharedValidFixturesDecodeAndRoundTrip() throws {
         let paths = try fixtures("valid")
-        XCTAssertEqual(paths.count, 34)
+        XCTAssertEqual(paths.count, 37)
         for path in paths {
             let frame = try Frame.decodeLine(Data(contentsOf: path))
             let encoded = try frame.encodeLine()

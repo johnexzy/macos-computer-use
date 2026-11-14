@@ -16,6 +16,7 @@ const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 macro_rules! record {
     ($name:ident { $($field:ident: $ty:ty),* $(,)? }) => {
         #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+        #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
         pub struct $name { $(pub $field: $ty),* }
     };
@@ -23,6 +24,7 @@ macro_rules! record {
 macro_rules! choices {
     ($name:ident { $($variant:ident),* $(,)? }) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+        #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
         #[serde(rename_all = "camelCase")]
         pub enum $name { $($variant),* }
     };
@@ -33,6 +35,7 @@ choices!(ExecutionMode {
     ForegroundAllowed
 });
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Delivery {
     NotDispatched,
@@ -119,7 +122,10 @@ choices!(ErrorCode {
     StaleObservation,
     StaleElement,
     Unsupported,
-    NativeFailed
+    NativeFailed,
+    DeadlineExceeded,
+    Cancelled,
+    ResourceLimit
 });
 choices!(WaitOutcome {
     Satisfied,
@@ -212,6 +218,7 @@ record!(EnabledCondition {
     enabled: bool
 });
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(
     tag = "kind",
     content = "params",
@@ -249,6 +256,7 @@ record!(ClickOperation {
     space: CoordinateSpace
 });
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(
     tag = "kind",
     content = "params",
@@ -298,6 +306,7 @@ record!(Failure {
 });
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(
     tag = "method",
     content = "params",
@@ -314,6 +323,7 @@ pub enum RequestBody {
     Cancel(CancelRequest),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(
     tag = "result",
     content = "data",
@@ -341,6 +351,7 @@ record!(Progress {
     version: u16, id: String, epoch: String, observation_id: String, steps: Vec<StepReceipt>
 });
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(
     tag = "kind",
     content = "message",
