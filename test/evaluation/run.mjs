@@ -52,7 +52,7 @@ const report = { schemaVersion: 1, campaignId: randomUUID(), startedAt: new Date
     "Fixture allowlisting and a common one-attempt-per-requested-control policy bound this controller. They do not add native retained identity or verification to legacy.",
     "Independent before/after oracle checks model plus control values, write attempts, native generations, sibling windows and foreground endpoints.",
     "Foreground sampling cannot exclude transient or externally caused interference. Confirmed means observed state, not causal proof.",
-    "Claude API-reported USD is retained; billed monetary cost and reasoning tokens are not independently established. Missing usage/cost stays null.",
+    "Claude CLI-reported cost estimates are retained; provider billing and reasoning tokens are not independently established. Token totals sum all per-model usage, including auxiliary calls. Missing usage/cost stays null.",
     "Budget checks occur before calls; Claude's per-call USD guard may only stop after a provider request. Any reported overshoot stops the remaining campaign."], episodes: [] };
 for (const file of [".artifacts/runtime-install/cua-host", ".artifacts/runtime-install/cua-runtime", "native_helper", "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture"]) {
   try { report.source[file] = hash(await fs.readFile(path.join(root, file))); } catch { report.source[file] = null; }

@@ -60,6 +60,13 @@ missing, changed or mixed resolved model. No fallback model is configured. The p
 failed calls and all episode calls retain reported usage and count toward the common
 USD budget. Default limits are USD5 total, USD0.10 reserved per CLI call, eight model
 decisions per episode, 60 seconds per model call, and 120 seconds per episode.
+For an explicit or resolved model ID, the child process pins the main model, all model
+family aliases, the current/deprecated background selectors and subagent default to
+that same ID. The exact role overrides are retained with each invocation. An initial
+alias probe has no exact ID yet and is still rejected if multiple models appear.
+Every model call also sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in its child environment
+to skip the background session-title request. These are documented controls recognized
+by the installed CLI; observed per-model usage remains the enforcement check.
 The controller reserves 13 seconds for the bounded eight-second MCP call plus
 five-second oracle read, clips model time to the remaining budget less that reserve,
 and checks admission again before dispatching a tool.
@@ -123,11 +130,13 @@ Satisfied standalone waits are also checked against the independent oracle.
 Native state-confirmation truth uses each read reference's observed generation;
 task completion/wrong-target grading separately uses the original selected generation.
 
-Usage retains input/output tokens and cache-read/cache-creation counters separately.
+Usage sums input/output tokens and cache-read/cache-creation counters from every
+`modelUsage` entry, including auxiliary models and failed/rejected calls. Top-level
+main-conversation usage is retained separately and never added to those totals.
 CLI invocations/controller decisions are distinct from the sum of CLI-reported
 `num_turns`; missing CLI turn counts remain null, including paired turn deltas.
-Reasoning tokens and independently billed cost remain null. API-reported USD is
-explicitly labelled, including failed calls and the model-resolution probe. No model
+Reasoning tokens and independently billed cost remain null. USD figures are explicitly
+labelled CLI-reported estimates, including failed calls and the model-resolution probe. No model
 campaign has zero token/cost claims merely because it did not run. Per-lane model
 cost excludes the separately retained common pin probe; the campaign total includes
 it. Foreground endpoint sampling cannot exclude transient or external disruption.
@@ -139,3 +148,7 @@ kill timing is inferred from a sleep in this model runner.
 
 The Claude controls follow the [official CLI reference](https://code.claude.com/docs/en/cli-reference)
 and [programmatic-run documentation](https://code.claude.com/docs/en/headless).
+Background/subagent role pinning follows the [model configuration documentation](https://code.claude.com/docs/en/model-config#environment-variables).
+Title-request disabling follows the [environment variable reference](https://code.claude.com/docs/en/env-vars).
+The [cost documentation](https://code.claude.com/docs/en/costs#using-the-usage-command)
+describes dollar totals as locally computed estimates, not authoritative billing.

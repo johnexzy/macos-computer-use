@@ -3,7 +3,7 @@ import test from "node:test";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { parseCommand, parseResult, claudeArguments, ModelBudget, apiKeyEnvironment, invokeClaude, preflightClaude } from "./model.mjs";
+import { parseCommand, parseResult, claudeArguments, claudeEnvironment, ModelBudget, apiKeyEnvironment, invokeClaude, preflightClaude } from "./model.mjs";
 import { judgeEpisode, summarize, usageSummary } from "./metrics.mjs";
 import { intendedRefusal, validateFixtureCommand, validateOriginalMutation, laneTools, LaneAdapter } from "./adapters.mjs";
 
@@ -37,6 +37,22 @@ test("failure usage remains attributable, cache counters stay distinct, absent c
   const measured = usageSummary([{ ...failed, numTurns: 2 }, { ...failed, numTurns: 1 }]);
   assert.equal(measured.calls, 2); assert.equal(measured.cliReportedTurns, 3);
 });
+test("mixed-model rejection retains all auxiliary tokens without adding primary usage twice", () => {
+  const primaryUsage = { input_tokens: 2, output_tokens: 226, cache_read_input_tokens: 0, cache_creation_input_tokens: 2963 };
+  const mixed = response({ modelUsage: {
+    "claude-haiku-4-5-20251001": { inputTokens: 1739, outputTokens: 14, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.001809 },
+    "claude-sonnet-5": { inputTokens: 2, outputTokens: 226, cacheReadInputTokens: 0, cacheCreationInputTokens: 2963, costUSD: 0.01450725 },
+  }, usage: primaryUsage, total_cost_usd: 0.01631625 });
+  for (const exitCode of [0, 1]) {
+    const parsed = parseResult(mixed, exitCode, "claude-sonnet-5");
+    assert.equal(parsed.ok, false); assert.equal(parsed.costUsd, 0.01631625);
+    assert.deepEqual(parsed.usage, { inputTokens: 1741, outputTokens: 240, cacheReadInputTokens: 0, cacheCreationInputTokens: 2963, reasoningTokens: null });
+    assert.deepEqual(parsed.primaryUsage, primaryUsage); assert.equal(parsed.costSource, "cli_reported_estimate");
+    assert.equal(usageSummary([parsed]).inputTokens, 1741);
+  }
+  const incomplete = parseResult(response({ modelUsage: { "claude-sonnet-5": { inputTokens: 2 } } }));
+  assert.equal(incomplete.usage.outputTokens, null); // Main usage cannot fill an absent all-model counter.
+});
 test("Claude has no builtin tools or connected MCP and no fallback model", () => {
   const args = claudeArguments({ model: "claude-specific", budgetUsd: 0.1, systemPrompt: "same" });
   assert.equal(args[args.indexOf("--tools") + 1], "");
@@ -44,6 +60,16 @@ test("Claude has no builtin tools or connected MCP and no fallback model", () =>
   assert.ok(args.includes("--strict-mcp-config")); assert.ok(args.includes("--safe-mode"));
   assert.equal(args.includes("--fallback-model"), false);
   assert.equal(args[args.indexOf("--max-turns") + 1], "1");
+});
+test("all exact model roles are pinned only in the Claude child environment", () => {
+  const parent = { ANTHROPIC_API_KEY: "fake-key", ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-other", CLAUDE_CODE_SUBAGENT_MODEL: "haiku" };
+  const child = claudeEnvironment({ model: "claude-sonnet-5", env: parent });
+  for (const key of ["ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"]) assert.equal(child[key], "claude-sonnet-5");
+  assert.equal(parent.ANTHROPIC_DEFAULT_HAIKU_MODEL, "claude-other"); assert.equal(parent.CLAUDE_CODE_SUBAGENT_MODEL, "haiku");
+  assert.equal(child.ANTHROPIC_API_KEY, "fake-key");
+  assert.equal(child.CLAUDE_CODE_DISABLE_TERMINAL_TITLE, "1");
+  assert.equal(claudeEnvironment({ model: "sonnet", env: {} }).ANTHROPIC_DEFAULT_SONNET_MODEL, undefined);
 });
 test("unmeasured cost or an exhausted reservation stops subsequent model calls", () => {
   const budget = new ModelBudget(0.2, 0.1); budget.record({ costUsd: 0.15 }); assert.equal(budget.allowance(), null);
@@ -73,10 +99,13 @@ test("CLI process output is drained and any echoed child key is redacted before 
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cua-eval-cli-test-")); const binary = path.join(dir, "fake-claude");
   try {
     const fake = JSON.parse(response());
-    await fs.writeFile(binary, '#!/usr/bin/env node\nprocess.stdin.resume();process.stdin.on("end",()=>{const result=' + JSON.stringify(fake) + ';result.echo=process.env.ANTHROPIC_API_KEY;process.stderr.write(process.env.ANTHROPIC_API_KEY);process.stdout.write(JSON.stringify(result));});\n', { mode: 0o700 });
+    await fs.writeFile(binary, '#!/usr/bin/env node\nprocess.stdin.resume();process.stdin.on("end",()=>{const result=' + JSON.stringify(fake) + ';result.echo=process.env.ANTHROPIC_API_KEY;result.childBackgroundModel=process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL;process.stderr.write(process.env.ANTHROPIC_API_KEY);process.stdout.write(JSON.stringify(result));});\n', { mode: 0o700 });
     const result = await invokeClaude({ binary, model: "claude-sonnet-specific", pinnedModel: "claude-sonnet-specific", budgetUsd: 0.1,
       systemPrompt: "test", prompt: "test", cwd: dir, env: { ...process.env, ANTHROPIC_API_KEY: "fixture-fake-key-to-redact" }, timeoutMs: 5000 });
     assert.equal(result.ok, true); assert.equal(result.costUsd, 0.01);
+    assert.equal(result.raw.childBackgroundModel, "claude-sonnet-specific");
+    assert.equal(result.invocation.modelRoleOverrides.ANTHROPIC_SMALL_FAST_MODEL, "claude-sonnet-specific");
+    assert.equal(result.invocation.backgroundTitleRequestDisabled, true);
     assert.equal(JSON.stringify(result).includes("fixture-fake-key-to-redact"), false);
     assert.equal(result.stderr, "[REDACTED]");
   } finally { await fs.rm(dir, { recursive: true, force: true }); }

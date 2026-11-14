@@ -85,6 +85,7 @@ export function compareLanes(episodes, left, right) {
 export function usageSummary(measured) {
   const sum = (field) => measured.length && measured.every((t) => Number.isFinite(t.usage?.[field])) ? measured.reduce((n, t) => n + t.usage[field], 0) : null;
   return { calls: measured.length,
+    costSource: "cli_reported_estimate",
     cliReportedTurns: measured.length && measured.every((t) => Number.isFinite(t.numTurns)) ? measured.reduce((n, t) => n + t.numTurns, 0) : null,
     inputTokens: sum("inputTokens"), outputTokens: sum("outputTokens"),
     cacheReadInputTokens: sum("cacheReadInputTokens"), cacheCreationInputTokens: sum("cacheCreationInputTokens"), reasoningTokens: null,

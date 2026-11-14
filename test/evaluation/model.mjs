@@ -28,13 +28,14 @@ export function parseResult(stdout, exitCode = 0, pinnedModel = null) {
   try { result = JSON.parse(stdout); } catch { return { ok: false, error: "Claude returned non-JSON output", model: null, usage: null, costUsd: null }; }
   const models = Object.keys(result.modelUsage || {});
   const model = models.length === 1 && models[0].startsWith("claude-") ? models[0] : null;
-  const perModel = model ? result.modelUsage[model] : {};
-  const usage = { inputTokens: finite(result.usage?.input_tokens ?? perModel.inputTokens),
-    outputTokens: finite(result.usage?.output_tokens ?? perModel.outputTokens),
-    cacheReadInputTokens: finite(result.usage?.cache_read_input_tokens ?? perModel.cacheReadInputTokens),
-    cacheCreationInputTokens: finite(result.usage?.cache_creation_input_tokens ?? perModel.cacheCreationInputTokens),
+  // Top-level usage covers the main conversation only. modelUsage also includes auxiliary calls.
+  const sum = (field) => models.length && models.every((key) => finite(result.modelUsage[key]?.[field]) !== null)
+    ? models.reduce((total, key) => total + result.modelUsage[key][field], 0) : null;
+  const usage = { inputTokens: sum("inputTokens"), outputTokens: sum("outputTokens"),
+    cacheReadInputTokens: sum("cacheReadInputTokens"), cacheCreationInputTokens: sum("cacheCreationInputTokens"),
     reasoningTokens: null };
   const parsed = { ok: false, error: null, model, models, usage, costUsd: finite(result.total_cost_usd),
+    usageSource: "cli_model_usage_all_models", primaryUsage: result.usage ?? null, costSource: "cli_reported_estimate",
     sessionId: result.session_id ?? null, durationApiMs: finite(result.duration_api_ms), numTurns: finite(result.num_turns),
     subtype: result.subtype ?? null, raw: result };
   if (exitCode !== 0 || result.is_error === true || result.type !== "result" || result.subtype !== "success") {
@@ -92,11 +93,20 @@ export function claudeArguments({ model, budgetUsd, systemPrompt }) {
     "--setting-sources", "", "--no-session-persistence", "--permission-mode", "dontAsk", "--max-turns", "1",
     "--max-budget-usd", String(budgetUsd), "--effort", "low", "--model", model, "--system-prompt", systemPrompt];
 }
+export function claudeEnvironment({ model, env = process.env }) {
+  // Alias probes have no exact ID yet. Once known, pin both current and deprecated background selectors.
+  const roles = model.startsWith("claude-") ? Object.fromEntries([
+    "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL",
+  ].map((key) => [key, model])) : {};
+  return { ...env, ...roles, CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "1", CLAUDE_CODE_MAX_OUTPUT_TOKENS: "1500", MAX_STRUCTURED_OUTPUT_RETRIES: "0" };
+}
 export async function invokeClaude({ binary = "claude", model, budgetUsd, systemPrompt, prompt, cwd, timeoutMs = 60000, pinnedModel, env = process.env }) {
   const args = claudeArguments({ model, budgetUsd, systemPrompt });
+  const childEnv = claudeEnvironment({ model: pinnedModel || model, env });
   const start = performance.now();
   const child = spawn(binary, args, { cwd, stdio: ["pipe", "pipe", "pipe"],
-    env: { ...env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: "1500", MAX_STRUCTURED_OUTPUT_RETRIES: "0" } });
+    env: childEnv });
   let stdout = "", stderr = "", failure = null;
   const stop = () => { child.kill("SIGKILL"); };
   const timer = setTimeout(() => { failure = "Model wall-clock budget exceeded"; stop(); }, timeoutMs);
@@ -113,7 +123,9 @@ export async function invokeClaude({ binary = "claude", model, budgetUsd, system
   const parsed = parseResult(redact(stdout, env), code, pinnedModel);
   return { ...parsed, ok: parsed.ok && !failure && signal === null, error: failure || parsed.error,
     elapsedMs: performance.now() - start, exitCode: code, signal, stderr: redact(stderr, env),
-    invocation: { binary, args, timeoutMs }, responseBytes: Buffer.byteLength(stdout) };
+    invocation: { binary, args, timeoutMs, backgroundTitleRequestDisabled: true, modelRoleOverrides: Object.fromEntries(Object.entries(childEnv)
+      .filter(([key]) => ["ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"].includes(key))) }, responseBytes: Buffer.byteLength(stdout) };
 }
 
 export class ModelBudget {
@@ -121,6 +133,7 @@ export class ModelBudget {
   allowance() { return this.measured && this.limitUsd - this.spentUsd >= this.perCallUsd ? this.perCallUsd : null; }
   record(result) { this.calls++; if (result.costUsd === null) this.measured = false; else this.spentUsd += result.costUsd; }
   summary() { return { limitUsd: this.limitUsd, perCallUsd: this.perCallUsd, calls: this.calls,
+    costSource: "cli_reported_estimate",
     reportedCostUsd: this.calls && this.measured ? this.spentUsd : null, knownReportedCostUsd: this.calls ? this.spentUsd : null,
     exceeded: this.spentUsd > this.limitUsd, measured: this.measured }; }
 }
