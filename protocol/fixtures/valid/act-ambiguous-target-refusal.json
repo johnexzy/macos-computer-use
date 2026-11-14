@@ -1,0 +1,1 @@
+{"kind":"response","message":{"version":1,"id":"request-1","epoch":"helper-epoch-1","body":{"result":"act","data":{"observationId":"observation-1","steps":[{"actionId":"action-1","delivery":"not_dispatched","verification":"unverified","reason":"ambiguousTarget","evidence":[]}],"remainingSteps":0,"stopReason":"ambiguousTarget"}}}}

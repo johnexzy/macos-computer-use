@@ -1,0 +1,356 @@
+import Foundation
+
+private func require(_ condition: Bool, _ message: String) throws {
+    if !condition { throw ContractError(message) }
+}
+private func identifier(_ value: String) throws {
+    try require(!value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && value.utf8.count <= 128, "invalid identifier")
+}
+private func validTarget(_ target: TargetKey) throws {
+    try require(target.pid > 0 && target.windowId > 0, "target IDs must be positive")
+}
+private func validRect(_ rect: Rect) throws {
+    try require([rect.x, rect.y, rect.width, rect.height].allSatisfy(\.isFinite)
+                && rect.width > 0 && rect.height > 0 && (rect.x + rect.width).isFinite
+                && (rect.y + rect.height).isFinite, "invalid rectangle")
+}
+private func unique(_ values: [String]) throws {
+    var seen = Set<String>()
+    for value in values {
+        try identifier(value)
+        try require(seen.insert(value).inserted, "duplicate identifier")
+    }
+}
+private func validInterval(_ interval: CollectionInterval) throws {
+    try require(interval.startedUnixMs <= interval.finishedUnixMs
+                && interval.finishedUnixMs <= 9_007_199_254_740_991, "invalid collection interval")
+}
+private func channelInterval(_ channel: CollectionInterval, within total: CollectionInterval) throws {
+    try validInterval(channel)
+    try require(channel.startedUnixMs >= total.startedUnixMs && channel.finishedUnixMs <= total.finishedUnixMs,
+                "channel interval outside observation")
+}
+private func expectation(_ step: ActionStep, _ receipt: StepReceipt, settled: Bool) throws {
+    if let expected = step.expect {
+        func matches(_ matched: Bool) -> Bool {
+            receipt.evidence.contains { $0.condition == expected && $0.matched == matched }
+        }
+        switch receipt.verification {
+        case .confirmed: try require(matches(true), "confirmation does not match requested expectation")
+        case .mismatch: try require(matches(false), "mismatch does not match requested expectation")
+        case .unverified: try require(!settled, "settled step has unverified required expectation")
+        }
+    } else {
+        try require(receipt.reason != .alreadySatisfied, "alreadySatisfied requires an expectation")
+    }
+}
+
+extension Condition {
+    func validate() throws {
+        switch self {
+        case .elementExists(let value), .elementAbsent(let value): try identifier(value.selector.role)
+        case .valueEquals(let value): try identifier(value.elementRef)
+        case .enabled(let value): try identifier(value.elementRef)
+        }
+    }
+}
+
+extension ImageTransform {
+    public func toScreen(_ point: Point) throws -> Point {
+        let r = validImageBounds
+        try validRect(r)
+        try require([scaleX, scaleY, offsetX, offsetY].allSatisfy(\.isFinite)
+                    && scaleX > 0 && scaleY > 0, "invalid image transform")
+        try require(coverage != .unavailable && point.x.isFinite && point.y.isFinite
+                    && point.x >= r.x && point.y >= r.y && point.x < r.x + r.width
+                    && point.y < r.y + r.height, "point outside valid image transform")
+        let mapped = Point(x: point.x * scaleX + offsetX, y: point.y * scaleY + offsetY)
+        try require(mapped.x.isFinite && mapped.y.isFinite, "mapped point overflow")
+        return mapped
+    }
+}
+
+extension Screenshot {
+    func validate() throws {
+        try validInterval(collected)
+        try require(widthPx > 0 && heightPx > 0, "image dimensions must be positive")
+        let t = imageToScreen
+        try validRect(t.validImageBounds)
+        try require([t.scaleX, t.scaleY, t.offsetX, t.offsetY].allSatisfy(\.isFinite)
+                    && t.scaleX > 0 && t.scaleY > 0 && t.coverage != .unavailable, "invalid image transform")
+        let r = t.validImageBounds
+        try require(r.x >= 0 && r.y >= 0 && r.x + r.width <= Double(widthPx)
+                    && r.y + r.height <= Double(heightPx), "transform domain outside image")
+        try require([r.x * t.scaleX + t.offsetX, (r.x + r.width) * t.scaleX + t.offsetX,
+                     r.y * t.scaleY + t.offsetY, (r.y + r.height) * t.scaleY + t.offsetY].allSatisfy(\.isFinite),
+                    "mapped rectangle overflow")
+        if t.coverage == .complete {
+            try require(r.x == 0 && r.y == 0 && r.width == Double(widthPx)
+                        && r.height == Double(heightPx), "complete transform must cover image")
+        }
+        try require(!dataBase64.isEmpty && dataBase64.utf8.count <= ((Limits.maxImageBytes + 2) / 3) * 4,
+                    "image exceeds payload limit")
+        guard let bytes = Data(base64Encoded: dataBase64) else { throw ContractError("invalid image base64") }
+        try require(bytes.base64EncodedString() == dataBase64, "noncanonical image base64")
+        try require(!bytes.isEmpty && bytes.count <= Limits.maxImageBytes, "image exceeds payload limit")
+    }
+}
+
+extension Observation {
+    func validate() throws {
+        try identifier(observationId)
+        try validTarget(target)
+        try validRect(windowBounds)
+        try validInterval(collected)
+        try require(accessibility == .unavailable || accessibilityCollected != nil,
+                    "available accessibility requires collection interval")
+        if let ax = accessibilityCollected { try channelInterval(ax, within: collected) }
+        try require(elements.count <= Limits.maxElements, "too many elements")
+        try unique(elements.map(\.reference))
+        try require(accessibility != .unavailable || elements.isEmpty, "unavailable accessibility cannot include elements")
+        for element in elements {
+            try identifier(element.role)
+            try validRect(element.bounds)
+        }
+        try screenshot?.validate()
+        if let screenshot { try channelInterval(screenshot.collected, within: collected) }
+    }
+}
+
+extension ActRequest {
+    func validate() throws {
+        try identifier(grantId)
+        try identifier(observationId)
+        try validTarget(target)
+        try require(!steps.isEmpty && steps.count <= Limits.maxSteps, "invalid action count")
+        try unique(steps.map(\.actionId))
+        for step in steps {
+            switch step.operation {
+            case .press(let value): try identifier(value.elementRef)
+            case .setValue(let value): try identifier(value.elementRef)
+            case .typeText(let value):
+                try identifier(value.elementRef)
+                try require(!value.text.isEmpty, "empty typing")
+            case .key(let value): try identifier(value.elementRef)
+            case .scroll(let value):
+                try identifier(value.elementRef)
+                try require(value.amount != 0 && (-1000...1000).contains(value.amount), "invalid scroll amount")
+            case .click(let value):
+                try require(value.point.x.isFinite && value.point.y.isFinite, "invalid point")
+            }
+            try step.precondition?.validate()
+            try step.expect?.validate()
+        }
+    }
+}
+
+extension ActResult {
+    func validate() throws {
+        try identifier(observationId)
+        try require(!steps.isEmpty && steps.count + Int(remainingSteps) <= Limits.maxSteps, "invalid receipt prefix")
+        try unique(steps.map(\.actionId))
+        for (index, step) in steps.enumerated() {
+            for evidence in step.evidence {
+                try identifier(evidence.observationId)
+                try evidence.condition.validate()
+            }
+            switch step.verification {
+            case .confirmed:
+                try require(!step.evidence.isEmpty && step.evidence.allSatisfy(\.matched), "confirmation needs evidence")
+            case .mismatch:
+                try require(step.evidence.contains(where: { !$0.matched }), "mismatch needs evidence")
+            case .unverified: break
+            }
+            if step.reason == .alreadySatisfied {
+                try require(step.delivery == .notDispatched && step.verification == .confirmed,
+                            "alreadySatisfied requires confirmed evidence without dispatch")
+            }
+            if step.delivery == .notDispatched && step.reason != .alreadySatisfied {
+                try require(index + 1 == steps.count && step.reason != nil && stopReason != .completed,
+                            "rejected step must stop sequence")
+            }
+            if let reason = step.reason, reason != .alreadySatisfied {
+                let expected: StopReason
+                switch reason {
+                case .preconditionFailed: expected = .preconditionFailed
+                case .verificationFailed: expected = .verificationFailed
+                case .cancelled: expected = .cancelled
+                case .deadlineExceeded: expected = .deadlineExceeded
+                case .helperDied: expected = .helperDied
+                case .targetStale: expected = .targetStale
+                case .ambiguousTarget: expected = .ambiguousTarget
+                case .unsupported: expected = .unsupported
+                case .nativeFailed: expected = .failed
+                case .alreadySatisfied: expected = .completed
+                }
+                try require(index + 1 == steps.count && stopReason == expected,
+                            "failed step must be terminal with matching stop reason")
+            }
+            if step.delivery == .notDispatched && step.verification == .confirmed {
+                try require(step.reason == .alreadySatisfied, "undispatched confirmation needs alreadySatisfied")
+            }
+            if step.delivery == .unknown {
+                try require(index + 1 == steps.count && stopReason != .completed, "unknown dispatch must stop sequence")
+            }
+            if step.verification == .mismatch {
+                try require(index + 1 == steps.count && stopReason != .completed,
+                            "verification mismatch must stop sequence")
+            }
+        }
+        if stopReason == .completed {
+            try require(remainingSteps == 0 && steps.allSatisfy {
+                $0.delivery == .dispatched || $0.reason == .alreadySatisfied
+            }, "completed sequence cannot include rejected steps")
+        }
+    }
+}
+
+extension Frame {
+    public func validate() throws {
+        switch self {
+        case .progress(let progress):
+            try require(progress.version == Limits.version, "unsupported envelope version")
+            try identifier(progress.id)
+            try identifier(progress.epoch)
+            try ActResult(observationId: progress.observationId, steps: progress.steps,
+                          remainingSteps: 0, stopReason: .completed).validate()
+        case .request(let request):
+            try require(request.version == Limits.version, "unsupported envelope version")
+            try identifier(request.id)
+            try require(request.budgetMs > 0 && request.budgetMs <= Limits.maxBudgetMS, "invalid deadline budget")
+            if case .hello(let hello) = request.body {
+                try require(request.epoch == nil, "hello must not reuse an epoch")
+                try identifier(hello.clientName)
+                try identifier(hello.authority.grantId)
+                try require(hello.supportedVersions.contains(Limits.version), "no compatible protocol version")
+            } else {
+                guard let epoch = request.epoch else { throw ContractError("epoch required") }
+                try identifier(epoch)
+            }
+            switch request.body {
+            case .observe(let value): try validTarget(value.target)
+            case .act(let value): try value.validate()
+            case .waitFor(let value):
+                try identifier(value.observationId)
+                try validTarget(value.target)
+                try value.condition.validate()
+            case .cancel(let value):
+                try identifier(value.requestId)
+                try require(value.requestId != request.id, "cancel cannot target itself")
+            default: break
+            }
+        case .response(let response):
+            try require(response.version == Limits.version, "unsupported envelope version")
+            try identifier(response.id)
+            try identifier(response.epoch)
+            switch response.body {
+            case .hello(let value):
+                try identifier(value.helperVersion)
+                try require(value.selectedVersion == Limits.version, "unsupported selected version")
+            case .targets(let value):
+                try require(value.targets.count <= Limits.maxTargets, "too many targets")
+                for target in value.targets {
+                    try validTarget(target.key)
+                    try identifier(target.bundleId)
+                    try validRect(target.bounds)
+                }
+            case .observe(let value): try value.validate()
+            case .act(let value): try value.validate()
+            case .waitFor(let value):
+                try require(!value.alreadySatisfied || value.outcome == .satisfied, "invalid alreadySatisfied wait")
+                try require(value.outcome != .satisfied || value.observation != nil, "satisfied wait needs observation")
+                try value.observation?.validate()
+            case .cancel(let value): try identifier(value.requestId)
+            case .error(let value): try require(!value.message.isEmpty, "empty error message")
+            case .capabilities: break
+            }
+        }
+    }
+
+    public static func decodeLine(_ bytes: Data) throws -> Frame {
+        try require(bytes.count <= Limits.maxFrameBytes, "frame exceeds limit")
+        let content = bytes.last == 10 ? bytes.dropLast() : bytes[...]
+        try require(content.count < Limits.maxFrameBytes, "frame exceeds limit")
+        try require(!content.contains(10) && !content.contains(13), "one JSON object per line required")
+        let frame = try JSONDecoder().decode(Frame.self, from: Data(content))
+        try frame.validate()
+        return frame
+    }
+
+    public func encodeLine() throws -> Data {
+        try validate()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        var data = try encoder.encode(self)
+        data.append(10)
+        try require(data.count <= Limits.maxFrameBytes, "frame exceeds limit")
+        return data
+    }
+}
+
+extension Progress {
+    public func validateFor(_ request: Request, expectedEpoch: String) throws {
+        try Frame.request(request).validate()
+        try Frame.progress(self).validate()
+        try require(id == request.id && epoch == expectedEpoch && request.epoch == expectedEpoch,
+                    "progress correlation mismatch")
+        guard case .act(let act) = request.body else { throw ContractError("progress requires act request") }
+        try require(observationId == act.observationId, "progress observation provenance mismatch")
+        try require(steps.count <= act.steps.count && zip(steps, act.steps).allSatisfy { $0.actionId == $1.actionId },
+                    "progress does not match requested action prefix")
+        for (receipt, step) in zip(steps, act.steps) { try expectation(step, receipt, settled: true) }
+    }
+}
+
+extension Response {
+    public func validateFor(_ request: Request, expectedEpoch: String) throws {
+        try Frame.request(request).validate()
+        try Frame.response(self).validate()
+        try require(id == request.id, "response request ID mismatch")
+        try require(epoch == expectedEpoch, "response helper epoch mismatch")
+        if case .hello = request.body {} else {
+            try require(request.epoch == expectedEpoch, "pending request epoch mismatch")
+        }
+        switch (request.body, body) {
+        case (_, .error), (.hello, .hello), (.capabilities, .capabilities), (.targets, .targets): break
+        case (.observe(let request), .observe(let observation)):
+            try require(request.target == observation.target, "observation target mismatch")
+            try require(request.includeValues || observation.elements.allSatisfy { $0.value == nil },
+                        "observation includes unrequested values")
+            try require(request.includeScreenshot || observation.screenshot == nil,
+                        "observation includes unrequested image")
+        case (.act(let request), .act(let result)):
+            try require(result.observationId == request.observationId, "act observation provenance mismatch")
+            try require(result.steps.count + Int(result.remainingSteps) == request.steps.count,
+                        "receipt prefix does not account for requested steps")
+            try require(zip(result.steps, request.steps).allSatisfy { $0.actionId == $1.actionId },
+                        "receipt does not match requested action prefix")
+            for (index, pair) in zip(result.steps, request.steps).enumerated() {
+                try expectation(pair.1, pair.0, settled: result.stopReason == .completed || index + 1 < result.steps.count)
+            }
+        case (.waitFor(let request), .waitFor(let result)):
+            if let observation = result.observation {
+                try require(request.target == observation.target, "wait observation target mismatch")
+                try require(observation.elements.allSatisfy { $0.value == nil }, "wait observation includes private values")
+            }
+        case (.cancel(let request), .cancel(let result)):
+            try require(request.requestId == result.requestId, "cancel target mismatch")
+        default: throw ContractError("response method mismatch")
+        }
+    }
+}
+
+/// Created from the trusted host handshake, never from public tool arguments.
+public struct SessionContext: Sendable {
+    public let epoch: String
+    public let authority: Authority
+    public init(epoch: String, authority: Authority) { self.epoch = epoch; self.authority = authority }
+    public func authorize(_ request: Request) throws {
+        try Frame.request(request).validate()
+        if case .hello = request.body { throw ContractError("session already initialized") }
+        try require(request.epoch == epoch, "stale helper epoch")
+        if case .act(let act) = request.body {
+            try require(act.grantId == authority.grantId, "unknown host authority grant")
+        }
+    }
+}

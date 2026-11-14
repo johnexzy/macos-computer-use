@@ -1,0 +1,1 @@
+{"kind":"progress","message":{"version":1,"id":"request-1","epoch":"helper-epoch-1","observationId":"observation-1","steps":[{"actionId":"action-1","delivery":"dispatched","verification":"confirmed","reason":null,"evidence":[{"observationId":"observation-after","condition":{"kind":"valueEquals","params":{"elementRef":"element-1","value":"hello"}},"matched":true}]}]}}

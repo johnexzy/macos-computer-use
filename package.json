@@ -25,6 +25,10 @@
     "test": "npm run build:ts && node --test test/*.test.mjs",
     "test:background": "npm run build:ts && node test/background-smoke.mjs",
     "test:live": "npm run build:ts && node test/live-smoke.mjs",
+    "test:foundations": "node --test test/baseline/*.test.mjs && cargo test --workspace && swift test --package-path protocol/swift",
+    "baseline:build": "npm run build && sh test/fixtures/macos/build.sh",
+    "baseline:preflight": "node test/baseline/run.mjs --preflight",
+    "baseline": "node test/baseline/run.mjs",
     "prepack": "npm run build:release",
     "prepublishOnly": "npm test",
     "start": "node server.mjs"

@@ -1,0 +1,1749 @@
+[
+  {
+    "name": "matching-required-expect",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "dispatched",
+                "verification": "confirmed",
+                "reason": null,
+                "evidence": [
+                  {
+                    "observationId": "observation-after",
+                    "condition": {
+                      "kind": "valueEquals",
+                      "params": {
+                        "elementRef": "element-1",
+                        "value": "hello"
+                      }
+                    },
+                    "matched": true
+                  }
+                ]
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "completed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "settled-progress",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              },
+              {
+                "actionId": "action-2",
+                "operation": {
+                  "kind": "press",
+                  "params": {
+                    "elementRef": "element-1"
+                  }
+                },
+                "precondition": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "next stage"
+                  }
+                },
+                "expect": null
+              },
+              {
+                "actionId": "action-3",
+                "operation": {
+                  "kind": "scroll",
+                  "params": {
+                    "elementRef": "element-1",
+                    "axis": "vertical",
+                    "amount": 100
+                  }
+                },
+                "precondition": null,
+                "expect": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "progress",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "observationId": "observation-1",
+        "steps": [
+          {
+            "actionId": "action-1",
+            "delivery": "dispatched",
+            "verification": "confirmed",
+            "reason": null,
+            "evidence": [
+              {
+                "observationId": "observation-after",
+                "condition": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "matched": true
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "preserved-prefix",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              },
+              {
+                "actionId": "action-2",
+                "operation": {
+                  "kind": "press",
+                  "params": {
+                    "elementRef": "element-1"
+                  }
+                },
+                "precondition": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "next stage"
+                  }
+                },
+                "expect": null
+              },
+              {
+                "actionId": "action-3",
+                "operation": {
+                  "kind": "scroll",
+                  "params": {
+                    "elementRef": "element-1",
+                    "axis": "vertical",
+                    "amount": 100
+                  }
+                },
+                "precondition": null,
+                "expect": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "dispatched",
+                "verification": "confirmed",
+                "reason": null,
+                "evidence": [
+                  {
+                    "observationId": "observation-after",
+                    "condition": {
+                      "kind": "valueEquals",
+                      "params": {
+                        "elementRef": "element-1",
+                        "value": "hello"
+                      }
+                    },
+                    "matched": true
+                  }
+                ]
+              },
+              {
+                "actionId": "action-2",
+                "delivery": "not_dispatched",
+                "verification": "unverified",
+                "reason": "preconditionFailed",
+                "evidence": []
+              }
+            ],
+            "remainingSteps": 1,
+            "stopReason": "preconditionFailed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "already-satisfied-matching-expect",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "not_dispatched",
+                "verification": "confirmed",
+                "reason": "alreadySatisfied",
+                "evidence": [
+                  {
+                    "observationId": "observation-1",
+                    "condition": {
+                      "kind": "valueEquals",
+                      "params": {
+                        "elementRef": "element-1",
+                        "value": "hello"
+                      }
+                    },
+                    "matched": true
+                  }
+                ]
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "completed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "act-unknown-state-confirmed",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "unknown",
+                "verification": "confirmed",
+                "reason": "deadlineExceeded",
+                "evidence": [
+                  {
+                    "observationId": "observation-after",
+                    "condition": {
+                      "kind": "valueEquals",
+                      "params": {
+                        "elementRef": "element-1",
+                        "value": "hello"
+                      }
+                    },
+                    "matched": true
+                  }
+                ]
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "deadlineExceeded"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "act-unknown-state-mismatch",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "unknown",
+                "verification": "mismatch",
+                "reason": "deadlineExceeded",
+                "evidence": [
+                  {
+                    "observationId": "observation-after",
+                    "condition": {
+                      "kind": "valueEquals",
+                      "params": {
+                        "elementRef": "element-1",
+                        "value": "hello"
+                      }
+                    },
+                    "matched": false
+                  }
+                ]
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "deadlineExceeded"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "act-timeout-dispatch-unknown",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "unknown",
+                "verification": "unverified",
+                "reason": "deadlineExceeded",
+                "evidence": []
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "deadlineExceeded"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "act-helper-death-dispatch-unknown",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "unknown",
+                "verification": "unverified",
+                "reason": "helperDied",
+                "evidence": []
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "helperDied"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "terminal-dispatched-unverified-timeout",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "dispatched",
+                "verification": "unverified",
+                "reason": "deadlineExceeded",
+                "evidence": []
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "deadlineExceeded"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "unrelated-confirmed-value",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "dispatched",
+                "verification": "confirmed",
+                "reason": null,
+                "evidence": [
+                  {
+                    "observationId": "observation-after",
+                    "condition": {
+                      "kind": "valueEquals",
+                      "params": {
+                        "elementRef": "element-1",
+                        "value": "wrong"
+                      }
+                    },
+                    "matched": true
+                  }
+                ]
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "completed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "completed-unverified-required-expect",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "dispatched",
+                "verification": "unverified",
+                "reason": null,
+                "evidence": []
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "completed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "precondition-not-postcondition",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "dispatched",
+                "verification": "confirmed",
+                "reason": null,
+                "evidence": [
+                  {
+                    "observationId": "observation-after",
+                    "condition": {
+                      "kind": "enabled",
+                      "params": {
+                        "elementRef": "element-1",
+                        "enabled": true
+                      }
+                    },
+                    "matched": true
+                  }
+                ]
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "completed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "already-satisfied-unrelated-expect",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "not_dispatched",
+                "verification": "confirmed",
+                "reason": "alreadySatisfied",
+                "evidence": [
+                  {
+                    "observationId": "observation-1",
+                    "condition": {
+                      "kind": "valueEquals",
+                      "params": {
+                        "elementRef": "element-1",
+                        "value": "wrong"
+                      }
+                    },
+                    "matched": true
+                  }
+                ]
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "completed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "unrelated-mismatch",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "dispatched",
+                "verification": "mismatch",
+                "reason": "verificationFailed",
+                "evidence": [
+                  {
+                    "observationId": "observation-after",
+                    "condition": {
+                      "kind": "valueEquals",
+                      "params": {
+                        "elementRef": "element-1",
+                        "value": "wrong"
+                      }
+                    },
+                    "matched": false
+                  }
+                ]
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "verificationFailed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "progress-unverified-expect",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              },
+              {
+                "actionId": "action-2",
+                "operation": {
+                  "kind": "press",
+                  "params": {
+                    "elementRef": "element-1"
+                  }
+                },
+                "precondition": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "next stage"
+                  }
+                },
+                "expect": null
+              },
+              {
+                "actionId": "action-3",
+                "operation": {
+                  "kind": "scroll",
+                  "params": {
+                    "elementRef": "element-1",
+                    "axis": "vertical",
+                    "amount": 100
+                  }
+                },
+                "precondition": null,
+                "expect": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "progress",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "observationId": "observation-1",
+        "steps": [
+          {
+            "actionId": "action-1",
+            "delivery": "dispatched",
+            "verification": "unverified",
+            "reason": null,
+            "evidence": []
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "progress-unrelated-expect",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              },
+              {
+                "actionId": "action-2",
+                "operation": {
+                  "kind": "press",
+                  "params": {
+                    "elementRef": "element-1"
+                  }
+                },
+                "precondition": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "next stage"
+                  }
+                },
+                "expect": null
+              },
+              {
+                "actionId": "action-3",
+                "operation": {
+                  "kind": "scroll",
+                  "params": {
+                    "elementRef": "element-1",
+                    "axis": "vertical",
+                    "amount": 100
+                  }
+                },
+                "precondition": null,
+                "expect": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "progress",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "observationId": "observation-1",
+        "steps": [
+          {
+            "actionId": "action-1",
+            "delivery": "dispatched",
+            "verification": "confirmed",
+            "reason": null,
+            "evidence": [
+              {
+                "observationId": "observation-after",
+                "condition": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "wrong"
+                  }
+                },
+                "matched": true
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "prior-step-unverified-before-next-step",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              },
+              {
+                "actionId": "action-2",
+                "operation": {
+                  "kind": "press",
+                  "params": {
+                    "elementRef": "element-1"
+                  }
+                },
+                "precondition": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "next stage"
+                  }
+                },
+                "expect": null
+              },
+              {
+                "actionId": "action-3",
+                "operation": {
+                  "kind": "scroll",
+                  "params": {
+                    "elementRef": "element-1",
+                    "axis": "vertical",
+                    "amount": 100
+                  }
+                },
+                "precondition": null,
+                "expect": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "observation-1",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "dispatched",
+                "verification": "unverified",
+                "reason": null,
+                "evidence": []
+              },
+              {
+                "actionId": "action-2",
+                "delivery": "not_dispatched",
+                "verification": "unverified",
+                "reason": "preconditionFailed",
+                "evidence": []
+              }
+            ],
+            "remainingSteps": 1,
+            "stopReason": "preconditionFailed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "wrong-act-observation-provenance",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "act",
+          "data": {
+            "observationId": "unrelated-observation",
+            "steps": [
+              {
+                "actionId": "action-1",
+                "delivery": "dispatched",
+                "verification": "confirmed",
+                "reason": null,
+                "evidence": [
+                  {
+                    "observationId": "observation-after",
+                    "condition": {
+                      "kind": "valueEquals",
+                      "params": {
+                        "elementRef": "element-1",
+                        "value": "hello"
+                      }
+                    },
+                    "matched": true
+                  }
+                ]
+              }
+            ],
+            "remainingSteps": 0,
+            "stopReason": "completed"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "wrong-progress-observation-provenance",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "act",
+          "params": {
+            "grantId": "host-grant-1",
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "steps": [
+              {
+                "actionId": "action-1",
+                "operation": {
+                  "kind": "setValue",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "precondition": {
+                  "kind": "enabled",
+                  "params": {
+                    "elementRef": "element-1",
+                    "enabled": true
+                  }
+                },
+                "expect": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                }
+              },
+              {
+                "actionId": "action-2",
+                "operation": {
+                  "kind": "press",
+                  "params": {
+                    "elementRef": "element-1"
+                  }
+                },
+                "precondition": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "next stage"
+                  }
+                },
+                "expect": null
+              },
+              {
+                "actionId": "action-3",
+                "operation": {
+                  "kind": "scroll",
+                  "params": {
+                    "elementRef": "element-1",
+                    "axis": "vertical",
+                    "amount": 100
+                  }
+                },
+                "precondition": null,
+                "expect": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "progress",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "observationId": "unrelated-observation",
+        "steps": [
+          {
+            "actionId": "action-1",
+            "delivery": "dispatched",
+            "verification": "confirmed",
+            "reason": null,
+            "evidence": [
+              {
+                "observationId": "observation-after",
+                "condition": {
+                  "kind": "valueEquals",
+                  "params": {
+                    "elementRef": "element-1",
+                    "value": "hello"
+                  }
+                },
+                "matched": true
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+]

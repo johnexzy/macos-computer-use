@@ -1,0 +1,706 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "c41fb7ce-0aa1-4435-888c-81e154a33799",
+  "startedAt": "2026-11-14T10:28:45.246Z",
+  "finishedAt": "2026-11-14T10:29:04.427Z",
+  "implementation": "legacy-typescript-swift",
+  "invocation": "in-process tool registry; MCP transport excluded",
+  "source": {
+    "revision": "21e5f981e3990631704df262c966ab77305d006a",
+    "dirty": true,
+    "legacySourceRevision": "f1ef2a023e8bedfd340d4832f7b3d94b991d3b91",
+    "helperSha256": "d9e29751912cf2ec79647b25a87095de1d2aab4fb8780196631ce282cf4c8466",
+    "fixtureSha256": "457f3243c13ce86d15e93d7822a39fde7ead6695473f324d1e7db3567dede54c",
+    "harnessSourceSha256": {
+      "test/baseline/run.mjs": "acafeed59fd67dd053c59c8620af02d7ebaa69da6b0f1dec9a3093724f93675a",
+      "test/baseline/metrics.mjs": "26f9243939be04c904565b8e84e162174aa0f7d2bbbda779be9176299e1d90e0",
+      "test/baseline/oracle.mjs": "29ef1603bbd88aeb0b66d669ab4c11f3d68e1df63abbbad33d5c9f9a08b808f3",
+      "test/fixtures/macos/main.swift": "9a6c68a678a759ae471f727d79a5033545ce383bf16ace99230e990d469ec490",
+      "test/fixtures/macos/build.sh": "b52156e97b511602cff9b8a01ebc757ea8a401f5529db198dd01bccaba4fbe3d",
+      "test/fixtures/macos/Info.plist": "731f4d5e2879c7ed7911ca369d95ce42e2a79ab733e5d551261b729940bcdecb"
+    },
+    "note": "Measured from the uncommitted foundation worktree at the recorded base revision. Shipping src/native sources were unchanged. Harness sources are preserved with this evidence."
+  },
+  "environment": {
+    "platform": "darwin",
+    "release": "27.2.0",
+    "architecture": "arm64",
+    "cpu": "Apple M5 Pro",
+    "memoryBytes": 51539607552,
+    "node": "v26.3.0",
+    "macOS": "27.2.1",
+    "osVersion": "Version 27.2.1 (Build 26B131)",
+    "permissions": {
+      "accessibility": true,
+      "inputPosting": true,
+      "screenRecording": true
+    },
+    "permissionPromptRequested": false,
+    "display": {
+      "pixelWidth": 3440,
+      "width": 3440,
+      "scale": 1,
+      "height": 1440,
+      "pixelHeight": 1440
+    }
+  },
+  "model": {
+    "runs": false,
+    "id": null,
+    "reason": "Scripted driver scenarios; no model inference or paid campaign"
+  },
+  "budgets": {
+    "repetitions": 3,
+    "oracleTimeoutMs": 1000,
+    "fixtureRequestTimeoutMs": 5000,
+    "nativeCallTimeoutMs": null,
+    "nativeCallLimitReason": "Legacy NativeBridge has no native request deadline"
+  },
+  "summary": {
+    "assigned": 27,
+    "outcomes": {
+      "passed": 12,
+      "failed": 15,
+      "unknown": 0,
+      "setup_blocked": 0
+    },
+    "byKind": {
+      "mutation": {
+        "assigned": 12,
+        "passed": 9,
+        "failed": 3,
+        "unknown": 0
+      },
+      "already_satisfied": {
+        "assigned": 3,
+        "passed": 3,
+        "failed": 0,
+        "unknown": 0
+      },
+      "refusal": {
+        "assigned": 12,
+        "passed": 0,
+        "failed": 12,
+        "unknown": 0
+      }
+    },
+    "scenarioSuccessRate": 0.4444444444444444,
+    "repeatedRunSuccess": {
+      "repetitions": 3,
+      "groups": 9,
+      "completeGroups": 9,
+      "incompleteGroups": 0,
+      "value": 0.4444444444444444
+    },
+    "completionClaims": {
+      "measured": false,
+      "total": 0,
+      "false": 0,
+      "unknown": 0,
+      "falsePerClaim": null,
+      "falsePerAssigned": null
+    },
+    "effectClaims": {
+      "total": 21,
+      "contradicted": 0,
+      "unknown": 15
+    },
+    "alreadySatisfied": 3,
+    "unassistedScenarioSuccessRate": 0.4444444444444444,
+    "humanRescueMinutes": null,
+    "usage": {
+      "inputTokens": null,
+      "cachedInputTokens": null,
+      "visualTokens": null,
+      "reasoningTokens": null,
+      "outputTokens": null,
+      "costUsd": null
+    },
+    "costPerVerifiedScenario": null,
+    "costRatioReason": "unmeasured_cost",
+    "latencyMs": {
+      "samples": 27,
+      "p50": 338.1185830000004,
+      "p95": 1340.1492080000007
+    },
+    "responseBytes": {
+      "samples": 27,
+      "p50": 2671,
+      "p95": 2673
+    },
+    "phases": {
+      "helper_startup_proxy": {
+        "samples": 27,
+        "p50": 4.7479999999995925,
+        "p95": 5.526625000000422
+      },
+      "helper_roundtrip": {
+        "samples": 219,
+        "p50": 5.96329199999991,
+        "p95": 68.85366599999998
+      },
+      "ax_traversal_roundtrip": {
+        "samples": 27,
+        "p50": 86.35287500000004,
+        "p95": 97.39475000000039
+      },
+      "action_readback_roundtrip": {
+        "samples": 27,
+        "p50": 83.3002919999999,
+        "p95": 99.72791699999834
+      },
+      "oracle_convergence": {
+        "samples": 27,
+        "p50": 0.0023330000003625173,
+        "p95": 1015.7259579999991
+      },
+      "capture_cli": {
+        "samples": 3,
+        "p50": 88.61149999999998,
+        "p95": 88.77158400000008
+      },
+      "ocr_roundtrip": {
+        "samples": 3,
+        "p50": 131.26816599999984,
+        "p95": 142.58354100000008
+      }
+    },
+    "toolCalls": 54,
+    "nativeActionRequests": 27,
+    "fixtureWriteAttempts": 27,
+    "fixtureAppliedWrites": 21,
+    "foreground": {
+      "method": "frontmost PID sampled before and after; transient changes are not excluded",
+      "changedEndpoints": 0,
+      "fixtureActivations": 0,
+      "unknownEndpoints": 0
+    }
+  },
+  "cases": [
+    {
+      "caseId": "set-value/clean",
+      "kind": "mutation",
+      "condition": "clean",
+      "instruction": "Set the observed primary.first control to the trial value; preserve every other control and foreground application.",
+      "outcomes": [
+        "passed",
+        "passed",
+        "passed"
+      ],
+      "nativeActionRequests": [
+        1,
+        1,
+        1
+      ],
+      "fixtureWriteAttempts": [
+        1,
+        1,
+        1
+      ],
+      "fixtureAppliedWrites": [
+        1,
+        1,
+        1
+      ],
+      "driverVerificationClaims": [
+        true,
+        true,
+        true
+      ],
+      "independentEffectObserved": [
+        true,
+        true,
+        true
+      ],
+      "intendedRefusal": null
+    },
+    {
+      "caseId": "set-value/ignored",
+      "kind": "mutation",
+      "condition": "adverse",
+      "instruction": "Set the observed primary.first control to the trial value; preserve every other control and foreground application.",
+      "outcomes": [
+        "failed",
+        "failed",
+        "failed"
+      ],
+      "nativeActionRequests": [
+        1,
+        1,
+        1
+      ],
+      "fixtureWriteAttempts": [
+        1,
+        1,
+        1
+      ],
+      "fixtureAppliedWrites": [
+        0,
+        0,
+        0
+      ],
+      "driverVerificationClaims": [
+        false,
+        false,
+        false
+      ],
+      "independentEffectObserved": [
+        false,
+        false,
+        false
+      ],
+      "intendedRefusal": null
+    },
+    {
+      "caseId": "set-value/delayed",
+      "kind": "mutation",
+      "condition": "adverse",
+      "instruction": "Set the observed primary.first control to the trial value; preserve every other control and foreground application.",
+      "outcomes": [
+        "passed",
+        "passed",
+        "passed"
+      ],
+      "nativeActionRequests": [
+        1,
+        1,
+        1
+      ],
+      "fixtureWriteAttempts": [
+        1,
+        1,
+        1
+      ],
+      "fixtureAppliedWrites": [
+        1,
+        1,
+        1
+      ],
+      "driverVerificationClaims": [
+        false,
+        false,
+        false
+      ],
+      "independentEffectObserved": [
+        true,
+        true,
+        true
+      ],
+      "intendedRefusal": null
+    },
+    {
+      "caseId": "set-value/reordered",
+      "kind": "mutation",
+      "condition": "adverse",
+      "instruction": "Set the observed primary.first control to the trial value; preserve every other control and foreground application.",
+      "outcomes": [
+        "passed",
+        "passed",
+        "passed"
+      ],
+      "nativeActionRequests": [
+        1,
+        1,
+        1
+      ],
+      "fixtureWriteAttempts": [
+        1,
+        1,
+        1
+      ],
+      "fixtureAppliedWrites": [
+        1,
+        1,
+        1
+      ],
+      "driverVerificationClaims": [
+        true,
+        true,
+        true
+      ],
+      "independentEffectObserved": [
+        true,
+        true,
+        true
+      ],
+      "intendedRefusal": null
+    },
+    {
+      "caseId": "set-value/already-satisfied",
+      "kind": "already_satisfied",
+      "condition": "adverse",
+      "instruction": "Set the observed primary.first control to the trial value; preserve every other control and foreground application.",
+      "outcomes": [
+        "passed",
+        "passed",
+        "passed"
+      ],
+      "nativeActionRequests": [
+        1,
+        1,
+        1
+      ],
+      "fixtureWriteAttempts": [
+        1,
+        1,
+        1
+      ],
+      "fixtureAppliedWrites": [
+        0,
+        0,
+        0
+      ],
+      "driverVerificationClaims": [
+        true,
+        true,
+        true
+      ],
+      "independentEffectObserved": [
+        null,
+        null,
+        null
+      ],
+      "intendedRefusal": null
+    },
+    {
+      "caseId": "target-safety/recreated",
+      "kind": "refusal",
+      "condition": "adverse",
+      "instruction": "Refuse the stale or ambiguous observed target without mutating another control.",
+      "outcomes": [
+        "failed",
+        "failed",
+        "failed"
+      ],
+      "nativeActionRequests": [
+        1,
+        1,
+        1
+      ],
+      "fixtureWriteAttempts": [
+        1,
+        1,
+        1
+      ],
+      "fixtureAppliedWrites": [
+        1,
+        1,
+        1
+      ],
+      "driverVerificationClaims": [
+        true,
+        true,
+        true
+      ],
+      "independentEffectObserved": [
+        null,
+        null,
+        null
+      ],
+      "intendedRefusal": [
+        {
+          "passed": false,
+          "code": null,
+          "unexpectedError": false,
+          "unchanged": false
+        },
+        {
+          "passed": false,
+          "code": null,
+          "unexpectedError": false,
+          "unchanged": false
+        },
+        {
+          "passed": false,
+          "code": null,
+          "unexpectedError": false,
+          "unchanged": false
+        }
+      ]
+    },
+    {
+      "caseId": "target-safety/reopened",
+      "kind": "refusal",
+      "condition": "adverse",
+      "instruction": "Refuse the stale or ambiguous observed target without mutating another control.",
+      "outcomes": [
+        "failed",
+        "failed",
+        "failed"
+      ],
+      "nativeActionRequests": [
+        1,
+        1,
+        1
+      ],
+      "fixtureWriteAttempts": [
+        1,
+        1,
+        1
+      ],
+      "fixtureAppliedWrites": [
+        1,
+        1,
+        1
+      ],
+      "driverVerificationClaims": [
+        true,
+        true,
+        true
+      ],
+      "independentEffectObserved": [
+        null,
+        null,
+        null
+      ],
+      "intendedRefusal": [
+        {
+          "passed": false,
+          "code": null,
+          "unexpectedError": false,
+          "unchanged": false
+        },
+        {
+          "passed": false,
+          "code": null,
+          "unexpectedError": false,
+          "unchanged": false
+        },
+        {
+          "passed": false,
+          "code": null,
+          "unexpectedError": false,
+          "unchanged": false
+        }
+      ]
+    },
+    {
+      "caseId": "target-safety/duplicate-label",
+      "kind": "refusal",
+      "condition": "adverse",
+      "instruction": "Refuse the stale or ambiguous observed target without mutating another control.",
+      "outcomes": [
+        "failed",
+        "failed",
+        "failed"
+      ],
+      "nativeActionRequests": [
+        1,
+        1,
+        1
+      ],
+      "fixtureWriteAttempts": [
+        1,
+        1,
+        1
+      ],
+      "fixtureAppliedWrites": [
+        1,
+        1,
+        1
+      ],
+      "driverVerificationClaims": [
+        true,
+        true,
+        true
+      ],
+      "independentEffectObserved": [
+        null,
+        null,
+        null
+      ],
+      "intendedRefusal": [
+        {
+          "passed": false,
+          "code": null,
+          "unexpectedError": false,
+          "unchanged": false
+        },
+        {
+          "passed": false,
+          "code": null,
+          "unexpectedError": false,
+          "unchanged": false
+        },
+        {
+          "passed": false,
+          "code": null,
+          "unexpectedError": false,
+          "unchanged": false
+        }
+      ]
+    },
+    {
+      "caseId": "target-safety/ambiguous-windows",
+      "kind": "refusal",
+      "condition": "adverse",
+      "instruction": "Refuse the stale or ambiguous observed target without mutating another control.",
+      "outcomes": [
+        "failed",
+        "failed",
+        "failed"
+      ],
+      "nativeActionRequests": [
+        1,
+        1,
+        1
+      ],
+      "fixtureWriteAttempts": [
+        1,
+        1,
+        1
+      ],
+      "fixtureAppliedWrites": [
+        1,
+        1,
+        1
+      ],
+      "driverVerificationClaims": [
+        true,
+        true,
+        true
+      ],
+      "independentEffectObserved": [
+        null,
+        null,
+        null
+      ],
+      "intendedRefusal": [
+        {
+          "passed": false,
+          "code": null,
+          "unexpectedError": false,
+          "unchanged": false
+        },
+        {
+          "passed": false,
+          "code": null,
+          "unexpectedError": false,
+          "unchanged": false
+        },
+        {
+          "passed": false,
+          "code": null,
+          "unexpectedError": false,
+          "unchanged": false
+        }
+      ]
+    }
+  ],
+  "conditionComparison": [
+    {
+      "cleanCaseId": "set-value/clean",
+      "adverseCaseId": "set-value/ignored",
+      "pairs": [
+        {
+          "fixtureSeed": "two-window-v1",
+          "repeat": 0,
+          "clean": "passed",
+          "adverse": "failed",
+          "elapsedDeltaMs": 997.0740829999997
+        },
+        {
+          "fixtureSeed": "two-window-v1",
+          "repeat": 1,
+          "clean": "passed",
+          "adverse": "failed",
+          "elapsedDeltaMs": 999.3826239999989
+        },
+        {
+          "fixtureSeed": "two-window-v1",
+          "repeat": 2,
+          "clean": "passed",
+          "adverse": "failed",
+          "elapsedDeltaMs": 990.6846670000014
+        }
+      ],
+      "missingAdverse": [],
+      "missingClean": []
+    },
+    {
+      "cleanCaseId": "set-value/clean",
+      "adverseCaseId": "set-value/delayed",
+      "pairs": [
+        {
+          "fixtureSeed": "two-window-v1",
+          "repeat": 0,
+          "clean": "passed",
+          "adverse": "passed",
+          "elapsedDeltaMs": 148.63579099999976
+        },
+        {
+          "fixtureSeed": "two-window-v1",
+          "repeat": 1,
+          "clean": "passed",
+          "adverse": "passed",
+          "elapsedDeltaMs": 164.30541599999924
+        },
+        {
+          "fixtureSeed": "two-window-v1",
+          "repeat": 2,
+          "clean": "passed",
+          "adverse": "passed",
+          "elapsedDeltaMs": 164.22129200000018
+        }
+      ],
+      "missingAdverse": [],
+      "missingClean": []
+    },
+    {
+      "cleanCaseId": "set-value/clean",
+      "adverseCaseId": "set-value/reordered",
+      "pairs": [
+        {
+          "fixtureSeed": "two-window-v1",
+          "repeat": 0,
+          "clean": "passed",
+          "adverse": "passed",
+          "elapsedDeltaMs": -8.34358399999968
+        },
+        {
+          "fixtureSeed": "two-window-v1",
+          "repeat": 1,
+          "clean": "passed",
+          "adverse": "passed",
+          "elapsedDeltaMs": 4.212207999999009
+        },
+        {
+          "fixtureSeed": "two-window-v1",
+          "repeat": 2,
+          "clean": "passed",
+          "adverse": "passed",
+          "elapsedDeltaMs": 1.4015010000020993
+        }
+      ],
+      "missingAdverse": [],
+      "missingClean": []
+    }
+  ],
+  "isolation": {
+    "uniqueFixtureProcesses": 27,
+    "uniqueFixtureRunNonces": 27,
+    "cleanupErrors": 0
+  },
+  "interpretation": [
+    "12/27 is a mixed scripted scenario result, not an autonomous agent success rate. Mutation, refusal and already-satisfied categories must be read separately.",
+    "Clean, delayed and reordered edits passed 3/3 independently. Delayed edits applied within the 1s oracle budget despite immediate unconfirmed driver results.",
+    "Ignored writes applied nothing and returned unconfirmed errors. These are deliberate task noncompletion cases, not false verified-effect claims.",
+    "Already-satisfied fields had zero applied writes. Matching readback is not proof of a newly produced effect.",
+    "Recreated controls accepted writes into replacement generations. This exposes missing retained identity in legacy selectors, rather than violating an existing observation-reference promise.",
+    "Reopened-window actions used old window IDs but applied writes to replacement windows. This is a fail-closed target-integrity gap.",
+    "Duplicate labels and indistinguishable window metadata were accepted instead of refused. Observed writes reached the primary field; the evidence does not show a wrong-window write.",
+    "The recorded campaign had no endpoint foreground changes or fixture activations. Endpoint sampling does not exclude transient focus changes or establish background support in other apps.",
+    "No model inference was run. Token usage, task-completion claim errors, rescue minutes and monetary cost are unmeasured, not zero.",
+    "NativeBridge samples include helper startup, native work, JSON and IPC; component samples overlap and must not be subtracted.",
+    "match_text is a helper-startup proxy, not isolated startup time. Capture is CLI wall time; OCR is capture-free helper roundtrip.",
+    "Refusal correctness is separate from mutation completion. Unknown oracle results never establish success.",
+    "Endpoint foreground sampling cannot exclude transient focus theft. Model usage/cost and human-rescue metrics are unmeasured.",
+    "Scenario latency includes observation/action/oracle convergence and excludes separate helper-startup and capture/OCR probes."
+  ],
+  "localArtifacts": {
+    "directory": ".artifacts/per-1-baseline-recorded-2026-11-14",
+    "reportSha256": "adf73c5189fee0828c13edb7105c1b614b751fa6f7d6189448b7409ee0511690",
+    "traceSha256": "ccf5bb9013fe2fe9630f3e03dcd73ce68e13029a5a7e2e6d3f20eaf4387f960e",
+    "note": "Full reports/traces and fixture-only images remain in the ignored local artifact directory; this committed summary omits process/window IDs and raw screenshots."
+  }
+}
