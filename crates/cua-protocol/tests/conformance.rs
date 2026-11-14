@@ -24,7 +24,7 @@ fn shared_valid_fixtures_decode_and_round_trip() {
     let paths = fixtures("valid");
     assert_eq!(
         paths.len(),
-        34,
+        37,
         "keep the shared fixture inventory deliberate"
     );
     for path in paths {

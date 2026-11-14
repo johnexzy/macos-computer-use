@@ -7,7 +7,7 @@ TypeScript server and native helper remain the runnable product.
 
 ## Boundary and transport
 
-The future Rust host owns MCP, public argument validation, host authorization,
+The Rust host owns MCP, public argument validation, host authorization,
 end-to-end deadlines, and response correlation. Swift owns macOS objects, exact
 window resolution, AX references, capture geometry, and dispatch. No FFI or daemon
 is required by this contract. The transport is a private child-process pipe.
@@ -52,15 +52,16 @@ host grant is `backgroundRequired`; `foregroundAllowed` is representable only fo
 an explicitly host-authorized session. **Public model arguments must never supply
 the handshake, grant, or a policy upgrade.** These are internal control messages.
 `SessionContext.authorize` rejects another grant, an old epoch, and a second hello.
-The future host/runtime must call it; the contract alone cannot authenticate a
+The host/runtime must call it; the contract alone cannot authenticate a
 process that can write to the private pipe.
 
 All later requests carry the helper epoch. References and observations belong to
 that epoch and exact `(pid, windowId)`. A helper restart invalidates them. Runtime
 limits are **32 retained observations**, **60 seconds maximum retention**, **256
 elements per observation**, and **256 returned targets**, with explicit truncation
-or partial coverage. The constants are shared; retention storage is future runtime
-work. References are opaque retained AX objects, not indices for a model to invent.
+or partial coverage. The constants are shared and the persistent runtime enforces
+retention for its lifecycle observations. Semantic element references follow in
+PER-5; they are opaque retained AX objects, not indices for a model to invent.
 
 Request IDs are unique within an epoch and are never reused there. Action IDs are
 unique within their request. They correlate receipts; they do not make mutations
@@ -85,8 +86,13 @@ validates its request ID/epoch/action order and retains it; prefixes must grow b
 one and never alter earlier receipts. On EOF the host first drains all complete
 frames. It can then preserve the last settled prefix, mark the next unacknowledged
 step unknown, and leave later steps unsent. An unknown or failed step is returned
-in the final act result, not in progress. This protocol requirement is not an
-implemented streaming runtime.
+in the final act result, not in progress.
+
+The Rust client implements prefix accounting and rejects rewritten or regressing
+progress. If EOF cannot be established within its bounded drain, it returns typed
+uncertainty for the whole unacknowledged suffix instead of claiming later steps
+were unsent. The current Swift runtime sends no native input; progress production
+accompanies semantic dispatch in subsequent work.
 
 ## Operations
 

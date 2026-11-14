@@ -147,6 +147,9 @@ public enum ErrorCode: String, Codable, Equatable, Sendable {
     case staleElement
     case unsupported
     case nativeFailed
+    case deadlineExceeded
+    case cancelled
+    case resourceLimit
 }
 
 public enum WaitOutcome: String, Codable, Equatable, Sendable {
