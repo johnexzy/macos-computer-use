@@ -229,6 +229,13 @@ round trip also includes those layers. These timings do not show improved task
 completion or isolate Swift work from pipe overhead. Model usage and monetary cost
 remain unmeasured.
 
+The [PER-5/PER-6 verification record](evidence/per-5-per-6-verification-2026-11-14.json)
+records 134 passing automated tests and 60/60 live fixture trials (20 scenarios,
+three repetitions), with no final setup or cleanup failures. It preserves the two
+earlier clean campaigns and their failure dispositions. The three deliberately
+killed owners retain unknown delivery; that uncertainty is an expected result.
+These are fixture-conformance results, not autonomous or arbitrary-app success.
+
 The earlier [PER-3/PER-4 verification record](evidence/per-3-per-4-verification-2026-11-14.json)
 records 91 passing automated tests and native process smoke checks for that earlier
 milestone. Its fifty warm
