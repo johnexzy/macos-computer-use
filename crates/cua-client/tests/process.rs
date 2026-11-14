@@ -211,6 +211,37 @@ async fn helper_death_drains_settled_progress_before_synthesizing_uncertainty() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_correlated_wait_timeout_survives_host_deadline_reconciliation_but_late_success_does_not()
+{
+    for scenario in ["late_wait_timeout", "late_wait_satisfied"] {
+        let client = peer(scenario).await;
+        let request = RequestBody::WaitFor(WaitRequest {
+            observation_id: "observation-1".into(),
+            target: TargetKey {
+                pid: 42,
+                window_id: 7,
+            },
+            condition: Condition::ValueEquals(ValueCondition {
+                element_ref: "element-1".into(),
+                value: "ready".into(),
+            }),
+        });
+        let result = client
+            .call(request, Duration::from_millis(25), CancellationToken::new())
+            .await;
+        if scenario == "late_wait_timeout" {
+            let response = result.expect("correlated negative wait receipt was discarded");
+            assert!(
+                matches!(response.body, ResponseBody::WaitFor(wait) if wait.outcome == WaitOutcome::TimedOut)
+            );
+        } else {
+            assert_eq!(result.unwrap_err().kind, ClientErrorKind::DeadlineExceeded);
+        }
+        client.shutdown().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn helper_loss_during_a_pure_wait_preserves_prefix_without_unknown_input() {
     let client = peer("eof_after_prefix").await;
     let mut body = act(3);

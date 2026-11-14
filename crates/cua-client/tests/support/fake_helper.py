@@ -159,6 +159,22 @@ for line in sys.stdin:
     if scenario == "late":
         threading.Thread(target=delayed_reply, args=(request,), daemon=True).start()
         continue
+    if method == "waitFor" and scenario in {"late_wait_timeout", "late_wait_satisfied"}:
+        time.sleep(0.075)
+        satisfied = scenario == "late_wait_satisfied"
+        emit(response(request, "waitFor", {
+            "outcome": "satisfied" if satisfied else "timedOut", "alreadySatisfied": False,
+            "observation": {
+                "observationId": "after-wait", "target": params["target"],
+                "collected": {"startedUnixMs": 1, "finishedUnixMs": 2},
+                "windowBounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+                "accessibility": "unavailable", "accessibilityCollected": None,
+                "elements": [], "screenshot": None,
+            } if satisfied else None,
+            "evidence": {"observationId": "check-after-wait", "condition": params["condition"],
+                         "matched": True, "collected": {"startedUnixMs": 1, "finishedUnixMs": 2}} if satisfied else None,
+        }))
+        continue
     if method == "act":
         if params["grantId"] != authority["grantId"]:
             emit(response(request, "error", {"code": "authorityDenied", "message": "wrong grant"}))

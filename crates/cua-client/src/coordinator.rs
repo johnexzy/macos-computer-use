@@ -447,6 +447,12 @@ fn interrupted_final(
         }
         return Ok(response);
     }
+    // Correlated negative wait receipts remain useful; a late satisfied read cannot extend the host deadline.
+    if matches!(request.body, RequestBody::WaitFor(_))
+        && matches!(&response.body, ResponseBody::WaitFor(result) if matches!(result.outcome, WaitOutcome::TimedOut | WaitOutcome::Cancelled))
+    {
+        return Ok(response);
+    }
     // A validated pre-dispatch native rejection remains useful evidence that no input was sent.
     if matches!(request.body, RequestBody::Act(_)) {
         return Ok(response);

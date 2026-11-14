@@ -58,15 +58,21 @@ compatible titles when available. Both AX candidate ties and equivalent CG
 siblings are rejected. A missing AX title cannot distinguish equal-bounds CG
 siblings with different titles. There is no nearest-window scoring or private API.
 
-Each catalog read takes one visible CG-window list, then resolves its distinct
-owner PIDs once on the AppKit main queue using `NSRunningApplication(pid:)`. All
-rows share that immutable PID-to-bundle map. The main queue performs no explicit
-AX calls or input for this metadata read, and the separate logical deadline stays
-active while the worker waits. No process metadata is cached or retried across
-calls. Process association rejects incomplete owned layer-zero rows instead of
-silently dropping a sibling. An absent exact CG pair is `targetNotFound`; an
-existing pair with unavailable process metadata is a native metadata failure.
-These coherent per-call inputs still do not form an atomic cross-API snapshot.
+Each catalog read takes one visible CG-window list and shares one PID-to-bundle
+map across its rows. Immutable bundle metadata is retained in a 256-entry cache
+with an absolute, non-refreshing 60-second lifetime. Every use and fill checks the
+public kernel process-birth time and executable UUID before and after resolution;
+changed, exited, unavailable or zero-image signatures invalidate the entry. Missing
+metadata is not negatively cached or retried. Initial bundle lookup runs on AppKit's
+main queue; repeated reads reuse it only for the same live birth/image signature.
+This signature cannot distinguish every exec, including same-image exec, and is not
+an OS identity attestation. Apps without a usable signature remain unavailable.
+
+This cache stores no AX control references and does not refresh observation TTLs.
+Process association rejects incomplete owned layer-zero rows instead of silently
+dropping a sibling. An absent exact CG pair is `targetNotFound`; an existing pair
+with unavailable process metadata is a native metadata failure. These per-call
+inputs and the later AX reads still do not form an atomic cross-API snapshot.
 
 Each issued reference retains the actual AX control, its observed role, and its raw
 AX identifier. Before a read or action, the runtime rechecks the exact CG target
@@ -202,7 +208,8 @@ The client serializes requests through a bounded queue. It validates replies and
 monotonic progress prefixes against the pending operation, epoch and expectation.
 A deadline includes queueing. Cancellation before handoff can establish no dispatch;
 after handoff the client reconciles the original reply during a bounded grace period,
-then terminates an unresponsive helper. Known receipts survive. A protocol violation
+then terminates an unresponsive helper. Known receipts survive. Correlated negative wait receipts also survive host-deadline
+reconciliation; late satisfied reads cannot extend that deadline. A protocol violation
 reports the known prefix and all unacknowledged action IDs as uncertainty rather
 than claiming an untrusted helper left later steps unsent.
 An incomplete stdout drain also leaves the entire unacknowledged suffix uncertain.

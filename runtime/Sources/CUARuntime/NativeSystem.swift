@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CUAProtocol
 import CoreGraphics
+import Darwin
 import Foundation
 
 public protocol NativeSystem: Sendable {
@@ -62,30 +63,122 @@ public struct MacOSSystem: NativeSystem {
     }
 }
 
+/// A public process-birth/image signature, not a full exec generation (same-image exec is indistinguishable).
+struct ProcessGeneration: Equatable, Sendable {
+    let startAbstime: UInt64
+    let executableUUID: UUID
+
+    static func live(_ info: rusage_info_v0, status: Int32) -> ProcessGeneration? {
+        // Images without an LC_UUID are unavailable; birth alone does not identify an executable image.
+        guard status == 0, info.ri_proc_start_abstime > 0, info.ri_proc_exit_abstime == 0,
+              withUnsafeBytes(of: info.ri_uuid, { $0.contains { $0 != 0 } }) else { return nil }
+        return ProcessGeneration(startAbstime: info.ri_proc_start_abstime, executableUUID: UUID(uuid: info.ri_uuid))
+    }
+}
+
+/// Only immutable app metadata is retained. Every use rechecks the live kernel signature.
+final class ProcessBundleResolver: @unchecked Sendable {
+    private struct Entry: Sendable { let generation: ProcessGeneration; let bundle: String; let createdAt: UInt64 }
+    private let lock = NSLock()
+    private var entries: [UInt32: Entry] = [:]
+    private var order: [UInt32] = []
+    private let generation: @Sendable (UInt32) -> ProcessGeneration?
+    private let metadata: @Sendable ([UInt32]) -> [UInt32: String]
+    private let now: @Sendable () -> UInt64
+    private let capacity: Int
+    private let lifetime: UInt64
+
+    convenience init() { self.init(generation: Self.nativeGeneration, metadata: Self.nativeMetadata) }
+    init(generation: @escaping @Sendable (UInt32) -> ProcessGeneration?,
+         metadata: @escaping @Sendable ([UInt32]) -> [UInt32: String],
+         now: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
+         capacity: Int = 256, lifetime: UInt64 = 60_000_000_000) {
+        self.generation = generation; self.metadata = metadata; self.now = now
+        self.capacity = capacity; self.lifetime = lifetime
+    }
+
+    func resolve(_ pids: [UInt32]) -> [UInt32: String] {
+        lock.lock(); pruneLocked(); let cached = entries; lock.unlock()
+        var signatures: [UInt32: ProcessGeneration] = [:]
+        var bundles: [UInt32: String] = [:]
+        var missing: [UInt32] = []
+        for pid in pids {
+            guard let current = generation(pid) else { remove(pid); continue }
+            signatures[pid] = current
+            if let entry = cached[pid], entry.generation == current { bundles[pid] = entry.bundle }
+            else { remove(pid); missing.append(pid) }
+        }
+        let discovered = missing.isEmpty ? [:] : metadata(missing)
+        for pid in pids {
+            guard let before = signatures[pid], let after = generation(pid), before == after else {
+                bundles.removeValue(forKey: pid); remove(pid); continue
+            }
+            if bundles[pid] == nil, let bundle = discovered[pid], !bundle.isEmpty {
+                bundles[pid] = bundle
+                lock.lock(); pruneLocked()
+                order.removeAll { $0 == pid }
+                while order.count >= capacity { entries.removeValue(forKey: order.removeFirst()) }
+                entries[pid] = Entry(generation: before, bundle: bundle, createdAt: now())
+                order.append(pid); lock.unlock()
+            }
+        }
+        let checkedAt = now()
+        for (pid, entry) in cached where bundles[pid] != nil && entry.generation == signatures[pid] {
+            if checkedAt >= entry.createdAt && checkedAt - entry.createdAt >= lifetime {
+                bundles.removeValue(forKey: pid); remove(pid)
+            }
+        }
+        return bundles
+    }
+
+    private func remove(_ pid: UInt32) {
+        lock.lock(); entries.removeValue(forKey: pid); order.removeAll { $0 == pid }; lock.unlock()
+    }
+    private func pruneLocked() {
+        let current = now()
+        order.removeAll { pid in
+            guard let entry = entries[pid] else { return true }
+            if current >= entry.createdAt && current - entry.createdAt >= lifetime {
+                entries.removeValue(forKey: pid); return true
+            }
+            return false
+        }
+    }
+    private static func nativeGeneration(_ pid: UInt32) -> ProcessGeneration? {
+        guard pid > 0, pid <= UInt32(Int32.max) else { return nil }
+        var info = rusage_info_v0()
+        let status = withUnsafeMutableBytes(of: &info) { bytes in
+            proc_pid_rusage(pid_t(pid), RUSAGE_INFO_V0, bytes.baseAddress!.assumingMemoryBound(to: rusage_info_t?.self))
+        }
+        return ProcessGeneration.live(info, status: status)
+    }
+    private static func nativeMetadata(_ pids: [UInt32]) -> [UInt32: String] {
+        let snapshot: @Sendable () -> [UInt32: String] = {
+            var bundles: [UInt32: String] = [:]
+            for pid in pids {
+                guard pid > 0, pid <= UInt32(Int32.max),
+                      let application = NSRunningApplication(processIdentifier: pid_t(pid)),
+                      let bundle = application.bundleIdentifier, !bundle.isEmpty else { continue }
+                bundles[pid] = bundle
+            }
+            return bundles
+        }
+        return Thread.isMainThread ? snapshot() : DispatchQueue.main.sync(execute: snapshot)
+    }
+}
+
 public struct MacOSWindowCatalog: WindowCatalog {
     private let readWindows: @Sendable () throws -> [[String: Any]]
     private let readProcessBundles: @Sendable ([UInt32]) -> [UInt32: String]
 
     public init() {
+        let resolver = ProcessBundleResolver()
         self.init(windowRecords: {
             guard let records = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
                 throw NativeFailure(.nativeFailed, "window enumeration unavailable")
             }
             return records
-        }, processBundles: { pids in
-            let snapshot: @Sendable () -> [UInt32: String] = {
-                var bundles: [UInt32: String] = [:]
-                for pid in pids {
-                    guard pid > 0, pid <= UInt32(Int32.max),
-                          let application = NSRunningApplication(processIdentifier: pid_t(pid)),
-                          let bundle = application.bundleIdentifier, !bundle.isEmpty else { continue }
-                    bundles[pid] = bundle
-                }
-                return bundles
-            }
-            // Resolve process metadata on AppKit's main loop, once for each owner in this CG snapshot.
-            return Thread.isMainThread ? snapshot() : DispatchQueue.main.sync(execute: snapshot)
-        })
+        }, processBundles: resolver.resolve)
     }
 
     init(windowRecords: @escaping @Sendable () throws -> [[String: Any]],
