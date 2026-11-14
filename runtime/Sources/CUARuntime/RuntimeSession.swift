@@ -12,8 +12,11 @@ private final class PendingRequest: @unchecked Sendable {
     let request: Request
     let context: OperationContext
     let timer: DispatchSourceTimer
+    let execution: ActionExecutionState?
     init(_ request: Request, context: OperationContext, timer: DispatchSourceTimer) {
         self.request = request; self.context = context; self.timer = timer
+        if case .act(let act) = request.body { execution = ActionExecutionState(act: act) }
+        else { execution = nil }
     }
 }
 
@@ -30,6 +33,7 @@ public final class RuntimeSession: @unchecked Sendable {
     private let control = DispatchQueue(label: "cua.runtime.control")
     private let worker = DispatchQueue(label: "cua.runtime.native", qos: .userInitiated)
     private let system: any NativeSystem
+    private let actions: BackgroundActions
     private let limits: RuntimeLimits
     private let emit: @Sendable (Response) -> Void
     private let didShutdown: @Sendable () -> Void
@@ -43,9 +47,11 @@ public final class RuntimeSession: @unchecked Sendable {
 
     public init(system: any NativeSystem = MacOSSystem(), epoch: String = UUID().uuidString,
                 limits: RuntimeLimits = RuntimeLimits(),
+                actions: BackgroundActions = BackgroundActions(),
                 emit: @escaping @Sendable (Response) -> Void,
                 didShutdown: @escaping @Sendable () -> Void = {}) {
         self.system = system; self.epoch = epoch; self.limits = limits
+        self.actions = actions
         self.emit = emit; self.didShutdown = didShutdown
         observations = ObservationRegistry(epoch: epoch)
         maintenance = DispatchSource.makeTimerSource(queue: control)
@@ -129,8 +135,8 @@ public final class RuntimeSession: @unchecked Sendable {
         worker.async { [self] in
             let result: NativeResult
             do {
-                let body = try execute(request, mode: session.authority.mode, context: context)
-                try context.check()
+                let body = try execute(request, mode: session.authority.mode, context: context, execution: entry.execution)
+                if case .act = request.body {} else { try context.check() }
                 result = body
             } catch let error as NativeFailure {
                 result = NativeResult(.error(Failure(code: error.code, message: error.message)))
@@ -142,10 +148,13 @@ public final class RuntimeSession: @unchecked Sendable {
                 guard self.pending.removeValue(forKey: request.id) != nil else { return }
                 timer.cancel()
                 if let reason = context.interruption {
-                    self.respond(request, self.interruptedBody(request, reason)); return
+                    self.respond(request, self.interruptedBody(request, reason, execution: entry.execution)); return
                 }
                 do {
                     if case .observe(let observation) = result.body {
+                        try self.observations.insert(observation, handle: result.handle)
+                    }
+                    if case .waitFor(let wait) = result.body, let observation = wait.observation {
                         try self.observations.insert(observation, handle: result.handle)
                     }
                     self.respond(request, result.body)
@@ -158,13 +167,15 @@ public final class RuntimeSession: @unchecked Sendable {
 
     private func interrupt(_ entry: PendingRequest, reason: Interruption) {
         guard pending.removeValue(forKey: entry.request.id) != nil else { return }
+        let body = interruptedBody(entry.request, reason, execution: entry.execution)
         entry.context.cancel()
         entry.timer.cancel()
-        respond(entry.request, interruptedBody(entry.request, reason))
+        respond(entry.request, body)
     }
 
-    private func interruptedBody(_ request: Request, _ reason: Interruption) -> ResponseBody {
+    private func interruptedBody(_ request: Request, _ reason: Interruption, execution: ActionExecutionState? = nil) -> ResponseBody {
         if case .act(let act) = request.body {
+            if let execution { return .act(execution.interrupt(reason)) }
             let receiptReason: ReceiptReason = reason == .cancelled ? .cancelled : .deadlineExceeded
             let stop: StopReason = reason == .cancelled ? .cancelled : .deadlineExceeded
             return rejectedAct(act, reason: receiptReason, stop: stop)
@@ -183,37 +194,47 @@ public final class RuntimeSession: @unchecked Sendable {
             remainingSteps: UInt16(act.steps.count - 1), stopReason: stop))
     }
 
-    private func execute(_ request: Request, mode: ExecutionMode, context: OperationContext) throws -> NativeResult {
+    private func execute(_ request: Request, mode: ExecutionMode, context: OperationContext, execution: ActionExecutionState?) throws -> NativeResult {
         try context.check()
         switch request.body {
         case .capabilities:
-            return NativeResult(.capabilities(Capabilities(permissions: try system.permissions(context: context), mode: mode, actions: [])))
+            let permissions = try system.permissions(context: context)
+            return NativeResult(.capabilities(Capabilities(permissions: permissions, mode: mode, actions: system.supportedActions(permissions: permissions))))
         case .targets(let params):
             return NativeResult(.targets(try system.targets(bundleId: params.bundleId, context: context)))
         case .observe(let params):
-            guard !params.includeScreenshot else { throw NativeFailure(.unsupported, "screenshot collection is not implemented") }
-            let start = unixMilliseconds()
-            let target = try system.window(params.target, context: context)
-            let handle = try system.retainApplication(pid: params.target.pid,
-                timeoutSeconds: context.nativeTimeoutSeconds(), context: context)
-            let revalidated = try system.window(params.target, context: context)
-            guard target.bounds == revalidated.bounds, target.bundleId == revalidated.bundleId else {
-                throw NativeFailure(.nativeFailed, "window changed during lifecycle collection")
-            }
-            try context.check()
-            let observation = Observation(observationId: "obs-\(epoch)-\(UUID().uuidString)", target: params.target,
-                collected: CollectionInterval(startedUnixMs: start, finishedUnixMs: max(start, unixMilliseconds())),
-                windowBounds: revalidated.bounds, accessibility: .unavailable, accessibilityCollected: nil,
-                elements: [], screenshot: nil)
-            return NativeResult(.observe(observation), handle: handle)
+            let native = try system.observe(params: params, observationId: nextObservationID(), context: context)
+            return NativeResult(.observe(native.observation), handle: native.handle)
         case .act(let act):
-            return NativeResult(rejectedAct(act, reason: .unsupported, stop: .unsupported))
-        case .waitFor:
-            throw NativeFailure(.unsupported, "semantic waiting is not implemented")
+            guard act.steps.count == 1 else { return NativeResult(rejectedAct(act, reason: .unsupported, stop: .unsupported)) }
+            let retained = try observations.lookup(act.observationId, epoch: epoch, target: act.target)
+            guard let execution else { throw NativeFailure(.nativeFailed, "action state unavailable") }
+            return NativeResult(.act(actions.act(act, entry: retained, context: context, state: execution)))
+        case .waitFor(let wait):
+            let retained = try observations.lookup(wait.observationId, epoch: epoch, target: wait.target)
+            let started = unixMilliseconds()
+            let evaluated = try actions.wait(wait, entry: retained, context: context)
+            guard evaluated.outcome == .satisfied else {
+                return NativeResult(.waitFor(WaitResult(outcome: evaluated.outcome, alreadySatisfied: false, observation: nil)))
+            }
+            let native = try system.observe(params: ObserveRequest(target: wait.target, includeScreenshot: false, includeValues: false),
+                observationId: nextObservationID(), context: context)
+            let original = native.observation
+            let finished = max(started, original.collected.finishedUnixMs)
+            let axInterval = original.accessibilityCollected.map {
+                CollectionInterval(startedUnixMs: min(started, $0.startedUnixMs), finishedUnixMs: max(started, $0.finishedUnixMs))
+            }
+            let observation = Observation(observationId: original.observationId, target: original.target,
+                collected: CollectionInterval(startedUnixMs: min(started, original.collected.startedUnixMs), finishedUnixMs: finished),
+                windowBounds: original.windowBounds, accessibility: original.accessibility, accessibilityCollected: axInterval,
+                elements: original.elements, screenshot: nil)
+            return NativeResult(.waitFor(WaitResult(outcome: .satisfied, alreadySatisfied: evaluated.alreadySatisfied, observation: observation)), handle: native.handle)
         case .hello, .cancel:
             throw NativeFailure(.invalidRequest, "control request reached native worker")
         }
     }
+
+    private func nextObservationID() -> String { "obs-\(epoch)-\(UUID().uuidString)" }
 }
 
 private func unixMilliseconds() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }

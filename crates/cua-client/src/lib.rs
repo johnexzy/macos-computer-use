@@ -218,10 +218,24 @@ pub struct Client {
 }
 impl Client {
     pub async fn spawn(config: Config) -> Result<Self, ClientError> {
+        Self::spawn_with_cancellation(config, CancellationToken::new()).await
+    }
+
+    /// Cancellation during startup waits for the child to be killed and reaped before returning.
+    pub async fn spawn_with_cancellation(
+        config: Config,
+        cancel: CancellationToken,
+    ) -> Result<Self, ClientError> {
         if !valid_budget(config.handshake_budget) {
             return Err(ClientError::new(
                 ClientErrorKind::InvalidConfig,
                 "invalid handshake budget",
+            ));
+        }
+        if cancel.is_cancelled() {
+            return Err(ClientError::new(
+                ClientErrorKind::Cancelled,
+                "native startup cancelled",
             ));
         }
         let shared = Arc::new(Shared {
@@ -232,7 +246,14 @@ impl Client {
         });
         let mut transport = process::Transport::spawn(&config, shared.stderr_bytes.clone())?;
         let pid = transport.pid();
-        let epoch = match coordinator::handshake(&mut transport, &config).await {
+        let handshake = tokio::select! { biased;
+            _ = cancel.cancelled() => {
+                transport.stop();
+                Err(ClientError::new(ClientErrorKind::Cancelled, "native startup cancelled"))
+            }
+            result = coordinator::handshake(&mut transport, &config) => result,
+        };
+        let epoch = match handshake {
             Ok(epoch) => epoch,
             Err(error) => {
                 let _ = transport.shutdown().await;

@@ -59,6 +59,10 @@ public enum Verification: String, Codable, Equatable, Sendable {
     case unverified
 }
 
+public enum DeliveryRoute: String, Codable, Equatable, Sendable {
+    case axSetValue, axSelectedText, axPress
+}
+
 public enum Coverage: String, Codable, Equatable, Sendable {
     case complete
     case partial
@@ -545,7 +549,8 @@ public struct Element: Codable, Equatable, Sendable {
     public let bounds: Rect
     public let enabled: Bool
     public let actions: [ElementAction]
-    public init(reference: String, role: String, label: String?, value: String?, bounds: Rect, enabled: Bool, actions: [ElementAction]) {
+    public let identifier: String?
+    public init(reference: String, role: String, label: String?, value: String?, bounds: Rect, enabled: Bool, actions: [ElementAction], identifier: String? = nil) {
         self.reference = reference
         self.role = role
         self.label = label
@@ -553,9 +558,10 @@ public struct Element: Codable, Equatable, Sendable {
         self.bounds = bounds
         self.enabled = enabled
         self.actions = actions
+        self.identifier = identifier
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case reference, role, label, value, bounds, enabled, actions
+        case reference, role, label, value, bounds, enabled, actions, identifier
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -566,6 +572,7 @@ public struct Element: Codable, Equatable, Sendable {
         bounds = try c.decode(Rect.self, forKey: .bounds)
         enabled = try c.decode(Bool.self, forKey: .enabled)
         actions = try c.decode([ElementAction].self, forKey: .actions)
+        identifier = try c.decodeIfPresent(String.self, forKey: .identifier)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -576,6 +583,7 @@ public struct Element: Codable, Equatable, Sendable {
         try c.encode(bounds, forKey: .bounds)
         try c.encode(enabled, forKey: .enabled)
         try c.encode(actions, forKey: .actions)
+        try c.encode(identifier, forKey: .identifier)
     }
 }
 
@@ -963,15 +971,17 @@ public struct StepReceipt: Codable, Equatable, Sendable {
     public let verification: Verification
     public let reason: ReceiptReason?
     public let evidence: [CheckEvidence]
-    public init(actionId: String, delivery: Delivery, verification: Verification, reason: ReceiptReason?, evidence: [CheckEvidence]) {
+    public let route: DeliveryRoute?
+    public init(actionId: String, delivery: Delivery, verification: Verification, reason: ReceiptReason?, evidence: [CheckEvidence], route: DeliveryRoute? = nil) {
         self.actionId = actionId
         self.delivery = delivery
         self.verification = verification
         self.reason = reason
         self.evidence = evidence
+        self.route = route
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case actionId, delivery, verification, reason, evidence
+        case actionId, delivery, verification, reason, evidence, route
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -980,6 +990,7 @@ public struct StepReceipt: Codable, Equatable, Sendable {
         verification = try c.decode(Verification.self, forKey: .verification)
         reason = try c.decodeIfPresent(ReceiptReason.self, forKey: .reason)
         evidence = try c.decode([CheckEvidence].self, forKey: .evidence)
+        route = try c.decodeIfPresent(DeliveryRoute.self, forKey: .route)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -988,6 +999,7 @@ public struct StepReceipt: Codable, Equatable, Sendable {
         try c.encode(verification, forKey: .verification)
         try c.encode(reason, forKey: .reason)
         try c.encode(evidence, forKey: .evidence)
+        try c.encode(route, forKey: .route)
     }
 }
 

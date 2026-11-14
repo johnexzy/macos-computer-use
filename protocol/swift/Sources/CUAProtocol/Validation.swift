@@ -31,13 +31,26 @@ private func channelInterval(_ channel: CollectionInterval, within total: Collec
                 "channel interval outside observation")
 }
 private func expectation(_ step: ActionStep, _ receipt: StepReceipt, settled: Bool) throws {
+    if let route = receipt.route {
+        switch (step.operation, route) {
+        case (.setValue, .axSetValue), (.typeText, .axSelectedText), (.press, .axPress): break
+        default: throw ContractError("receipt route does not match operation")
+        }
+    }
+    var required: [Condition] = []
+    if case .setValue(let value) = step.operation {
+        required.append(.valueEquals(ValueCondition(elementRef: value.elementRef, value: value.value)))
+    }
     if let expected = step.expect {
-        func matches(_ matched: Bool) -> Bool {
-            receipt.evidence.contains { $0.condition == expected && $0.matched == matched }
+        if !required.contains(expected) { required.append(expected) }
+    }
+    if !required.isEmpty {
+        func matches(_ condition: Condition, _ matched: Bool) -> Bool {
+            receipt.evidence.contains { $0.condition == condition && $0.matched == matched }
         }
         switch receipt.verification {
-        case .confirmed: try require(matches(true), "confirmation does not match requested expectation")
-        case .mismatch: try require(matches(false), "mismatch does not match requested expectation")
+        case .confirmed: try require(required.allSatisfy { matches($0, true) }, "confirmation does not match requested expectation")
+        case .mismatch: try require(required.contains { matches($0, false) }, "mismatch does not match requested expectation")
         case .unverified: try require(!settled, "settled step has unverified required expectation")
         }
     } else {
@@ -185,9 +198,6 @@ extension ActResult {
                 }
                 try require(index + 1 == steps.count && stopReason == expected,
                             "failed step must be terminal with matching stop reason")
-            }
-            if step.delivery == .notDispatched && step.verification == .confirmed {
-                try require(step.reason == .alreadySatisfied, "undispatched confirmation needs alreadySatisfied")
             }
             if step.delivery == .unknown {
                 try require(index + 1 == steps.count && stopReason != .completed, "unknown dispatch must stop sequence")

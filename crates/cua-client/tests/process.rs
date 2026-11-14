@@ -587,6 +587,52 @@ async fn dropped_spawn_future_reaps_a_child_waiting_for_handshake() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_startup_returns_only_after_reaping_the_handshaking_child() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let pid_file = std::env::temp_dir().join(format!(
+        "cua-cancel-startup-{}-{nonce}.pid",
+        std::process::id()
+    ));
+    let mut config = config("handshake_hang");
+    config.args.push(pid_file.clone().into_os_string());
+    let cancel = CancellationToken::new();
+    let trigger = cancel.clone();
+    let spawn = tokio::spawn(async move { Client::spawn_with_cancellation(config, cancel).await });
+    let until = Instant::now() + Duration::from_secs(2);
+    let pid = loop {
+        if let Ok(text) = std::fs::read_to_string(&pid_file)
+            && let Ok(pid) = text.parse::<u32>()
+        {
+            break pid;
+        }
+        assert!(Instant::now() < until, "test helper never wrote its PID");
+        sleep(Duration::from_millis(10)).await;
+    };
+    trigger.cancel();
+    let error = spawn
+        .await
+        .unwrap()
+        .err()
+        .expect("cancelled startup succeeded");
+    assert_eq!(error.kind, ClientErrorKind::Cancelled);
+    let alive = std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap()
+        .success();
+    assert!(
+        !alive,
+        "startup returned before its native helper was reaped"
+    );
+    std::fs::remove_file(pid_file).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn missing_cancel_ack_does_not_discard_a_completed_mutation_receipt() {
     let client = peer("final_without_cancel_ack").await;
     let pid = client.helper_pid();

@@ -262,7 +262,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Collect a session-scoped observation for one exact target. Values and images are opt-in. Semantic AX/image collection is not yet supported by this runtime."
+        description = "Collect bounded semantic AX controls and opaque live references for one exact target. Values are opt-in; screenshots are unsupported. Partial coverage cannot prove absence."
     )]
     async fn observe(
         &self,
@@ -282,7 +282,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Run bounded typed steps with independent delivery and verification receipts. The host installs authority; unsupported operations are refused without input."
+        description = "Run one capability-supported background AX action using a live reference. Supports setValue, targeted selection replacement and press; delivery and state verification are independent. No global input fallback."
     )]
     async fn act(
         &self,
@@ -304,7 +304,7 @@ impl Host {
 
     #[tool(
         name = "waitFor",
-        description = "Wait for a typed condition within one request budget. Native predicate evaluation is not yet supported by this runtime."
+        description = "Wait for an exact valueEquals condition on a live reference within one budget. Returns a fresh redacted observation when satisfied. Other predicates are unsupported."
     )]
     async fn wait_for(
         &self,
@@ -329,7 +329,7 @@ impl ServerHandler for Host {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("macos-computer-use", env!("CARGO_PKG_VERSION")))
-            .with_instructions("Background authority is installed by the operator. Read capabilities before acting. Observations establish provenance, not freshness. Unknown delivery must be reconciled before retrying. Semantic AX actions are a subsequent milestone.")
+            .with_instructions("Background authority is installed by the operator. Read capabilities before acting. Observations establish provenance, not freshness. Unknown delivery must be reconciled before retrying. Use only actions advertised by the live element. This runtime accepts one step per act request and never activates a window or sends global input.")
     }
 }
 

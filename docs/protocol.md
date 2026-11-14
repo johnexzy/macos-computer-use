@@ -1,9 +1,11 @@
 # Rust–Swift protocol v1
 
 This is the internal contract for the rebuild, implemented in `crates/cua-protocol`
-and the Foundation-only `protocol/swift` package. It does not implement the MCP host,
-native runtime, AX registry, permission prompts, or input dispatch. The existing
-TypeScript server and native helper remain the runnable product.
+and the Foundation-only `protocol/swift` package. The standalone Rust host and
+persistent Swift runtime use it for semantic observation and a narrow background
+action path; see [runtime.md](runtime.md) for build/run commands and implemented
+scope. The contract can represent operations that the current runtime rejects as
+unsupported. The existing Node/Swift npm entry point remains separate.
 
 ## Boundary and transport
 
@@ -60,13 +62,14 @@ that epoch and exact `(pid, windowId)`. A helper restart invalidates them. Runti
 limits are **32 retained observations**, **60 seconds maximum retention**, **256
 elements per observation**, and **256 returned targets**, with explicit truncation
 or partial coverage. The constants are shared and the persistent runtime enforces
-retention for its lifecycle observations. Semantic element references follow in
-PER-5; they are opaque retained AX objects, not indices for a model to invent.
+retention. Semantic element references are opaque retained AX objects with observed
+role/identifier identity, not indices or selectors for a model to reconstruct.
 
 Request IDs are unique within an epoch and are never reused there. Action IDs are
 unique within their request. They correlate receipts; they do not make mutations
-idempotent across crashes. A later host must reject duplicate requests rather than
-replay them. Neither codec maintains a session history or a durable journal.
+idempotent across crashes. The runtime rejects duplicate requests rather than
+replaying them and closes when its bounded request history is exhausted. Neither
+codec alone maintains a session history or durable journal.
 
 `budgetMs` is the remaining deadline budget at IPC send, in `(0, 60000]`. The Rust
 host owns the original monotonic deadline and subtracts elapsed time before sending.
@@ -91,25 +94,33 @@ in the final act result, not in progress.
 The Rust client implements prefix accounting and rejects rewritten or regressing
 progress. If EOF cannot be established within its bounded drain, it returns typed
 uncertainty for the whole unacknowledged suffix instead of claiming later steps
-were unsent. The current Swift runtime sends no native input; progress production
-accompanies semantic dispatch in subsequent work.
+were unsent. The current Swift executor accepts one step and returns a final
+receipt, so it has no inter-step progress prefix to emit. Multi-step execution is
+later PER-8 work.
 
 ## Operations
 
 | Method | Contract |
 | --- | --- |
-| `capabilities` | Read-only permission booleans, installed mode, and overall supported action kinds including coordinate click. It does not request permission. |
+| `capabilities` | Read-only permission booleans, installed mode, and actual supported action kinds. It does not request permission. |
 | `targets` | Optionally filter by bundle ID; return exact window/process keys, titles, and logical bounds. `truncated` makes the bound visible. |
 | `observe` | Exact target, explicit screenshot/value inclusion flags; return semantic targets and optional image evidence. |
 | `act` | Installed grant, observation, exact target, and 1–16 ordered steps. No arbitrary scripts or execution-mode override. |
 | `waitFor` | Evaluate a typed condition for the same exact target within the request deadline. It never mutates. |
 
-Action kinds are semantic press, set value, type text, supported key, semantic
-scroll, and coordinate click. Coordinate click carries an explicit coordinate
+The current runtime implements `observe` without images, one-step `act` for
+`setValue`/`typeText`/`press`, and `waitFor` for exact `valueEquals` only. Action guards
+and expectations support exact values and enabled state. Other condition/action
+variants and multi-step execution are represented by the wire contract but refused
+by this implementation.
+
+The action enum also represents supported keys, semantic scroll, and coordinate
+click. Coordinate click carries an explicit coordinate
 space. It does not authorize global pointer input: background delivery still needs
 an exact semantic target; unsupported targeting must fail without silent fallback.
 Background keys are initially return/tab/escape/backspace/arrows. Scroll amounts
 are signed nonzero units in `[-1000,1000]`; runtime determines support and delivery.
+None of these three paths is currently implemented in the new runtime.
 Overall `ActionKind` discovery is separate from each element's `ElementAction`
 affordances. Coordinate click can be supported without claiming every element has
 a semantic click action.
@@ -139,6 +150,24 @@ coverage must not be treated as proof that an omitted element is absent. Values
 are excluded unless explicitly requested. The runtime must enforce that privacy
 choice and revalidate target identity/state before input; this package models the
 boundary and does not query a Mac.
+
+The current runtime associates AX windows using unique PID, exact logical bounds,
+and titles when available, rejecting ties in AX candidates and CG siblings. Public
+AX provides no OS-attested `CGWindowID` association or atomic snapshot guarantee.
+Catalog calls use one running-application bundle map for every CG row; missing
+metadata cannot silently remove a process sibling during association. Exact CG
+absence is distinguished from unavailable process metadata.
+Each reference retains an actual object plus observed role and raw identifier;
+live `CFEqual` tree/window membership, ownership, role, and identifier are checked
+before use. Changed labels, values, or control positions do not remap the reference.
+An unchanged role/identifier is not a native object-generation guarantee.
+
+Observation traversal is bounded to 1,024 nodes/depth 32 and 256 returned elements.
+Unreadability, unknown enabled states, traversal bounds, or omitted oversized
+exports produce partial coverage. Labels/identifiers are capped at 1 KiB, values at
+64 KiB, and encoded elements at 2 MiB. Omitted values are not empty strings. Values
+excluded from observation are not requested through `AXValue`; internal action
+proof can read values without adding them to returned observations or diagnostics.
 
 Window and element rectangles use top-left-origin logical screen points and may
 have negative origins. Returned screenshots have independent pixel dimensions.
@@ -188,6 +217,21 @@ that the action produced it. Delivery `unknown` never becomes `dispatched` merel
 because the desired state is present. Fresh wait/observe reconciliation can add
 state evidence without rewriting the original delivery history.
 
+`StepReceipt.route` is optional. The current executor records `axSetValue`,
+`axSelectedText`, or `axPress` at the dispatch boundary; an absent route does not
+invent a native method. `typeText` uses targeted `AXSelectedText` replacement of
+the current UTF-16 selection, not a whole-value rewrite, keyboard fallback, or
+selection-changing operation. It requires the advertised settable attribute.
+
+Every `setValue` requires exact-value proof for its own requested value, in addition
+to any caller-supplied `expect`. Correlation checks must account for both; a passing
+unrelated expectation cannot confirm an ignored value write. For `typeText` with
+private existing values, no derived full-value condition/evidence is exported.
+An exact resulting value can be exposed as evidence only if values were included
+in the originating observation or the caller supplied that exact expectation.
+Otherwise delivery can succeed with unverified public evidence even when internal
+readback matches. A press with no expectation likewise does not prove its effect.
+
 `ActResult.steps` is the processed prefix, including a rejected final step when
 applicable. `remainingSteps` counts steps never processed. Correlation checks require
 prefix action IDs to match the original request and account for every requested
@@ -198,9 +242,12 @@ in the receipts if a later step fails.
 Required verification mismatch stops the sequence. A `completed` sequence means its
 steps were processed, not that the user's whole task was independently completed.
 
-The future runtime must serialize revalidate → focus → dispatch → critical readback
-across clients sharing the macOS session. A per-MCP-connection queue is insufficient.
-No lock may span a model call. The wire contract is not a locking implementation.
+The current Swift runtime serializes revalidate → dispatch → critical readback
+across cooperating helpers for the same OS user with one stable advisory `flock`.
+It holds ownership until physical work returns, even when a logical timeout or
+cancellation has already sealed a receipt. Owner close/crash releases the lock;
+the inode is not unlinked. This excludes neither the user nor unrelated automation.
+No lock spans a model call. The wire contract alone is not a locking implementation.
 
 Response/progress correlation also binds verification to each requested `expect`:
 confirmed/mismatch requires evidence for that exact condition, not a passing guard
@@ -233,7 +280,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 swift test --package-path protocol/swift --scratch-path /tmp/macos-cua-protocol-swift-build
 ```
 
-These checks establish the contract and decoding behavior. They do not establish
-native dispatch, exact AX lifetime checks, mutation exclusion, deadline enforcement,
-image fidelity, or real application outcomes; those belong to the host/runtime and
-live verification issues.
+These checks establish the contract and decoding behavior. Runtime/injected tests
+and the isolated live fixture campaign separately check dispatch, retained identity,
+exclusion, deadlines, and independent native outcomes; see [runtime.md](runtime.md).
+Neither contract tests nor fixture conformance establishes arbitrary-application
+task success or image fidelity.

@@ -1,0 +1,421 @@
+{
+  "schemaVersion": 1,
+  "milestones": [
+    "PER-5",
+    "PER-6"
+  ],
+  "verifiedAt": "2026-11-14T13:29:23.198Z",
+  "branch": "feat/semantic-ax-background-actions-per5-per6",
+  "source": {
+    "revision": "ae5805f30cb8ea27d9d3047479a699425df009a6",
+    "dirty": false,
+    "hostSha256": "81d277a80e08d28de28772e362413ec26e3e29b15e3ce11fb9e1c81987642070",
+    "helperSha256": "41dba3aefad86edf6bcb0440167785ac024e98efce04b1c0bdacdf9bc2fdb28f",
+    "fixtureSha256": "a7ca8954e2ebb141859df821859da5b3caf4ae50feb09a42debedc9f2ded967f"
+  },
+  "environment": {
+    "macOS": "27.2.1",
+    "cpu": "Apple M5 Pro",
+    "architecture": "arm64",
+    "rust": "1.96.0",
+    "swift": "6.4.2",
+    "node": "26.3.0"
+  },
+  "automated": {
+    "passed": 134,
+    "failed": 0,
+    "suites": {
+      "rustWorkspace": 32,
+      "swiftRuntime": 58,
+      "swiftProtocol": 11,
+      "installedMcpProcesses": 10,
+      "legacyServer": 12,
+      "baselineMetrics": 11
+    },
+    "additionalChecks": [
+      "cargo fmt --all --check",
+      "cargo clippy --workspace --all-targets -- -D warnings",
+      "git diff --check",
+      "npm run build",
+      "sh scripts/build-runtime.sh",
+      "sh test/fixtures/macos/build.sh",
+      "python3 runtime/Tests/process-smoke.py .artifacts/runtime-install/cua-runtime"
+    ],
+    "readOnlyProcessSmoke": {
+      "mutations": 0,
+      "permissionRequests": 0,
+      "checks": [
+        "persistent preflight and target discovery",
+        "invalid target and unsupported multistep refusal",
+        "EOF and new epoch on restart",
+        "SIGTERM including startup with stdin open",
+        "truncated malformed CRLF and oversized input with bounded diagnostics"
+      ]
+    },
+    "protocolCorpus": {
+      "validFrames": 37,
+      "invalidFrames": 47,
+      "correlationCases": 33
+    }
+  },
+  "liveFixture": {
+    "startedAt": "2026-11-14T13:28:57.474Z",
+    "finishedAt": "2026-11-14T13:29:23.198Z",
+    "repetitions": 3,
+    "permissions": {
+      "accessibility": true,
+      "inputPosting": true,
+      "screenRecording": true
+    },
+    "budgets": {
+      "nativeRequestMs": 3000,
+      "registrationMs": 3000,
+      "oracleMs": 3000
+    },
+    "summary": {
+      "assigned": 60,
+      "passed": 60,
+      "failed": 0,
+      "setupBlocked": 0,
+      "verifiedDispatchedSteps": 27,
+      "unknownDeliverySteps": 3,
+      "latencyMs": {
+        "samples": 60,
+        "p50": 88.23058300000048,
+        "p95": 323.5272079999995
+      },
+      "cleanupErrors": 0,
+      "nativeStructuredResponseBytesPerScenario": {
+        "samples": 60,
+        "p50": 3077,
+        "p95": 5955
+      }
+    },
+    "foregroundEndpointChecksPassed": 60,
+    "expectedUnknownDelivery": "Three deliberately killed lock owners retained unknown delivery. Each independent contender then acquired ownership and confirmed its own exact edit.",
+    "oracle": "Each scenario checks fixture model/control values, unintended field write counts and button counters independently of AX receipts. Already-satisfied input remains distinct from newly applied writes. Ignored setters deliberately leave the goal unsatisfied.",
+    "scenarios": [
+      {
+        "caseId": "private-observation",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 0,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 32.266332999999975,
+          "p95": 35.79399999999987
+        }
+      },
+      {
+        "caseId": "clean-set",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 3,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 77.60370800000055,
+          "p95": 86.124416
+        }
+      },
+      {
+        "caseId": "ignored-set",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 0,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 187.7641249999997,
+          "p95": 195.77687499999956
+        }
+      },
+      {
+        "caseId": "delayed-set",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 3,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 280.29529099999854,
+          "p95": 294.92049999999995
+        }
+      },
+      {
+        "caseId": "already-satisfied",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 0,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 55.90895900000032,
+          "p95": 60.04070899999988
+        }
+      },
+      {
+        "caseId": "reorder",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 3,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 96.98241600000028,
+          "p95": 108.34587499999907
+        }
+      },
+      {
+        "caseId": "recreated",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 3,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 101.92591700000048,
+          "p95": 107.51258400000006
+        }
+      },
+      {
+        "caseId": "reopened",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 3,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 129.61845799999992,
+          "p95": 140.70191700000032
+        }
+      },
+      {
+        "caseId": "wrong-window",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 0,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 18.35216599999876,
+          "p95": 18.416041999999834
+        }
+      },
+      {
+        "caseId": "different-session",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 0,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 84.64820899999995,
+          "p95": 88.23058300000048
+        }
+      },
+      {
+        "caseId": "disabled",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 0,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 50.74012500000026,
+          "p95": 58.979457999999795
+        }
+      },
+      {
+        "caseId": "ambiguous-windows",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 0,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 5.937957999999526,
+          "p95": 8.811667000001762
+        }
+      },
+      {
+        "caseId": "same-title-siblings",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 3,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 86.04866699999911,
+          "p95": 109.66620799999964
+        }
+      },
+      {
+        "caseId": "wait-already-satisfied",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 0,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 66.08029100000022,
+          "p95": 91.60000000000036
+        }
+      },
+      {
+        "caseId": "wait-delayed",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 0,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 297.16558299999997,
+          "p95": 323.5272079999995
+        }
+      },
+      {
+        "caseId": "type-selection",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 3,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 75.1664579999997,
+          "p95": 92.77162500000031
+        }
+      },
+      {
+        "caseId": "type-private",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 0,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 78.02304200000071,
+          "p95": 89.66108299999996
+        }
+      },
+      {
+        "caseId": "press",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 0,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 156.53691700000127,
+          "p95": 169.25479199999972
+        }
+      },
+      {
+        "caseId": "cross-helper-contention",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 3,
+        "unknownDeliverySteps": 0,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 382.8825419999994,
+          "p95": 389.4224579999991
+        }
+      },
+      {
+        "caseId": "lock-owner-death",
+        "assigned": 3,
+        "passed": 3,
+        "verifiedDispatchedSteps": 3,
+        "unknownDeliverySteps": 3,
+        "caseLatencyMs": {
+          "samples": 3,
+          "p50": 214.41599999999926,
+          "p95": 225.39025000000038
+        }
+      }
+    ],
+    "model": {
+      "runs": false,
+      "tokens": null,
+      "costUsd": null
+    },
+    "rawLocalArtifacts": ".artifacts/semantic-live-per5-per6-accepted/{report.json,trace.jsonl}"
+  },
+  "priorCleanCampaigns": [
+    {
+      "source": {
+        "revision": "b05d1f8c6e501d3a62d7273a614c58ebea8777a5",
+        "dirty": false,
+        "hostSha256": "81d277a80e08d28de28772e362413ec26e3e29b15e3ce11fb9e1c81987642070",
+        "helperSha256": "351f0abd608de009a75734f87c65e7cb5a65061cc36a885ff249ed91acafefff",
+        "fixtureSha256": "a7ca8954e2ebb141859df821859da5b3caf4ae50feb09a42debedc9f2ded967f"
+      },
+      "summary": {
+        "assigned": 60,
+        "passed": 55,
+        "failed": 5,
+        "setupBlocked": 0,
+        "verifiedDispatchedSteps": 25,
+        "unknownDeliverySteps": 3,
+        "latencyMs": {
+          "samples": 60,
+          "p50": 61.61249999999927,
+          "p95": 315.87520799999766
+        },
+        "responseBytes": {
+          "samples": 60,
+          "p50": 3077,
+          "p95": 5955
+        },
+        "cleanupErrors": 0
+      },
+      "disposition": "Four graded observations lost the catalog target; one already-satisfied action refused as targetStale. A decision-point probe reproduced NSRunningApplication(pid:) returning nil despite a valid exact raw CG row. Per-row lookup also risked dropping a sibling. Corrected by one process metadata map for each CG snapshot, resolving each distinct owner PID on the AppKit main thread."
+    },
+    {
+      "source": {
+        "revision": "38ef375bd20d0874681bd6e34163f37ec1a0d491",
+        "dirty": false,
+        "hostSha256": "81d277a80e08d28de28772e362413ec26e3e29b15e3ce11fb9e1c81987642070",
+        "helperSha256": "07b6d2f3aa60b282f46b721427d3d004728aad2939a456b682d518e3e7fa8454",
+        "fixtureSha256": "a7ca8954e2ebb141859df821859da5b3caf4ae50feb09a42debedc9f2ded967f"
+      },
+      "summary": {
+        "assigned": 60,
+        "passed": 0,
+        "failed": 0,
+        "setupBlocked": 60,
+        "verifiedDispatchedSteps": 0,
+        "unknownDeliverySteps": 0,
+        "latencyMs": {
+          "samples": 0,
+          "p50": null,
+          "p95": null
+        },
+        "responseBytes": {
+          "samples": 0,
+          "p50": null,
+          "p95": null
+        },
+        "cleanupErrors": 0
+      },
+      "setupStage": "AX readiness for all 60; CG registration succeeded",
+      "disposition": "An intermediate NSWorkspace.runningApplications map variant blocked every trial before action. Diagnostic AXWindows entries reported AXApplication with absent geometry. The underlying framework interaction was not established. The final implementation uses explicit owner-PID lookups instead of workspace-wide enumeration."
+    }
+  ],
+  "developmentNotes": [
+    "Earlier dirty-tree smoke runs identified asynchronous publication, fixture row detachment that invalidated AX proxies, and opening animation geometry. These are not part of the final 60-trial denominator.",
+    "The fixture now reorders existing arranged views without detachment and disables its window animation. Its native ready event remains separate from bounded external CG/AX readiness gates.",
+    "Temporary native probes were removed before the final build and run."
+  ],
+  "limitations": [
+    "This is fixture conformance on one Mac, not autonomous task reliability or arbitrary application support. Three trials per scenario do not establish production failure rates.",
+    "CG-to-AX association uses unique PID, exact bounds and compatible available title metadata; public AX provides no OS-attested window-ID mapping, atomic validation/dispatch or reliable generation for same-role reuse with an unchanged or unavailable identifier.",
+    "Advisory flock excludes cooperating new helpers for the same OS user; it does not exclude the human user, legacy helpers or other automation. Foreground endpoint samples cannot exclude transient or external changes.",
+    "Only one-step AXSetValue, AXSelectedText replacement and AXPress are supported. Only exact-value waits and value/enabled guards or expectations execute. Images, OCR, keys, scrolling, coordinates, foreground delivery and multistep sequences remain later work.",
+    "Private selection edits may be delivered while their public effect remains unverified; presses without an explicit observable expectation also remain unverified.",
+    "Latency distributions mix different scenario workflows and exclude initial CG/AX readiness; they are not a matched performance comparison. Response-byte statistics count native structured JSON, excluding MCP framing and duplicate text content. No model tokens or monetary cost were measured.",
+    "This branch is local and opt-in; no remote CI run, default npm entry migration, universal distribution or release is claimed. PER-3/PER-4 PR #9 is separately published with passing CI."
+  ]
+}

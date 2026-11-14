@@ -478,6 +478,7 @@ pub(crate) fn interrupted(
     let (reason, stop_reason) = terminal(kind);
     if let Some(step) = act.steps.get(steps.len()) {
         steps.push(StepReceipt {
+            route: None,
             action_id: step.action_id.clone(),
             delivery: if may_have_dispatched {
                 Delivery::Unknown

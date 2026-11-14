@@ -134,10 +134,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         input_disconnect.cancel();
         input_service.cancel();
     });
-    let client = tokio::select! {
-        result = Client::spawn(Config::new(helper, authority)) => Arc::new(result?),
-        _ = disconnected.cancelled() => { signals.abort(); input_pump.abort(); return Ok(()); }
-    };
+    let client =
+        match Client::spawn_with_cancellation(Config::new(helper, authority), disconnected.clone())
+            .await
+        {
+            Ok(client) => Arc::new(client),
+            Err(_) if disconnected.is_cancelled() => {
+                signals.abort();
+                input_pump.abort();
+                return Ok(());
+            }
+            Err(error) => return Err(error.into()),
+        };
     eprintln!(
         "{}",
         serde_json::json!({"event":"runtime_started","helperPid":client.helper_pid(),"epoch":client.epoch(),"mode":mode})

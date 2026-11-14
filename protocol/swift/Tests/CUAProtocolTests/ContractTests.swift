@@ -148,7 +148,7 @@ final class ContractTests: XCTestCase {
     func testSharedExpectationCorrelationCases() throws {
         struct Case: Decodable { let name: String; let valid: Bool; let request: Frame; let reply: Frame }
         let cases = try JSONDecoder().decode([Case].self, from: Data(contentsOf: fixtureRoot.appendingPathComponent("correlation.json")))
-        XCTAssertEqual(cases.count, 19)
+        XCTAssertEqual(cases.count, 33)
         for item in cases {
             try item.request.validate()
             try item.reply.validate()

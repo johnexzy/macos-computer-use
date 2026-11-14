@@ -4,16 +4,42 @@
 [![Platform](https://img.shields.io/badge/Platform-macOS%20(Apple%20Silicon%20%26%20Intel)-lightgrey.svg)]()
 [![Model Context Protocol](https://img.shields.io/badge/MCP-Standard%20Compatible-green.svg)](https://modelcontextprotocol.io)
 
-An ultra-fast, native **Model Context Protocol (MCP)** server that gives LLMs and autonomous agents visual inspection and fail-closed desktop automation on macOS.
+A native **Model Context Protocol (MCP)** server for macOS inspection and desktop automation.
 
-The Rust + Swift rebuild starts with development foundations alongside the existing server:
+The Rust + Swift rebuild runs alongside the existing Node/Swift server. It now supports semantic observations and a narrow background action path:
 
 - [Legacy baseline and measurement boundaries](docs/baseline.md) (PER-1)
 - [Disposable two-window macOS fixture](docs/fixture.md)
 - [Rust–Swift protocol and conformance contract](docs/protocol.md) (PER-2)
-- [Rust MCP host and persistent Swift runtime](docs/runtime.md) (PER-3/PER-4)
+- [Rust MCP host, semantic observations, and background actions](docs/runtime.md) (PER-3 through PER-6)
 
-Run `npm run test:foundations` for the baseline metric checks and Rust/Swift conformance tests. Run `npm run baseline:build`, then `npm run baseline:preflight` before a live fixture campaign. Run `npm run build:runtime` and `npm run start:rust` for the new native pair. Semantic AX observations, imagery and action execution are subsequent milestones.
+| Rust runtime tool | Implemented scope |
+| --- | --- |
+| `capabilities` | Permission preflight and supported action kinds without permission prompts. |
+| `targets` | Exact process/window keys for visible application windows. |
+| `observe` | Bounded AX controls with retained opaque references; values are private by default. |
+| `act` | One retained-control `setValue`, selected-text `typeText`, or `press` operation, with separate delivery and verification receipts. |
+| `waitFor` | Exact-value waiting against a retained reference, followed by a fresh value-private observation. |
+
+The new runtime associates CG and AX windows through unique PID, exact logical bounds, and available titles. This is a public-metadata association, not an OS-attested window-ID mapping or atomic snapshot. Each action revalidates the retained AX object, owning window, observed role, and raw AX identifier. Duplicate labels never select a replacement control. Images, OCR, keys, scrolling, coordinate actions, and multi-step execution are not implemented in this runtime.
+
+```sh
+npm run build:runtime
+npm run start:rust
+```
+
+For automated checks, run `npm run test:runtime`. To exercise the installed pair against only the disposable fixture:
+
+```sh
+sh test/fixtures/macos/build.sh
+node test/runtime/semantic-live.mjs --repetitions 3
+```
+
+The live runner records target registration and external AX readiness separately from graded scenario latency. See [runtime.md](docs/runtime.md) for execution, privacy, locking, and evidence boundaries. `npm run test:foundations` and the `baseline:*` commands remain available for the legacy comparison.
+
+## Existing Node/Swift server
+
+The npm entry point (`server.mjs`, including `npx macos-computer-use-mcp`) still starts the existing server described below. The new Rust pair is launched explicitly with `npm run start:rust` or its installed executable.
 
 Built with a compiled Swift core leveraging Apple's native **CoreGraphics**, **Vision OCR (`VNRecognizeTextRequest`)**, and **Accessibility APIs** for semantic background actions. Untargeted input remains an explicit global CoreGraphics fallback.
 
