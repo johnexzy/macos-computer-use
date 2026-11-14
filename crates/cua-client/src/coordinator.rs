@@ -480,7 +480,7 @@ pub(crate) fn interrupted(
         steps.push(StepReceipt {
             route: None,
             action_id: step.action_id.clone(),
-            delivery: if may_have_dispatched {
+            delivery: if may_have_dispatched && !matches!(step.operation, Operation::WaitFor(_)) {
                 Delivery::Unknown
             } else {
                 Delivery::NotDispatched
@@ -500,6 +500,7 @@ pub(crate) fn interrupted(
             steps,
             remaining_steps,
             stop_reason,
+            feedback: None,
         }),
     })
 }

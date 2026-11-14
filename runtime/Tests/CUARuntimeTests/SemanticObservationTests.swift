@@ -312,3 +312,137 @@ final class SemanticObservationTests: XCTestCase {
                           3 * 1024 * 1024)
     }
 }
+
+final class PredicateAndFeedbackTests: XCTestCase {
+    private func context() -> OperationContext { OperationContext(budgetMs: 5000) }
+    private func retained(_ native: NativeObservation) -> RetainedObservation {
+        RetainedObservation(observation: native.observation, handle: native.handle,
+                            createdAt: DispatchTime.now().uptimeNanoseconds)
+    }
+    func testPartialScanEstablishesPositivePresenceButCannotProveMissingElementAbsent() throws {
+        let fixture = SemanticFixture()
+        let handle = try fixture.observe().handle as! SemanticObservationHandle
+        fixture.window.childrenComplete = false
+        let present = ElementCondition(selector: Selector(role: "AXTextField", label: "Value", identifier: "first"))
+        let missing = ElementCondition(selector: Selector(role: "AXTextField", label: nil, identifier: "missing"))
+        let evaluator = PredicateEvaluator()
+        XCTAssertEqual(try evaluator.evaluate(.elementExists(present), handle: handle, context: context()).matched, true)
+        XCTAssertEqual(try evaluator.evaluate(.elementAbsent(present), handle: handle, context: context()).matched, false)
+        XCTAssertNil(try evaluator.evaluate(.elementAbsent(missing), handle: handle, context: context()).matched)
+        fixture.window.childrenComplete = true
+        let absent = try evaluator.evaluate(.elementAbsent(missing), handle: handle, context: context())
+        XCTAssertEqual(absent.matched, true)
+        XCTAssertNotNil(absent.evidence?.collected)
+        XCTAssertNil(absent.elementRef)
+        XCTAssertTrue(fixture.backend.valueReads.isEmpty)
+    }
+    func testUnavailableValueAndEnabledStateAreUnknownRatherThanNegativeEvidence() throws {
+        let fixture = SemanticFixture()
+        let observation = try fixture.observe()
+        let handle = observation.handle as! SemanticObservationHandle
+        let reference = observation.observation.elements[0].reference
+        fixture.first.value = nil; fixture.first.enabledKnown = false
+        let evaluator = PredicateEvaluator()
+        XCTAssertNil(try evaluator.evaluate(.valueEquals(ValueCondition(elementRef: reference, value: "")), handle: handle, context: context()).evidence)
+        XCTAssertNil(try evaluator.evaluate(.enabled(EnabledCondition(elementRef: reference, enabled: false)), handle: handle, context: context()).evidence)
+        fixture.first.value = ""
+        XCTAssertEqual(try evaluator.evaluate(.valueEquals(ValueCondition(elementRef: reference, value: "")), handle: handle, context: context()).matched, true)
+    }
+    func testWindowAbsenceUsesIndependentExactPresenceWithoutRequiringLiveAXWindow() throws {
+        let fixture = SemanticFixture()
+        let handle = try fixture.observe().handle as! SemanticObservationHandle
+        fixture.catalog.records = []
+        let absent = PredicateEvaluator(windowPresent: { key, context in try context.check(); XCTAssertEqual(key, fixture.target.key); return false })
+        let result = try absent.evaluate(.windowAbsent(Empty()), handle: handle, context: context())
+        XCTAssertEqual(result.matched, true)
+        XCTAssertEqual(result.target, fixture.target.key)
+        XCTAssertNotNil(result.evidence?.collected)
+        XCTAssertNil(result.elementRef)
+        let offscreen = PredicateEvaluator(windowPresent: { _, context in try context.check(); return true })
+        XCTAssertEqual(try offscreen.evaluate(.windowAbsent(Empty()), handle: handle, context: context()).matched, false)
+    }
+    func testFeedbackComparesRequestedPublicProjectionWithoutCreatingReferences() throws {
+        let fixture = SemanticFixture()
+        let native = try fixture.observe()
+        let reference = native.observation.elements[0].reference
+        let collector = FeedbackCollector()
+        fixture.first.value = "new private value"
+        let privateResult = collector.collect(FeedbackRequest(elementRefs: [reference], includeValues: false), entry: retained(native), context: context())
+        XCTAssertEqual(privateResult.controls[0].state, .unchanged)
+        XCTAssertNil(privateResult.controls[0].element)
+        XCTAssertTrue(fixture.backend.valueReads.isEmpty)
+        let disclosed = collector.collect(FeedbackRequest(elementRefs: [reference], includeValues: true), entry: retained(native), context: context())
+        XCTAssertEqual(disclosed.controls[0].state, .changed)
+        XCTAssertEqual(disclosed.controls[0].element?.reference, reference)
+        XCTAssertEqual(disclosed.controls[0].element?.value, "new private value")
+        XCTAssertEqual(disclosed.baseObservationId, native.observation.observationId)
+        XCTAssertFalse(disclosed.invalidated)
+    }
+    func testExplicitValueDisclosureChangesProjectionEvenWithoutAMutation() throws {
+        let fixture = SemanticFixture()
+        let native = try fixture.observe()
+        let reference = native.observation.elements[0].reference
+        let unchangedValue = fixture.first.value
+        let result = FeedbackCollector().collect(FeedbackRequest(elementRefs: [reference], includeValues: true), entry: retained(native), context: context())
+        XCTAssertEqual(fixture.first.value, unchangedValue)
+        XCTAssertEqual(result.controls[0].state, .changed)
+        XCTAssertEqual(result.controls[0].element?.value, unchangedValue)
+        XCTAssertEqual(result.controls[0].element?.reference, reference)
+    }
+    func testIndividualControlInvalidationDoesNotInvalidateUnrelatedReferences() throws {
+        let fixture = SemanticFixture()
+        let native = try fixture.observe()
+        let references = native.observation.elements.map(\.reference)
+        fixture.first.identifier = "reused"
+        let result = FeedbackCollector().collect(FeedbackRequest(elementRefs: references, includeValues: false), entry: retained(native), context: context())
+        XCTAssertEqual(result.controls.map(\.state), [.invalidated, .unchanged])
+        XCTAssertFalse(result.invalidated)
+        XCTAssertTrue(result.controls.allSatisfy { $0.element == nil })
+    }
+    func testWholeWindowInvalidationAndNativeUnavailabilityRemainDistinct() throws {
+        let fixture = SemanticFixture()
+        let native = try fixture.observe()
+        let request = FeedbackRequest(elementRefs: native.observation.elements.map(\.reference), includeValues: false)
+        fixture.first.readable = false
+        let unavailable = FeedbackCollector().collect(request, entry: retained(native), context: context())
+        XCTAssertEqual(unavailable.controls.map(\.state), [.unavailable, .unchanged])
+        XCTAssertFalse(unavailable.invalidated)
+        fixture.catalog.records = []
+        let invalidated = FeedbackCollector().collect(request, entry: retained(native), context: context())
+        XCTAssertTrue(invalidated.invalidated)
+        XCTAssertTrue(invalidated.controls.allSatisfy { $0.state == .invalidated && $0.element == nil })
+    }
+    func testFeedbackDeadlineIsBestEffortAndDoesNotRequestValues() throws {
+        let fixture = SemanticFixture()
+        let native = try fixture.observe()
+        let context = context(); context.cancel()
+        let result = FeedbackCollector().collect(FeedbackRequest(elementRefs: native.observation.elements.map(\.reference), includeValues: true), entry: retained(native), context: context)
+        XCTAssertTrue(result.controls.allSatisfy { $0.state == .unavailable && $0.element == nil })
+        XCTAssertFalse(result.invalidated)
+        XCTAssertTrue(fixture.backend.valueReads.isEmpty)
+    }
+    func testExpiredFeedbackBindingDoesNotRefreshOrReadRetainedReferences() throws {
+        let fixture = SemanticFixture()
+        let native = try fixture.observe()
+        let expired = RetainedObservation(observation: native.observation, handle: native.handle, createdAt: 0)
+        let result = FeedbackCollector().collect(FeedbackRequest(elementRefs: native.observation.elements.map(\.reference), includeValues: true), entry: expired, context: context())
+        XCTAssertTrue(result.invalidated)
+        XCTAssertTrue(result.controls.allSatisfy { $0.state == .invalidated && $0.element == nil })
+        XCTAssertTrue(fixture.backend.valueReads.isEmpty)
+    }
+    func testFeedbackEncodedPayloadIsBoundedWithExplicitUnavailableRemainder() throws {
+        let fixture = SemanticFixture()
+        fixture.window.children = (0..<8).map { index in
+            let node = SemanticNode("feedback-\(index)", role: "AXTextField", title: "Value", bounds: fixture.first.bounds)
+            node.value = String(repeating: "\u{0000}", count: 65_536)
+            node.owner = fixture.window; node.parent = fixture.window; return node
+        }
+        let native = try fixture.observe()
+        let result = FeedbackCollector().collect(FeedbackRequest(elementRefs: native.observation.elements.map(\.reference), includeValues: true), entry: retained(native), context: context())
+        XCTAssertTrue(result.truncated)
+        XCTAssertEqual(result.controls.count, 8)
+        XCTAssertTrue(result.controls.contains { $0.state == .changed })
+        XCTAssertTrue(result.controls.contains { $0.state == .unavailable })
+        XCTAssertLessThanOrEqual(try JSONEncoder().encode(result).count, Limits.maxFeedbackBytes)
+    }
+}

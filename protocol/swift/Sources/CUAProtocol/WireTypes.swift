@@ -10,6 +10,7 @@ public enum Limits {
     public static let maxRetainedObservations = 32
     public static let observationTTLMS: UInt32 = 60_000
     public static let maxBudgetMS: UInt32 = 60_000
+    public static let maxFeedbackBytes = 2 * 1024 * 1024
 }
 
 public struct ContractError: Error, Equatable, CustomStringConvertible, Sendable {
@@ -128,6 +129,7 @@ public enum StopReason: String, Codable, Equatable, Sendable {
 
 public enum ReceiptReason: String, Codable, Equatable, Sendable {
     case alreadySatisfied
+    case conditionSatisfied
     case preconditionFailed
     case verificationFailed
     case cancelled
@@ -879,6 +881,110 @@ public struct ClickOperation: Codable, Equatable, Sendable {
     }
 }
 
+public enum FeedbackState: String, Codable, Equatable, Sendable {
+    case changed, unchanged, invalidated, unavailable
+}
+
+public struct WaitOperation: Codable, Equatable, Sendable {
+    public let condition: Condition
+    public init(condition: Condition) {
+        self.condition = condition
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case condition
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        condition = try c.decode(Condition.self, forKey: .condition)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(condition, forKey: .condition)
+    }
+}
+
+public struct FeedbackRequest: Codable, Equatable, Sendable {
+    public let elementRefs: [String]
+    public let includeValues: Bool
+    public init(elementRefs: [String], includeValues: Bool) {
+        self.elementRefs = elementRefs
+        self.includeValues = includeValues
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case elementRefs, includeValues
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        elementRefs = try c.decode([String].self, forKey: .elementRefs)
+        includeValues = try c.decode(Bool.self, forKey: .includeValues)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(elementRefs, forKey: .elementRefs)
+        try c.encode(includeValues, forKey: .includeValues)
+    }
+}
+
+public struct ControlFeedback: Codable, Equatable, Sendable {
+    public let elementRef: String
+    public let state: FeedbackState
+    public let element: Element?
+    public init(elementRef: String, state: FeedbackState, element: Element? = nil) {
+        self.elementRef = elementRef
+        self.state = state
+        self.element = element
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case elementRef, state, element
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        elementRef = try c.decode(String.self, forKey: .elementRef)
+        state = try c.decode(FeedbackState.self, forKey: .state)
+        element = try c.decodeIfPresent(Element.self, forKey: .element)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(elementRef, forKey: .elementRef)
+        try c.encode(state, forKey: .state)
+        try c.encode(element, forKey: .element)
+    }
+}
+
+public struct ObservationFeedback: Codable, Equatable, Sendable {
+    public let baseObservationId: String
+    public let collected: CollectionInterval
+    public let controls: [ControlFeedback]
+    public let invalidated: Bool
+    public let truncated: Bool
+    public init(baseObservationId: String, collected: CollectionInterval, controls: [ControlFeedback], invalidated: Bool, truncated: Bool) {
+        self.baseObservationId = baseObservationId
+        self.collected = collected
+        self.controls = controls
+        self.invalidated = invalidated
+        self.truncated = truncated
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case baseObservationId, collected, controls, invalidated, truncated
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        baseObservationId = try c.decode(String.self, forKey: .baseObservationId)
+        collected = try c.decode(CollectionInterval.self, forKey: .collected)
+        controls = try c.decode([ControlFeedback].self, forKey: .controls)
+        invalidated = try c.decode(Bool.self, forKey: .invalidated)
+        truncated = try c.decode(Bool.self, forKey: .truncated)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(baseObservationId, forKey: .baseObservationId)
+        try c.encode(collected, forKey: .collected)
+        try c.encode(controls, forKey: .controls)
+        try c.encode(invalidated, forKey: .invalidated)
+        try c.encode(truncated, forKey: .truncated)
+    }
+}
+
 public struct ActionStep: Codable, Equatable, Sendable {
     public let actionId: String
     public let operation: Operation
@@ -914,14 +1020,17 @@ public struct ActRequest: Codable, Equatable, Sendable {
     public let observationId: String
     public let target: TargetKey
     public let steps: [ActionStep]
-    public init(grantId: String, observationId: String, target: TargetKey, steps: [ActionStep]) {
+    public let feedback: FeedbackRequest?
+    public init(grantId: String, observationId: String, target: TargetKey, steps: [ActionStep], feedback: FeedbackRequest? = nil) {
         self.grantId = grantId
         self.observationId = observationId
         self.target = target
         self.steps = steps
+        self.feedback = feedback
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case grantId, observationId, target, steps
+        case feedback
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -929,6 +1038,7 @@ public struct ActRequest: Codable, Equatable, Sendable {
         observationId = try c.decode(String.self, forKey: .observationId)
         target = try c.decode(TargetKey.self, forKey: .target)
         steps = try c.decode([ActionStep].self, forKey: .steps)
+        feedback = try c.decodeIfPresent(FeedbackRequest.self, forKey: .feedback)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -936,6 +1046,7 @@ public struct ActRequest: Codable, Equatable, Sendable {
         try c.encode(observationId, forKey: .observationId)
         try c.encode(target, forKey: .target)
         try c.encode(steps, forKey: .steps)
+        try c.encode(feedback, forKey: .feedback)
     }
 }
 
@@ -943,25 +1054,30 @@ public struct CheckEvidence: Codable, Equatable, Sendable {
     public let observationId: String
     public let condition: Condition
     public let matched: Bool
-    public init(observationId: String, condition: Condition, matched: Bool) {
+    public let collected: CollectionInterval?
+    public init(observationId: String, condition: Condition, matched: Bool, collected: CollectionInterval? = nil) {
         self.observationId = observationId
         self.condition = condition
         self.matched = matched
+        self.collected = collected
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case observationId, condition, matched
+        case collected
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
         observationId = try c.decode(String.self, forKey: .observationId)
         condition = try c.decode(Condition.self, forKey: .condition)
         matched = try c.decode(Bool.self, forKey: .matched)
+        collected = try c.decodeIfPresent(CollectionInterval.self, forKey: .collected)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(observationId, forKey: .observationId)
         try c.encode(condition, forKey: .condition)
         try c.encode(matched, forKey: .matched)
+        try c.encode(collected, forKey: .collected)
     }
 }
 
@@ -1008,14 +1124,17 @@ public struct ActResult: Codable, Equatable, Sendable {
     public let steps: [StepReceipt]
     public let remainingSteps: UInt16
     public let stopReason: StopReason
-    public init(observationId: String, steps: [StepReceipt], remainingSteps: UInt16, stopReason: StopReason) {
+    public let feedback: ObservationFeedback?
+    public init(observationId: String, steps: [StepReceipt], remainingSteps: UInt16, stopReason: StopReason, feedback: ObservationFeedback? = nil) {
         self.observationId = observationId
         self.steps = steps
         self.remainingSteps = remainingSteps
         self.stopReason = stopReason
+        self.feedback = feedback
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case observationId, steps, remainingSteps, stopReason
+        case feedback
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -1023,6 +1142,7 @@ public struct ActResult: Codable, Equatable, Sendable {
         steps = try c.decode([StepReceipt].self, forKey: .steps)
         remainingSteps = try c.decode(UInt16.self, forKey: .remainingSteps)
         stopReason = try c.decode(StopReason.self, forKey: .stopReason)
+        feedback = try c.decodeIfPresent(ObservationFeedback.self, forKey: .feedback)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -1030,6 +1150,7 @@ public struct ActResult: Codable, Equatable, Sendable {
         try c.encode(steps, forKey: .steps)
         try c.encode(remainingSteps, forKey: .remainingSteps)
         try c.encode(stopReason, forKey: .stopReason)
+        try c.encode(feedback, forKey: .feedback)
     }
 }
 
@@ -1063,25 +1184,30 @@ public struct WaitResult: Codable, Equatable, Sendable {
     public let outcome: WaitOutcome
     public let alreadySatisfied: Bool
     public let observation: Observation?
-    public init(outcome: WaitOutcome, alreadySatisfied: Bool, observation: Observation?) {
+    public let evidence: CheckEvidence?
+    public init(outcome: WaitOutcome, alreadySatisfied: Bool, observation: Observation?, evidence: CheckEvidence? = nil) {
         self.outcome = outcome
         self.alreadySatisfied = alreadySatisfied
         self.observation = observation
+        self.evidence = evidence
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case outcome, alreadySatisfied, observation
+        case evidence
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
         outcome = try c.decode(WaitOutcome.self, forKey: .outcome)
         alreadySatisfied = try c.decode(Bool.self, forKey: .alreadySatisfied)
         observation = try c.decodeIfPresent(Observation.self, forKey: .observation)
+        evidence = try c.decodeIfPresent(CheckEvidence.self, forKey: .evidence)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(outcome, forKey: .outcome)
         try c.encode(alreadySatisfied, forKey: .alreadySatisfied)
         try c.encode(observation, forKey: .observation)
+        try c.encode(evidence, forKey: .evidence)
     }
 }
 
@@ -1250,6 +1376,7 @@ public enum Condition: Codable, Equatable, Sendable {
     case elementAbsent(ElementCondition)
     case valueEquals(ValueCondition)
     case enabled(EnabledCondition)
+    case windowAbsent(Empty)
     public init(from decoder: Decoder) throws {
         let (tag, c) = try tagged(decoder, "kind", "params")
         switch tag {
@@ -1257,6 +1384,7 @@ public enum Condition: Codable, Equatable, Sendable {
         case "elementAbsent": self = .elementAbsent(try c.decode(ElementCondition.self, forKey: WireKey("params")))
         case "valueEquals": self = .valueEquals(try c.decode(ValueCondition.self, forKey: WireKey("params")))
         case "enabled": self = .enabled(try c.decode(EnabledCondition.self, forKey: WireKey("params")))
+        case "windowAbsent": self = .windowAbsent(try c.decode(Empty.self, forKey: WireKey("params")))
         default: throw ContractError("unknown tagged variant")
         }
     }
@@ -1275,6 +1403,9 @@ public enum Condition: Codable, Equatable, Sendable {
         case .enabled(let value):
             try c.encode("enabled", forKey: WireKey("kind"))
             try c.encode(value, forKey: WireKey("params"))
+        case .windowAbsent(let value):
+            try c.encode("windowAbsent", forKey: WireKey("kind"))
+            try c.encode(value, forKey: WireKey("params"))
         }
     }
 }
@@ -1286,6 +1417,7 @@ public enum Operation: Codable, Equatable, Sendable {
     case key(KeyOperation)
     case scroll(ScrollOperation)
     case click(ClickOperation)
+    case waitFor(WaitOperation)
     public init(from decoder: Decoder) throws {
         let (tag, c) = try tagged(decoder, "kind", "params")
         switch tag {
@@ -1295,6 +1427,7 @@ public enum Operation: Codable, Equatable, Sendable {
         case "key": self = .key(try c.decode(KeyOperation.self, forKey: WireKey("params")))
         case "scroll": self = .scroll(try c.decode(ScrollOperation.self, forKey: WireKey("params")))
         case "click": self = .click(try c.decode(ClickOperation.self, forKey: WireKey("params")))
+        case "waitFor": self = .waitFor(try c.decode(WaitOperation.self, forKey: WireKey("params")))
         default: throw ContractError("unknown tagged variant")
         }
     }
@@ -1318,6 +1451,9 @@ public enum Operation: Codable, Equatable, Sendable {
             try c.encode(value, forKey: WireKey("params"))
         case .click(let value):
             try c.encode("click", forKey: WireKey("kind"))
+            try c.encode(value, forKey: WireKey("params"))
+        case .waitFor(let value):
+            try c.encode("waitFor", forKey: WireKey("kind"))
             try c.encode(value, forKey: WireKey("params"))
         }
     }

@@ -16,68 +16,104 @@ public protocol AXMutating: Sendable {
 public struct WaitEvaluation: Sendable {
     public let outcome: WaitOutcome
     public let alreadySatisfied: Bool
+    public let evidence: CheckEvidence?
 }
 
 public struct BackgroundActions: Sendable {
     private let coordinator: MutationCoordinator
     private let foreground: @Sendable () -> UInt32?
+    private let predicates: PredicateEvaluator
+    private let now: @Sendable () -> UInt64
 
     public init(coordinator: MutationCoordinator = MutationCoordinator(),
+                predicates: PredicateEvaluator = PredicateEvaluator(),
+                now: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
                 foreground: @escaping @Sendable () -> UInt32? = {
                     guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier, pid > 0 else { return nil }
                     return UInt32(pid)
                 }) {
-        self.coordinator = coordinator; self.foreground = foreground
+        self.coordinator = coordinator; self.foreground = foreground; self.predicates = predicates; self.now = now
     }
 
+    /// The sink must return only after a full progress frame is physically written.
+    public typealias ProgressSink = @Sendable ([StepReceipt], OperationContext) throws -> Void
+
     public func act(_ request: ActRequest, entry: RetainedObservation, context: OperationContext,
-                    state: ActionExecutionState) -> ActResult {
-        guard request.steps.count == 1 else {
+                    state: ActionExecutionState, progress: ProgressSink? = nil) -> ActResult {
+        let hasMutation = request.steps.contains { if case .waitFor = $0.operation { return false }; return true }
+        if hasMutation && request.steps.count > 1 && progress == nil {
             state.finish(reason: .unsupported, stop: .unsupported); return state.snapshot()
         }
-        do {
-            try coordinator.withOwnership(context: context) {
-                let before = foreground()
-                guard before != nil else { throw NativeFailure(.unsupported, "foreground baseline is unavailable") }
-                var failure: NativeFailure?
-                var alreadySatisfied = false
-                do { alreadySatisfied = try execute(request, entry: entry, context: context, state: state, before: before) }
-                catch let error as NativeFailure { failure = error }
-                catch { failure = NativeFailure(.nativeFailed, "background action failed") }
-                if foreground() != before {
-                    state.finish(reason: .nativeFailed, stop: .failed)
-                } else if let failure {
-                    finish(state, failure: failure)
+        let run = {
+            let before = hasMutation ? foreground() : nil
+            if hasMutation && before == nil { throw NativeFailure(.unsupported, "foreground baseline is unavailable") }
+            defer {
+                if !state.isSealed && before != nil && foreground() != before { state.finish(reason: .nativeFailed, stop: .failed) }
+            }
+            let handle = try semanticHandle(entry, observationId: request.observationId, target: request.target)
+            for step in request.steps {
+                try state.checkActive(context: context)
+                try checkLifetime(entry)
+                let reason: ReceiptReason?
+                if case .waitFor(let wait) = step.operation {
+                    reason = try waitStep(wait.condition, entry: entry, handle: handle, context: context, state: state)
                 } else {
-                    state.complete(context: context, alreadySatisfied: alreadySatisfied)
+                    let already = try execute(step, entry: entry, handle: handle, context: context, state: state, before: before)
+                    reason = already ? .alreadySatisfied : nil
+                }
+                if before != nil { try checkForeground(before) }
+                if let prefix = try state.settle(context: context, reason: reason), let progress {
+                    try progress(prefix, context)
                 }
             }
+            if before != nil { try checkForeground(before) }
+            try state.finalize(context: context)
+        }
+        do {
+            if hasMutation { try coordinator.withOwnership(context: context, run) }
+            else { try run() }
         } catch let error as NativeFailure { finish(state, failure: error) }
         catch { state.finish(reason: .nativeFailed, stop: .failed) }
+        if let requested = request.feedback {
+            state.attachFeedback(FeedbackCollector().collect(requested, entry: entry, context: context))
+        }
         return state.snapshot()
     }
 
     public func wait(_ request: WaitRequest, entry: RetainedObservation, context: OperationContext) throws -> WaitEvaluation {
-        guard case .valueEquals = request.condition else { throw NativeFailure(.unsupported, "only exact-value waiting is supported") }
         let handle = try semanticHandle(entry, observationId: request.observationId, target: request.target)
         var first = true
         while true {
             try context.check()
-            if let check = try evaluate(request.condition, handle: handle, context: context), check.matched {
-                return WaitEvaluation(outcome: .satisfied, alreadySatisfied: first)
+            try checkLifetime(entry)
+            let evaluation = try predicates.evaluate(request.condition, handle: handle, context: context)
+            if evaluation.matched == true {
+                return WaitEvaluation(outcome: .satisfied, alreadySatisfied: first, evidence: evaluation.evidence)
             }
             first = false
             try pause(context)
         }
     }
 
-    private func execute(_ request: ActRequest, entry: RetainedObservation, context: OperationContext,
+    private func waitStep(_ condition: Condition, entry: RetainedObservation, handle: SemanticObservationHandle, context: OperationContext,
+                          state: ActionExecutionState) throws -> ReceiptReason {
+        var first = true
+        while true {
+            try state.checkActive(context: context)
+            try checkLifetime(entry)
+            if let check = try evaluate(condition, handle: handle, context: context) {
+                state.checked([check], verification: check.matched ? .confirmed : .mismatch)
+                if check.matched { return first ? .alreadySatisfied : .conditionSatisfied }
+            }
+            first = false
+            try pause(context)
+        }
+    }
+
+    private func execute(_ step: ActionStep, entry: RetainedObservation, handle: SemanticObservationHandle, context: OperationContext,
                          state: ActionExecutionState, before: UInt32?) throws -> Bool {
         try context.check()
-        let handle = try semanticHandle(entry, observationId: request.observationId, target: request.target)
         guard let writer = handle.backend as? any AXMutating else { throw NativeFailure(.unsupported, "semantic mutation backend unavailable") }
-        let step = request.steps[0]
-        try supported(step.precondition); try supported(step.expect)
         let reference: String
         let route: DeliveryRoute
         switch step.operation {
@@ -144,6 +180,7 @@ public struct BackgroundActions: Sendable {
             throw NativeFailure(.staleElement, "text value or selection changed before dispatch")
         }
         let handoff: @Sendable () throws -> Void = {
+            try checkLifetime(entry)
             if let condition = step.precondition {
                 guard let check = try evaluate(condition, handle: handle, context: context) else {
                     throw NativeFailure(.unsupported, "precondition cannot be read before dispatch")
@@ -155,6 +192,7 @@ public struct BackgroundActions: Sendable {
                 }
             }
             try checkForeground(before)
+            try checkLifetime(entry)
             try state.beginDispatch(context: context, route: route)
         }
         var mutationFailure: NativeFailure?
@@ -179,6 +217,7 @@ public struct BackgroundActions: Sendable {
         }
         while true {
             try context.check()
+            try checkLifetime(entry)
             let checks = try recordChecks(required, handle: handle, context: context, state: state)
             let privateMatched: Bool
             if let expected = privateTextExpectation {
@@ -206,6 +245,12 @@ public struct BackgroundActions: Sendable {
         return checks
     }
 
+    private func checkLifetime(_ entry: RetainedObservation) throws {
+        if now() >= entry.createdAt + UInt64(Limits.observationTTLMS) * 1_000_000 {
+            throw NativeFailure(.staleObservation, "origin observation expired during execution")
+        }
+    }
+
     private func semanticHandle(_ entry: RetainedObservation, observationId: String, target: TargetKey) throws -> SemanticObservationHandle {
         guard entry.observation.observationId == observationId, entry.observation.target == target,
               let handle = entry.handle as? SemanticObservationHandle, handle.observationId == observationId,
@@ -213,33 +258,11 @@ public struct BackgroundActions: Sendable {
         return handle
     }
 
-    private func supported(_ condition: Condition?) throws {
-        switch condition {
-        case .valueEquals, .enabled, nil: break
-        default: throw NativeFailure(.unsupported, "condition is not implemented")
-        }
-    }
-
     private func evaluate(_ condition: Condition, handle: SemanticObservationHandle, context: OperationContext) throws -> ActionWitness? {
-        let started = milliseconds()
-        let reference: String
-        let matched: Bool
-        switch condition {
-        case .valueEquals(let value):
-            reference = value.elementRef
-            let node = try handle.resolve(reference, includeValue: true, context: context)
-            guard let actual = node.snapshot.value else { return nil }
-            matched = actual == value.value
-        case .enabled(let value):
-            reference = value.elementRef
-            let node = try handle.resolve(reference, context: context)
-            guard node.snapshot.enabledKnown else { return nil }
-            matched = node.snapshot.enabled == value.enabled
-        default: throw NativeFailure(.unsupported, "condition is not implemented")
-        }
-        return ActionWitness(observationId: "check-\(UUID().uuidString)",
-            collected: CollectionInterval(startedUnixMs: started, finishedUnixMs: max(started, milliseconds())),
-            target: handle.target.key, elementRef: reference, condition: condition, matched: matched)
+        let result = try predicates.evaluate(condition, handle: handle, context: context)
+        guard let evidence = result.evidence else { return nil }
+        return ActionWitness(observationId: evidence.observationId, collected: result.collected,
+            target: result.target, elementRef: result.elementRef, condition: evidence.condition, matched: evidence.matched)
     }
 
     private func expectedEdit(_ text: String, snapshot: AXNodeSnapshot) -> String? {

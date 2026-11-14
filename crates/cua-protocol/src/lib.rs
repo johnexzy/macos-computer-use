@@ -11,6 +11,7 @@ pub const MAX_TARGETS: usize = 256;
 pub const MAX_RETAINED_OBSERVATIONS: usize = 32;
 pub const OBSERVATION_TTL_MS: u32 = 60_000;
 pub const MAX_BUDGET_MS: u32 = 60_000;
+pub const MAX_FEEDBACK_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 macro_rules! record {
@@ -106,6 +107,7 @@ choices!(StopReason {
 });
 choices!(ReceiptReason {
     AlreadySatisfied,
+    ConditionSatisfied,
     PreconditionFailed,
     VerificationFailed,
     Cancelled,
@@ -235,6 +237,7 @@ pub enum Condition {
     ElementAbsent(ElementCondition),
     ValueEquals(ValueCondition),
     Enabled(EnabledCondition),
+    WindowAbsent(Empty),
 }
 record!(ElementOperation {
     element_ref: String
@@ -260,6 +263,9 @@ record!(ClickOperation {
     point: Point,
     space: CoordinateSpace
 });
+record!(WaitOperation {
+    condition: Condition
+});
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(
@@ -275,31 +281,45 @@ pub enum Operation {
     Key(KeyOperation),
     Scroll(ScrollOperation),
     Click(ClickOperation),
+    WaitFor(WaitOperation),
 }
+choices!(FeedbackState {
+    Changed,
+    Unchanged,
+    Invalidated,
+    Unavailable
+});
+record!(FeedbackRequest { element_refs: Vec<String>, include_values: bool });
+record!(ControlFeedback { element_ref: String, state: FeedbackState, element: Option<Element> });
+record!(ObservationFeedback {
+    base_observation_id: String, collected: CollectionInterval, controls: Vec<ControlFeedback>,
+    invalidated: bool, truncated: bool
+});
 record!(ActionStep {
     action_id: String, operation: Operation, precondition: Option<Condition>, expect: Option<Condition>
 });
 record!(ActRequest {
-    grant_id: String, observation_id: String, target: TargetKey, steps: Vec<ActionStep>
+    grant_id: String, observation_id: String, target: TargetKey, steps: Vec<ActionStep>, feedback: Option<FeedbackRequest>
 });
 record!(CheckEvidence {
     observation_id: String,
     condition: Condition,
-    matched: bool
+    matched: bool, collected: Option<CollectionInterval>
 });
 record!(StepReceipt {
     action_id: String, delivery: Delivery, verification: Verification,
     reason: Option<ReceiptReason>, evidence: Vec<CheckEvidence>, route: Option<DeliveryRoute>
 });
 record!(ActResult {
-    observation_id: String, steps: Vec<StepReceipt>, remaining_steps: u16, stop_reason: StopReason
+    observation_id: String, steps: Vec<StepReceipt>, remaining_steps: u16, stop_reason: StopReason,
+    feedback: Option<ObservationFeedback>
 });
 record!(WaitRequest {
     observation_id: String,
     target: TargetKey,
     condition: Condition
 });
-record!(WaitResult { outcome: WaitOutcome, already_satisfied: bool, observation: Option<Observation> });
+record!(WaitResult { outcome: WaitOutcome, already_satisfied: bool, observation: Option<Observation>, evidence: Option<Box<CheckEvidence>> });
 record!(CancelRequest { request_id: String });
 record!(CancelResult {
     request_id: String,
@@ -453,6 +473,39 @@ fn expectation(step: &ActionStep, receipt: &StepReceipt, settled: bool) -> Resul
         )?;
     }
     let mut required = Vec::new();
+    if let Operation::WaitFor(wait) = &step.operation {
+        require(
+            receipt.delivery == Delivery::NotDispatched && receipt.route.is_none(),
+            "wait cannot dispatch input",
+        )?;
+        required.push(wait.condition.clone());
+        if settled
+            || matches!(
+                receipt.reason,
+                Some(ReceiptReason::AlreadySatisfied | ReceiptReason::ConditionSatisfied)
+            )
+        {
+            require(
+                matches!(
+                    receipt.reason,
+                    Some(ReceiptReason::AlreadySatisfied | ReceiptReason::ConditionSatisfied)
+                ),
+                "settled wait requires a successful wait reason",
+            )?;
+            require(
+                receipt
+                    .evidence
+                    .iter()
+                    .any(|e| e.condition == wait.condition && e.matched && e.collected.is_some()),
+                "settled wait requires timed condition evidence",
+            )?;
+        }
+    } else {
+        require(
+            receipt.reason != Some(ReceiptReason::ConditionSatisfied),
+            "conditionSatisfied requires a wait operation",
+        )?;
+    }
     if let Operation::SetValue(value) = &step.operation {
         required.push(Condition::ValueEquals(ValueCondition {
             element_ref: value.element_ref.clone(),
@@ -506,8 +559,99 @@ impl Condition {
             Self::ElementExists(v) | Self::ElementAbsent(v) => id(&v.selector.role),
             Self::ValueEquals(v) => id(&v.element_ref),
             Self::Enabled(v) => id(&v.element_ref),
+            Self::WindowAbsent(_) => Ok(()),
         }
     }
+}
+
+impl CheckEvidence {
+    fn validate(&self) -> Result<(), String> {
+        id(&self.observation_id)?;
+        self.condition.validate()?;
+        if let Some(collected) = &self.collected {
+            interval(collected)?;
+        }
+        Ok(())
+    }
+}
+
+impl ObservationFeedback {
+    fn validate(&self) -> Result<(), String> {
+        id(&self.base_observation_id)?;
+        interval(&self.collected)?;
+        require(
+            self.controls.len() <= MAX_ELEMENTS,
+            "too many feedback controls",
+        )?;
+        unique(self.controls.iter().map(|c| c.element_ref.as_str()))?;
+        for control in &self.controls {
+            require(
+                (control.state == FeedbackState::Changed) == control.element.is_some(),
+                "only changed feedback carries an element",
+            )?;
+            if let Some(element) = &control.element {
+                require(
+                    element.reference == control.element_ref,
+                    "feedback must preserve the base reference",
+                )?;
+                id(&element.role)?;
+                rect(&element.bounds)?;
+                require(
+                    element.label.as_ref().is_none_or(|s| s.len() <= 1024)
+                        && element.identifier.as_ref().is_none_or(|s| s.len() <= 1024)
+                        && element.value.as_ref().is_none_or(|s| s.len() <= 65_536),
+                    "feedback projection exceeds string limit",
+                )?;
+            }
+        }
+        require(
+            !self.invalidated
+                || self
+                    .controls
+                    .iter()
+                    .all(|c| c.state == FeedbackState::Invalidated),
+            "invalidated binding cannot carry live feedback",
+        )?;
+        require(
+            serde_json::to_vec(self)
+                .map_err(|_| "feedback encoding failed")?
+                .len()
+                <= MAX_FEEDBACK_BYTES,
+            "feedback exceeds payload limit",
+        )
+    }
+}
+
+fn correlate_feedback(request: &ActRequest, result: &ActResult) -> Result<(), String> {
+    let Some(feedback) = &result.feedback else {
+        return Ok(());
+    };
+    let Some(requested) = &request.feedback else {
+        return Err("unrequested feedback".into());
+    };
+    require(
+        feedback.base_observation_id == request.observation_id,
+        "feedback base observation mismatch",
+    )?;
+    require(
+        feedback
+            .controls
+            .iter()
+            .all(|c| requested.element_refs.contains(&c.element_ref)),
+        "feedback contains an unrequested reference",
+    )?;
+    require(
+        feedback.truncated || feedback.controls.len() == requested.element_refs.len(),
+        "feedback omitted requested references",
+    )?;
+    require(
+        requested.include_values
+            || feedback
+                .controls
+                .iter()
+                .all(|c| c.element.as_ref().is_none_or(|e| e.value.is_none())),
+        "feedback includes unrequested values",
+    )
 }
 impl ImageTransform {
     /// A missing or out-of-domain mapping must not be guessed from display scaling.
@@ -663,6 +807,13 @@ impl ActRequest {
                     v.point.x.is_finite() && v.point.y.is_finite(),
                     "invalid point",
                 )?,
+                Operation::WaitFor(v) => {
+                    v.condition.validate()?;
+                    require(
+                        step.precondition.is_none() && step.expect.is_none(),
+                        "wait steps cannot carry guards or expectations",
+                    )?;
+                }
             }
             if let Some(c) = &step.precondition {
                 c.validate()?;
@@ -670,6 +821,13 @@ impl ActRequest {
             if let Some(c) = &step.expect {
                 c.validate()?;
             }
+        }
+        if let Some(feedback) = &self.feedback {
+            require(
+                feedback.element_refs.len() <= MAX_ELEMENTS,
+                "too many feedback references",
+            )?;
+            unique(feedback.element_refs.iter().map(String::as_str))?;
         }
         Ok(())
     }
@@ -685,8 +843,7 @@ impl ActResult {
         unique(self.steps.iter().map(|v| v.action_id.as_str()))?;
         for (index, step) in self.steps.iter().enumerate() {
             for evidence in &step.evidence {
-                id(&evidence.observation_id)?;
-                evidence.condition.validate()?;
+                evidence.validate()?;
             }
             match step.verification {
                 Verification::Confirmed => require(
@@ -699,7 +856,10 @@ impl ActResult {
                 )?,
                 Verification::Unverified => (),
             }
-            if step.reason == Some(ReceiptReason::AlreadySatisfied) {
+            if matches!(
+                step.reason,
+                Some(ReceiptReason::AlreadySatisfied | ReceiptReason::ConditionSatisfied)
+            ) {
                 require(
                     step.delivery == Delivery::NotDispatched
                         && step.verification == Verification::Confirmed,
@@ -707,7 +867,10 @@ impl ActResult {
                 )?;
             }
             if step.delivery == Delivery::NotDispatched
-                && step.reason != Some(ReceiptReason::AlreadySatisfied)
+                && !matches!(
+                    step.reason,
+                    Some(ReceiptReason::AlreadySatisfied | ReceiptReason::ConditionSatisfied)
+                )
             {
                 require(
                     index + 1 == self.steps.len()
@@ -716,10 +879,12 @@ impl ActResult {
                     "rejected step must stop sequence",
                 )?;
             }
-            if let Some(reason) = step
-                .reason
-                .filter(|r| *r != ReceiptReason::AlreadySatisfied)
-            {
+            if let Some(reason) = step.reason.filter(|r| {
+                !matches!(
+                    r,
+                    ReceiptReason::AlreadySatisfied | ReceiptReason::ConditionSatisfied
+                )
+            }) {
                 let expected = match reason {
                     ReceiptReason::PreconditionFailed => StopReason::PreconditionFailed,
                     ReceiptReason::VerificationFailed => StopReason::VerificationFailed,
@@ -730,7 +895,9 @@ impl ActResult {
                     ReceiptReason::AmbiguousTarget => StopReason::AmbiguousTarget,
                     ReceiptReason::Unsupported => StopReason::Unsupported,
                     ReceiptReason::NativeFailed => StopReason::Failed,
-                    ReceiptReason::AlreadySatisfied => unreachable!(),
+                    ReceiptReason::AlreadySatisfied | ReceiptReason::ConditionSatisfied => {
+                        unreachable!()
+                    }
                 };
                 require(
                     index + 1 == self.steps.len() && self.stop_reason == expected,
@@ -755,10 +922,19 @@ impl ActResult {
                 self.remaining_steps == 0
                     && self.steps.iter().all(|v| {
                         v.delivery == Delivery::Dispatched
-                            || v.reason == Some(ReceiptReason::AlreadySatisfied)
+                            || matches!(
+                                v.reason,
+                                Some(
+                                    ReceiptReason::AlreadySatisfied
+                                        | ReceiptReason::ConditionSatisfied
+                                )
+                            )
                     }),
                 "completed sequence cannot include rejected steps",
             )?;
+        }
+        if let Some(feedback) = &self.feedback {
+            feedback.validate()?;
         }
         Ok(())
     }
@@ -771,6 +947,7 @@ impl Frame {
                 id(&progress.id)?;
                 id(&progress.epoch)?;
                 ActResult {
+                    feedback: None,
                     observation_id: progress.observation_id.clone(),
                     steps: progress.steps.clone(),
                     remaining_steps: 0,
@@ -838,9 +1015,19 @@ impl Frame {
                             !v.already_satisfied || v.outcome == WaitOutcome::Satisfied,
                             "invalid alreadySatisfied wait",
                         )?;
+                        if let Some(evidence) = &v.evidence {
+                            evidence.validate()?;
+                        }
+                        let closed = v.evidence.as_ref().is_some_and(|e| {
+                            matches!(e.condition, Condition::WindowAbsent(_))
+                                && e.matched
+                                && e.collected.is_some()
+                        });
                         require(
-                            v.outcome != WaitOutcome::Satisfied || v.observation.is_some(),
-                            "satisfied wait needs observation",
+                            v.outcome != WaitOutcome::Satisfied
+                                || v.observation.is_some()
+                                || closed,
+                            "satisfied wait needs observation or timed window-absence evidence",
                         )?;
                         if let Some(o) = &v.observation {
                             o.validate()?;
@@ -950,9 +1137,36 @@ impl Response {
                         || index + 1 < result.steps.len();
                     expectation(step, receipt, settled)?;
                 }
-                Ok(())
+                correlate_feedback(request, result)
             }
             (RequestBody::WaitFor(request), ResponseBody::WaitFor(result)) => {
+                if let Some(evidence) = &result.evidence {
+                    require(
+                        evidence.condition == request.condition,
+                        "wait evidence condition mismatch",
+                    )?;
+                    require(
+                        result.outcome != WaitOutcome::Satisfied || evidence.matched,
+                        "satisfied wait has negative evidence",
+                    )?;
+                }
+                if result.outcome == WaitOutcome::Satisfied {
+                    if matches!(request.condition, Condition::WindowAbsent(_)) {
+                        require(
+                            result.observation.is_none()
+                                && result
+                                    .evidence
+                                    .as_ref()
+                                    .is_some_and(|e| e.matched && e.collected.is_some()),
+                            "window absence requires timed evidence without a new observation",
+                        )?;
+                    } else {
+                        require(
+                            result.observation.is_some(),
+                            "satisfied element wait requires an observation",
+                        )?;
+                    }
+                }
                 if let Some(observation) = &result.observation {
                     require(
                         request.target == observation.target,

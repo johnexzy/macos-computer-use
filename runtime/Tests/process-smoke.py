@@ -72,16 +72,16 @@ try:
     assert screenshot["body"]["data"]["code"] == "unsupported"
     actions = [{"actionId": name, "operation": {"kind": "press", "params": {"elementRef": "not-a-live-element"}},
                 "precondition": None, "expect": None} for name in ("first", "second")]
-    result = call(process, request("act", "act", {"grantId": "smoke-grant", "observationId": "not-a-live-observation",
-        "target": target, "steps": actions}, epoch))["body"]["data"]
-    assert result["stopReason"] == "unsupported"
-    assert result["steps"][0]["delivery"] == "not_dispatched" and result["remainingSteps"] == 1
+    rejected_act = call(process, request("act", "act", {"grantId": "smoke-grant", "observationId": "not-a-live-observation",
+        "target": target, "steps": actions}, epoch))["body"]
+    assert rejected_act["result"] == "error"
+    assert rejected_act["data"]["code"] == "staleObservation"
     stale = call(process, request("stale", "capabilities", {}, "old-epoch"))
     assert stale["body"]["data"]["code"] == "staleEpoch"
     process.stdin.close()
     process.wait(timeout=5)
     assert process.returncode == 0 and process.stderr.read() == b""
-    checks.append("persistent native preflight/targets/invalid-target refusal/unsupported actions/EOF")
+    checks.append("persistent native preflight/targets/invalid-target/stale-observation refusal/EOF")
 finally:
     if process.poll() is None:
         process.kill()

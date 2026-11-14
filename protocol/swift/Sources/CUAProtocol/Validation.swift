@@ -38,6 +38,18 @@ private func expectation(_ step: ActionStep, _ receipt: StepReceipt, settled: Bo
         }
     }
     var required: [Condition] = []
+    if case .waitFor(let wait) = step.operation {
+        try require(receipt.delivery == .notDispatched && receipt.route == nil, "wait cannot dispatch input")
+        required.append(wait.condition)
+        if settled || receipt.reason == .alreadySatisfied || receipt.reason == .conditionSatisfied {
+            try require(receipt.reason == .alreadySatisfied || receipt.reason == .conditionSatisfied,
+                        "settled wait requires a successful wait reason")
+            try require(receipt.evidence.contains { $0.condition == wait.condition && $0.matched && $0.collected != nil },
+                        "settled wait requires timed condition evidence")
+        }
+    } else {
+        try require(receipt.reason != .conditionSatisfied, "conditionSatisfied requires a wait operation")
+    }
     if case .setValue(let value) = step.operation {
         required.append(.valueEquals(ValueCondition(elementRef: value.elementRef, value: value.value)))
     }
@@ -64,8 +76,52 @@ extension Condition {
         case .elementExists(let value), .elementAbsent(let value): try identifier(value.selector.role)
         case .valueEquals(let value): try identifier(value.elementRef)
         case .enabled(let value): try identifier(value.elementRef)
+        case .windowAbsent: break
         }
     }
+}
+
+extension CheckEvidence {
+    func validate() throws {
+        try identifier(observationId)
+        try condition.validate()
+        if let collected { try validInterval(collected) }
+    }
+}
+
+extension ObservationFeedback {
+    func validate() throws {
+        try identifier(baseObservationId)
+        try validInterval(collected)
+        try require(controls.count <= Limits.maxElements, "too many feedback controls")
+        try unique(controls.map(\.elementRef))
+        for control in controls {
+            try require((control.state == .changed) == (control.element != nil), "only changed feedback carries an element")
+            if let element = control.element {
+                try require(element.reference == control.elementRef, "feedback must preserve the base reference")
+                try identifier(element.role)
+                try validRect(element.bounds)
+                try require((element.label?.utf8.count ?? 0) <= 1024 && (element.identifier?.utf8.count ?? 0) <= 1024
+                            && (element.value?.utf8.count ?? 0) <= 65_536, "feedback projection exceeds string limit")
+            }
+        }
+        try require(!invalidated || controls.allSatisfy { $0.state == .invalidated }, "invalidated binding cannot carry live feedback")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        try require(try encoder.encode(self).count <= Limits.maxFeedbackBytes, "feedback exceeds payload limit")
+    }
+}
+
+private func correlateFeedback(_ request: ActRequest, _ result: ActResult) throws {
+    guard let feedback = result.feedback else {
+        return
+    }
+    guard let requested = request.feedback else { throw ContractError("unrequested feedback") }
+    try require(feedback.baseObservationId == request.observationId, "feedback base observation mismatch")
+    let refs = Set(requested.elementRefs)
+    try require(feedback.controls.allSatisfy { refs.contains($0.elementRef) }, "feedback contains an unrequested reference")
+    try require(feedback.truncated || feedback.controls.count == requested.elementRefs.count, "feedback omitted requested references")
+    try require(requested.includeValues || feedback.controls.allSatisfy { $0.element?.value == nil }, "feedback includes unrequested values")
 }
 
 extension ImageTransform {
@@ -150,9 +206,16 @@ extension ActRequest {
                 try require(value.amount != 0 && (-1000...1000).contains(value.amount), "invalid scroll amount")
             case .click(let value):
                 try require(value.point.x.isFinite && value.point.y.isFinite, "invalid point")
+            case .waitFor(let value):
+                try value.condition.validate()
+                try require(step.precondition == nil && step.expect == nil, "wait steps cannot carry guards or expectations")
             }
             try step.precondition?.validate()
             try step.expect?.validate()
+        }
+        if let feedback {
+            try require(feedback.elementRefs.count <= Limits.maxElements, "too many feedback references")
+            try unique(feedback.elementRefs)
         }
     }
 }
@@ -164,8 +227,7 @@ extension ActResult {
         try unique(steps.map(\.actionId))
         for (index, step) in steps.enumerated() {
             for evidence in step.evidence {
-                try identifier(evidence.observationId)
-                try evidence.condition.validate()
+                try evidence.validate()
             }
             switch step.verification {
             case .confirmed:
@@ -174,15 +236,15 @@ extension ActResult {
                 try require(step.evidence.contains(where: { !$0.matched }), "mismatch needs evidence")
             case .unverified: break
             }
-            if step.reason == .alreadySatisfied {
+            if step.reason == .alreadySatisfied || step.reason == .conditionSatisfied {
                 try require(step.delivery == .notDispatched && step.verification == .confirmed,
                             "alreadySatisfied requires confirmed evidence without dispatch")
             }
-            if step.delivery == .notDispatched && step.reason != .alreadySatisfied {
+            if step.delivery == .notDispatched && step.reason != .alreadySatisfied && step.reason != .conditionSatisfied {
                 try require(index + 1 == steps.count && step.reason != nil && stopReason != .completed,
                             "rejected step must stop sequence")
             }
-            if let reason = step.reason, reason != .alreadySatisfied {
+            if let reason = step.reason, reason != .alreadySatisfied && reason != .conditionSatisfied {
                 let expected: StopReason
                 switch reason {
                 case .preconditionFailed: expected = .preconditionFailed
@@ -194,7 +256,7 @@ extension ActResult {
                 case .ambiguousTarget: expected = .ambiguousTarget
                 case .unsupported: expected = .unsupported
                 case .nativeFailed: expected = .failed
-                case .alreadySatisfied: expected = .completed
+                case .alreadySatisfied, .conditionSatisfied: expected = .completed
                 }
                 try require(index + 1 == steps.count && stopReason == expected,
                             "failed step must be terminal with matching stop reason")
@@ -209,9 +271,10 @@ extension ActResult {
         }
         if stopReason == .completed {
             try require(remainingSteps == 0 && steps.allSatisfy {
-                $0.delivery == .dispatched || $0.reason == .alreadySatisfied
+                $0.delivery == .dispatched || $0.reason == .alreadySatisfied || $0.reason == .conditionSatisfied
             }, "completed sequence cannot include rejected steps")
         }
+        try feedback?.validate()
     }
 }
 
@@ -268,7 +331,9 @@ extension Frame {
             case .act(let value): try value.validate()
             case .waitFor(let value):
                 try require(!value.alreadySatisfied || value.outcome == .satisfied, "invalid alreadySatisfied wait")
-                try require(value.outcome != .satisfied || value.observation != nil, "satisfied wait needs observation")
+                try value.evidence?.validate()
+                let closed = value.evidence.map { if case .windowAbsent = $0.condition { return $0.matched && $0.collected != nil }; return false } ?? false
+                try require(value.outcome != .satisfied || value.observation != nil || closed, "satisfied wait needs observation or timed window-absence evidence")
                 try value.observation?.validate()
             case .cancel(let value): try identifier(value.requestId)
             case .error(let value): try require(!value.message.isEmpty, "empty error message")
@@ -338,7 +403,20 @@ extension Response {
             for (index, pair) in zip(result.steps, request.steps).enumerated() {
                 try expectation(pair.1, pair.0, settled: result.stopReason == .completed || index + 1 < result.steps.count)
             }
+            try correlateFeedback(request, result)
         case (.waitFor(let request), .waitFor(let result)):
+            if let evidence = result.evidence {
+                try require(evidence.condition == request.condition, "wait evidence condition mismatch")
+                try require(result.outcome != .satisfied || evidence.matched, "satisfied wait has negative evidence")
+            }
+            if result.outcome == .satisfied {
+                if case .windowAbsent = request.condition {
+                    try require(result.observation == nil && result.evidence?.matched == true && result.evidence?.collected != nil,
+                                "window absence requires timed evidence without a new observation")
+                } else {
+                    try require(result.observation != nil, "satisfied element wait requires an observation")
+                }
+            }
             if let observation = result.observation {
                 try require(request.target == observation.target, "wait observation target mismatch")
                 try require(observation.elements.allSatisfy { $0.value == nil }, "wait observation includes private values")

@@ -1,6 +1,10 @@
 import AppKit
 import Foundation
 
+enum PressEffect: String {
+    case counter, disableSecond, removeSecond
+}
+
 enum WriteMode: String {
     case normal, ignored, delayed
 }
@@ -14,6 +18,7 @@ final class FieldRecord {
     var delayMs = 250
     var attempts = 0
     var appliedWrites = 0
+    var pauseAfterApplyMs = 0
     var lastRequestedValue: String?
     var pending: [Int: String] = [:]
     var field: FixtureTextField!
@@ -71,6 +76,7 @@ final class WindowRecord {
     var order = ["first", "second"]
     var button: NSButton!
     var pressCount = 0
+    var pressEffect: PressEffect = .counter
 
     init(key: String) { self.key = key }
 }
@@ -145,6 +151,15 @@ final class FixtureController: NSObject, NSApplicationDelegate {
         guard let record = windows.values.first(where: { $0.button === sender }) else { return }
         revision += 1
         record.pressCount += 1
+        switch record.pressEffect {
+        case .counter: break
+        case .disableSecond: record.fields["second"]!.field.isEnabled = false
+        case .removeSecond:
+            let field = record.fields["second"]!
+            field.pending = [:]
+            record.stack.removeArrangedSubview(field.row)
+            field.row.removeFromSuperview()
+        }
     }
 
     func makeControl(_ field: FieldRecord, in window: WindowRecord) {
@@ -196,6 +211,11 @@ final class FixtureController: NSObject, NSApplicationDelegate {
         field.modelValue = value
         field.field.stringValue = value
         field.appliedWrites += 1
+        if field.pauseAfterApplyMs > 0 {
+            emit(["event": "write_applied", "identifier": field.key, "state": state()])
+            // A controlled fixture fault: effect exists while the AX setter has not returned.
+            Thread.sleep(forTimeInterval: Double(field.pauseAfterApplyMs) / 1000)
+        }
     }
 
     func reset() {
@@ -232,6 +252,7 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                     "visible": window.window.isVisible,
                     "keyWindow": window.window.isKeyWindow,
                     "pressCount": window.pressCount,
+                    "pressEffect": window.pressEffect.rawValue,
                     "frame": ["x": frame.origin.x, "y": frame.origin.y, "width": frame.width, "height": frame.height],
                     "order": window.order,
                     "controls": window.order.map { key -> [String: Any] in
@@ -246,9 +267,11 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                             "modelValue": field.modelValue,
                             "controlValue": field.field.stringValue,
                             "enabled": field.field.isEnabled,
+                            "attached": field.field.window != nil,
                             "selection": ["location": field.field.selectedRange.location, "length": field.field.selectedRange.length],
                             "attempts": field.attempts,
                             "appliedWrites": field.appliedWrites,
+                            "pauseAfterApplyMs": field.pauseAfterApplyMs,
                             "lastRequestedValue": field.lastRequestedValue as Any? ?? NSNull(),
                             "pendingWrites": field.pending.sorted(by: { $0.key < $1.key }).map { ["id": $0.key, "value": $0.value] as [String: Any] }
                         ]
@@ -271,12 +294,16 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                 revision += 1
                 reset()
             case "state": break
-            case "configure", "reorder", "recreate", "close_reopen":
+            case "configure", "reorder", "recreate", "close_reopen", "hide_window":
                 let key = request["window"] as? String ?? "primary"
                 guard let window = windows[key] else { throw FixtureError("unknown window: \(key)") }
                 revision += 1
                 switch command {
                 case "configure":
+                    if let raw = request["pressEffect"] as? String {
+                        guard let effect = PressEffect(rawValue: raw) else { throw FixtureError("unknown pressEffect") }
+                        window.pressEffect = effect
+                    }
                     if let control = request["control"] as? String {
                         guard let field = window.fields[control] else { throw FixtureError("unknown control: \(control)") }
                         if let raw = request["mode"] as? String {
@@ -286,6 +313,10 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                         if let delay = request["delayMs"] as? Int {
                             guard (0...10_000).contains(delay) else { throw FixtureError("delayMs must be between 0 and 10000") }
                             field.delayMs = delay
+                        }
+                        if let pause = request["pauseAfterApplyMs"] as? Int {
+                            guard (0...2000).contains(pause) else { throw FixtureError("pauseAfterApplyMs must be between 0 and 2000") }
+                            field.pauseAfterApplyMs = pause
                         }
                         if let enabled = request["enabled"] as? Bool { field.field.isEnabled = enabled }
                         if let value = request["value"] as? String {
@@ -309,6 +340,8 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                         guard width >= 200, height >= 100 else { throw FixtureError("frame must be at least 200 by 100") }
                         window.window.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
                     }
+                case "hide_window":
+                    window.window.orderOut(nil)
                 case "reorder":
                     window.order.reverse()
                     for (index, control) in window.order.enumerated() {
@@ -324,6 +357,7 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                     let field = FieldRecord(key: old.key, generation: old.generation + 1, value: old.modelValue)
                     field.mode = old.mode
                     field.delayMs = old.delayMs
+                    field.pauseAfterApplyMs = old.pauseAfterApplyMs
                     window.fields[control] = field
                     makeControl(field, in: window)
                     for (index, key) in window.order.enumerated() {
@@ -341,6 +375,7 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                         let field = FieldRecord(key: old.key, generation: old.generation + 1, value: old.modelValue)
                         field.mode = old.mode
                         field.delayMs = old.delayMs
+                        field.pauseAfterApplyMs = old.pauseAfterApplyMs
                         window.fields[key] = field
                     }
                     makeWindow(window, title: previousTitle, frame: frame)

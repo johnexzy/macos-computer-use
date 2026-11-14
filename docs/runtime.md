@@ -2,7 +2,8 @@
 
 The rebuild has a standalone Rust MCP executable and one persistent Swift child
 per connection. PER-3/PER-4 provide coordination and lifecycle; PER-5/PER-6 add
-retained semantic observations and a narrow background action path. These
+retained semantic observations and background actions. PER-8 adds bounded linear
+composition, typed waits, and requested compact feedback. These
 executables use protocol v1 from [protocol.md](protocol.md).
 
 ## Build and run from the checkout
@@ -39,11 +40,13 @@ the private Rust–Swift protocol has its own version and epoch.
 | `capabilities` | Read permission booleans and installed mode without permission prompts; advertise `setValue`, `typeText`, and `press` when the AX mutation backend and Accessibility permission are available. |
 | `targets` | Return at most 256 visible, layer-zero windows with bundle IDs and exact process/window keys. |
 | `observe` | Associate the exact CG target with one AX window; return at most 256 controls with retained opaque references, bounds, actions, labels, and optional identifiers. Values require `includeValues: true`; images are unsupported. |
-| `act` | Execute one retained-control `setValue`, `typeText`, or `press` step. Revalidate identity, enabled state, and the actual native affordance before dispatch. |
-| `waitFor` | Poll an exact `valueEquals` condition on a retained reference within the original budget; a satisfied result includes a fresh observation with values excluded. |
+| `act` | Execute 1–16 ordered `setValue`, `typeText`, `press`, or read-only `waitFor` steps against the same target and original observation. Revalidate before every mutation; stop on failure or unknown delivery. |
+| `waitFor` | Poll `elementExists`, `elementAbsent`, `enabled`, `valueEquals`, or `windowAbsent` within the original budget. Element waits return a fresh value-private observation; exact window absence returns its timed witness without a new observation. |
 
-Screenshots, OCR, keys, scrolling, coordinate input, existence/absence waits, and
-multi-step execution remain unsupported in the new runtime. The wire format can
+Screenshots, OCR, keys, scrolling, and coordinate input remain unsupported in the
+new runtime. Composition has no branching, nested sequences, or target switching.
+All mutations use the original retained refs; a presence wait does not issue refs
+for newly discovered controls. The wire format can
 represent more operations than this implementation executes. It does not route
 around missing capabilities through legacy selectors, activation, or global input.
 
@@ -99,11 +102,34 @@ dispatch. `press` requires the control to advertise `AXPress`. Each native call
 installs a timeout on the exact AX object using the remaining whole-operation
 budget. Unknown or disabled enabled states are refused.
 
-Action guards and explicit expectations currently support `valueEquals` and
-`enabled`. Every `setValue` also requires an intrinsic exact readback of its
+Action guards and explicit expectations support the same typed conditions as
+waits. Every `setValue` also requires an intrinsic exact readback of its
 requested value; a caller's explicit expectation is an additional check, including
 when it concerns another control. If all required checks are already satisfied,
 the receipt can be confirmed with `not_dispatched` and `alreadySatisfied`.
+
+An in-sequence wait is `operation: {kind: "waitFor", params: {condition: ...}}`;
+its step-level `precondition` and `expect` must be absent or null. It never sends
+input and has no delivery route. If the first check matches, it returns
+`alreadySatisfied`; success after polling returns `conditionSatisfied`. Both use
+`not_dispatched`, `confirmed`, and timed condition evidence. A zero-match partial
+scan does not prove absence; unknown values, enabled states, or incomplete
+negative scans remain unavailable. A positive match can establish presence even
+when another subtree is unreadable.
+
+`windowAbsent` has empty parameters and refers only to the request's exact
+`(pid, windowId)`. It checks a complete `.optionAll` CG list without requiring a
+live AX window or app metadata. A hidden/offscreen window that still exists does
+not satisfy it. Satisfied standalone window-absence waits return a timed witness
+and `observation: null`; creating a replacement observation of a closed window
+would be false evidence.
+
+The executor settles an immutable receipt prefix and writes each progress frame
+fully before permitting the next input step. A blocked stdout write does not
+block cancellation/deadline control. A timer during that barrier preserves the
+settled prefix and leaves the next step not dispatched. Cancellation or helper
+death after a native handoff still preserves uncertainty; a sequence is not a
+transaction and earlier effects are not rolled back.
 
 Delivery (`not_dispatched`, `dispatched`, `unknown`) and verification
 (`confirmed`, `mismatch`, `unverified`) remain independent. A successful AX return
@@ -121,7 +147,9 @@ expectation. An incompatible explicit expectation is refused before dispatch.
 Explicit caller-supplied `setValue` values remain eligible for exact evidence.
 
 Cooperating helpers for the same OS user share a stable advisory `flock` in that
-user's cache directory. Ownership spans revalidation, native dispatch, and critical
+user's cache directory. A sequence containing mutations holds it across all its
+steps, including intervening waits; a pure-wait sequence acquires no mutation lock.
+Ownership spans revalidation, native dispatch, and critical
 readback, and lasts until physical work returns even if a logical timeout or
 cancellation has already sealed its receipt. Closing/crashing the owner releases
 the lock; the lockfile is not unlinked. This does not exclude the human user,
@@ -130,6 +158,34 @@ legacy helpers, or unrelated automation. No lock spans a model call.
 The runtime samples foreground PID before, around, and after background work and
 fails on observed change. These samples do not prove the absence of transient or
 external foreground changes. An absent foreground baseline is refused.
+
+## Requested compact feedback
+
+`act.feedback` optionally requests `{elementRefs: [...], includeValues: false}`
+for up to 256 unique refs from the original observation. The response's
+`feedback` is best effort and independent of settled receipts. `null` means
+collection was unavailable or not returned, even if the action completed; it
+never means all requested controls were unchanged.
+
+Present feedback names `baseObservationId`, its collection interval, and one
+per-control state: `changed`, `unchanged`, `invalidated`, or `unavailable`. Only
+`changed` carries an `element`, using the same original reference. The comparison
+uses the requested public projection: redacting a value excludes it from the
+comparison; explicitly revealing a previously private value can produce
+`changed` even when no UI mutation occurred. These states do not establish
+causality or add action proof.
+
+The top-level `invalidated` flag means the whole original window/observation
+binding is invalid. A removed or reused individual control is marked invalidated
+without discarding unrelated refs. Unknown native/read failures are unavailable.
+`truncated` reports omitted bounded projection data or an incomplete collection;
+it must not be read as unchanged state. Encoded feedback is capped at 2 MiB, and
+exported values retain the 64 KiB bound and require explicit `includeValues`.
+
+Feedback neither publishes a new observation nor refreshes the original TTL. It
+is collected after critical action readback and may reflect intervening changes
+by another actor; collection is not atomic. A deadline during optional feedback
+preserves completed delivery/proof and may return null feedback.
 
 ## Coordination and cleanup
 
@@ -166,7 +222,10 @@ its 4096-ID session history closes with a resource-limit result when exhausted,
 requiring a new connection rather than forgetting earlier IDs.
 
 The native observation registry retains at most 32 entries for at most 60 seconds.
-Access does not refresh expiry. Entries and handles belong to one process epoch and
+Expiry stays absolute during sequences: step, predicate, and mutation-handoff
+checks do not restart it, and expired feedback marks the whole binding invalid.
+Access does not refresh expiry. A fresh standalone wait observation does not extend
+the old observation's refs. Entries and handles belong to one process epoch and
 exact target. Cancelled or late observations do not publish handles. EOF, signals or
 transport loss invalidate the registry, cancel queued work and close the process.
 No AX notification observers or capture sessions are allocated.
@@ -201,6 +260,7 @@ fixture and run the installed semantic campaign:
 ```sh
 sh test/fixtures/macos/build.sh
 node test/runtime/semantic-live.mjs --repetitions 3
+node test/runtime/composition-live.mjs --repetitions 3
 ```
 
 This mutates only the fixture's own controls. Each trial uses a fresh fixture
@@ -214,6 +274,13 @@ counts encoded native structured content, excluding MCP wrapping and duplicate
 text content; it is not a wire-byte or model-token measurement. See
 [fixture.md](fixture.md) for the independent native oracle and coordinate conventions.
 
+The separate 12-scenario composition campaign writes under
+`.artifacts/composition-live` by default. It checks mixed/pure waits, immutable
+prefixes, stop-on-failure and deadlines, presence/absence, hidden versus closed
+windows, requested feedback, and causally gated helper death. `--output PATH`
+selects its evidence directory. These deterministic fault checks are separate
+from the matched scripted/model comparison in [evaluation.md](evaluation.md).
+
 Subprocess fault tests cover framing, response correlation, deadlines, cancellation,
 helper loss, progress receipts and cleanup. Installed-process MCP checks exercise the
 copied pair outside the repository, both MCP lifecycles, repeated/concurrent requests,
@@ -221,17 +288,17 @@ configured authority, EOF and signals with stdin open. Injected native tests cov
 association, retained identity, dispatch/readback, private values, and cooperative
 locking. The live fixture campaign separately checks real native effects against
 its model/control oracle. Fixture conformance does not establish arbitrary-app or
-autonomous task success, and model tokens/cost remain unmeasured.
+autonomous task success; model usage and cost belong to the separate evaluation.
 
 `tool_finished.elapsedMs` measures the adapter boundary from argument validation
 through typed-client completion. `nativeClientElapsedMs` includes the typed client's
 serialization, queueing, private IPC and native work. Their difference estimates
 adapter wrapping only; it excludes MCP parsing and response transport. A full MCP
 round trip also includes those layers. These timings do not show improved task
-completion or isolate Swift work from pipe overhead. Model usage and monetary cost
-remain unmeasured.
+completion or isolate Swift work from pipe overhead. These native intervals do not
+measure model usage or monetary cost.
 
-The [PER-5/PER-6 verification record](evidence/per-5-per-6-verification-2026-11-14.json)
+The earlier [PER-5/PER-6 verification record](evidence/per-5-per-6-verification-2026-11-14.json)
 records 134 passing automated tests and 60/60 live fixture trials (20 scenarios,
 three repetitions), with no final setup or cleanup failures. It preserves the two
 earlier clean campaigns and their failure dispositions. The three deliberately

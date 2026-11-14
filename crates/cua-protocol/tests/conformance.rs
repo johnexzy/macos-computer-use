@@ -24,7 +24,7 @@ fn shared_valid_fixtures_decode_and_round_trip() {
     let paths = fixtures("valid");
     assert_eq!(
         paths.len(),
-        37,
+        43,
         "keep the shared fixture inventory deliberate"
     );
     for path in paths {
@@ -39,7 +39,7 @@ fn shared_valid_fixtures_decode_and_round_trip() {
 #[test]
 fn shared_invalid_fixtures_are_rejected() {
     let paths = fixtures("invalid");
-    assert_eq!(paths.len(), 47);
+    assert_eq!(paths.len(), 57);
     for path in paths {
         assert!(
             decode_line(&fs::read(&path).unwrap()).is_err(),
@@ -55,6 +55,29 @@ fn frames_are_bounded_single_line_messages() {
     assert!(decode_line(b"{}\n{}\n").is_err());
     assert!(decode_line(b"{}\r\n").is_err());
     assert!(decode_line(b"diagnostic output\n").is_err());
+}
+
+#[test]
+fn feedback_encoded_budget_includes_json_escaping() {
+    let Frame::Response(mut response) = fixture("act-feedback-response") else {
+        panic!()
+    };
+    let ResponseBody::Act(act) = &mut response.body else {
+        panic!()
+    };
+    let feedback = act.feedback.as_mut().unwrap();
+    let original = feedback.controls[0].clone();
+    feedback.controls = (0..8)
+        .map(|index| {
+            let mut control = original.clone();
+            control.element_ref = format!("feedback-{index}");
+            let element = control.element.as_mut().unwrap();
+            element.reference = control.element_ref.clone();
+            element.value = Some("\0".repeat(65_536));
+            control
+        })
+        .collect();
+    assert!(Frame::Response(response).validate().is_err());
 }
 
 #[test]
@@ -242,7 +265,7 @@ fn shared_expectation_correlation_cases_bind_receipts_to_requested_conditions() 
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../protocol/fixtures/correlation.json");
     let cases: Vec<Case> = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
-    assert_eq!(cases.len(), 33);
+    assert_eq!(cases.len(), 50);
     for case in cases {
         case.request.validate().unwrap();
         case.reply.validate().unwrap();

@@ -16,6 +16,7 @@ export class Fixture {
     this.reader.on("line", (line) => {
       const message = JSON.parse(line);
       if (message.event === "ready") { clearTimeout(this.timer); this.resolveReady(message.state); }
+      else if (message.event === "write_applied") trace({ event: "fixture_write_applied", identifier: message.identifier, state: message.state });
       else {
         const pending = this.pending.get(message.id);
         if (pending) { this.pending.delete(message.id); clearTimeout(pending.timer); pending.resolve(message); }

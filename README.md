@@ -11,17 +11,20 @@ The Rust + Swift rebuild runs alongside the existing Node/Swift server. It now s
 - [Legacy baseline and measurement boundaries](docs/baseline.md) (PER-1)
 - [Disposable two-window macOS fixture](docs/fixture.md)
 - [Rust–Swift protocol and conformance contract](docs/protocol.md) (PER-2)
-- [Rust MCP host, semantic observations, and background actions](docs/runtime.md) (PER-3 through PER-6)
+- [Rust MCP host, semantic observations, and bounded composition](docs/runtime.md) (PER-3 through PER-8)
+- [Matched fixture and model evaluation](docs/evaluation.md)
 
 | Rust runtime tool | Implemented scope |
 | --- | --- |
 | `capabilities` | Permission preflight and supported action kinds without permission prompts. |
 | `targets` | Exact process/window keys for visible application windows. |
 | `observe` | Bounded AX controls with retained opaque references; values are private by default. |
-| `act` | One retained-control `setValue`, selected-text `typeText`, or `press` operation, with separate delivery and verification receipts. |
-| `waitFor` | Exact-value waiting against a retained reference, followed by a fresh value-private observation. |
+| `act` | Up to 16 ordered retained-control `setValue`, selected-text `typeText`, `press`, or read-only `waitFor` steps, with separate delivery and verification receipts. |
+| `waitFor` | Wait for presence, absence, enabled state, exact value, or exact window-key absence; closed-window proof needs no new observation. |
 
-The new runtime associates CG and AX windows through unique PID, exact logical bounds, and available titles. This is a public-metadata association, not an OS-attested window-ID mapping or atomic snapshot. Each action revalidates the retained AX object, owning window, observed role, and raw AX identifier. Duplicate labels never select a replacement control. Images, OCR, keys, scrolling, coordinate actions, and multi-step execution are not implemented in this runtime.
+The new runtime associates CG and AX windows through unique PID, exact logical bounds, and available titles. This is a public-metadata association, not an OS-attested window-ID mapping or atomic snapshot. Each action revalidates the retained AX object, owning window, observed role, and raw AX identifier. Duplicate labels never select a replacement control. Images, OCR, keys, scrolling, and coordinate actions remain unsupported.
+
+Sequences use one target, one original observation, and one whole-request deadline. Settled progress is written before the next input step. References keep their original 60-second expiry. Optional feedback reports bounded changes to requested public projections using the same refs; `feedback: null` means unavailable, not unchanged. Values require explicit inclusion. Read-only waits never claim input dispatch.
 
 ```sh
 npm run build:runtime
@@ -33,9 +36,10 @@ For automated checks, run `npm run test:runtime`. To exercise the installed pair
 ```sh
 sh test/fixtures/macos/build.sh
 node test/runtime/semantic-live.mjs --repetitions 3
+node test/runtime/composition-live.mjs --repetitions 3
 ```
 
-The live runner records target registration and external AX readiness separately from graded scenario latency. See [runtime.md](docs/runtime.md) for execution, privacy, locking, and evidence boundaries. `npm run test:foundations` and the `baseline:*` commands remain available for the legacy comparison.
+The live runners record setup separately from graded scenario latency. The composition campaign covers bounded sequences and fault handling; [evaluation.md](docs/evaluation.md) describes the separate matched scripted/model comparison. See [runtime.md](docs/runtime.md) for execution, privacy, locking, and evidence boundaries. `npm run test:foundations` and the `baseline:*` commands remain available for the legacy comparison.
 
 ## Existing Node/Swift server
 

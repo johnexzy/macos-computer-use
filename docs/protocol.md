@@ -64,6 +64,8 @@ elements per observation**, and **256 returned targets**, with explicit truncati
 or partial coverage. The constants are shared and the persistent runtime enforces
 retention. Semantic element references are opaque retained AX objects with observed
 role/identifier identity, not indices or selectors for a model to reconstruct.
+The original 60-second expiry continues during a sequence. Each step/predicate and
+mutation handoff checks it; progress, waits, and feedback do not refresh it.
 
 Request IDs are unique within an epoch and are never reused there. Action IDs are
 unique within their request. They correlate receipts; they do not make mutations
@@ -94,9 +96,11 @@ in the final act result, not in progress.
 The Rust client implements prefix accounting and rejects rewritten or regressing
 progress. If EOF cannot be established within its bounded drain, it returns typed
 uncertainty for the whole unacknowledged suffix instead of claiming later steps
-were unsent. The current Swift executor accepts one step and returns a final
-receipt, so it has no inter-step progress prefix to emit. Multi-step execution is
-later PER-8 work.
+were unsent. The current Swift executor accepts 1–16 steps. Prefix admission and
+timer finals share control ordering; the native worker waits outside control for
+the complete JSONL write before the next input. A timer during that barrier keeps
+the settled prefix and leaves the next step not dispatched. A pure-wait sequence
+sends no input; mixed sequences preserve the same boundary before later mutations.
 
 ## Operations
 
@@ -108,11 +112,16 @@ later PER-8 work.
 | `act` | Installed grant, observation, exact target, and 1–16 ordered steps. No arbitrary scripts or execution-mode override. |
 | `waitFor` | Evaluate a typed condition for the same exact target within the request deadline. It never mutates. |
 
-The current runtime implements `observe` without images, one-step `act` for
-`setValue`/`typeText`/`press`, and `waitFor` for exact `valueEquals` only. Action guards
-and expectations support exact values and enabled state. Other condition/action
-variants and multi-step execution are represented by the wire contract but refused
-by this implementation.
+The current runtime implements `observe` without images and bounded linear `act`
+sequences combining `setValue`, `typeText`, `press`, and a read-only `waitFor`
+operation. Every step shares the exact target, original observation/refs, and
+whole-request budget. There are no branches, nested sequences, or target switches.
+Presence checks do not create new action refs inside a sequence.
+
+`WaitOperation` is `{condition: Condition}`. Its enclosing step's `precondition`
+and `expect` must be omitted or null. Standalone waits, mutation guards, and
+mutation expectations support `elementExists`, `elementAbsent`, `valueEquals`,
+`enabled`, and `windowAbsent`.
 
 The action enum also represents supported keys, semantic scroll, and coordinate
 click. Coordinate click carries an explicit coordinate
@@ -125,11 +134,17 @@ Overall `ActionKind` discovery is separate from each element's `ElementAction`
 affordances. Coordinate click can be supported without claiming every element has
 a semantic click action.
 
-Guards and expectations use only element-exists, element-absent, exact-value, and
-enabled-state conditions. Existence selectors require a role and may constrain label
+Existence selectors require a role and may constrain label
 or identifier. They are conditions, not action locators. Actions use retained refs
 or explicitly mapped points; an existence check does not resolve ambiguous labels.
 There is no expression language, branching DSL, or rollback API.
+
+`windowAbsent` uses `params: {}` and refers to the request's exact `(pid, windowId)`.
+Only absence from a complete `.optionAll` CG-window list establishes it; a hidden,
+offscreen, unreadable, or ambiguously associated window is not thereby closed.
+It does not require the old AX window to remain readable. Other negative absence
+checks require a complete scan; a zero-match partial scan is unavailable. A positive
+match can establish presence or disprove absence despite another unreadable subtree.
 
 `ambiguousTarget` is a distinct typed error and terminal receipt reason for unresolved
 window/control ambiguity. It must not be collapsed into permission denial, native
@@ -217,6 +232,20 @@ that the action produced it. Delivery `unknown` never becomes `dispatched` merel
 because the desired state is present. Fresh wait/observe reconciliation can add
 state evidence without rewriting the original delivery history.
 
+A successful read-only wait step always has `not_dispatched`, `confirmed`, no
+route, and timed evidence for its own condition. `alreadySatisfied` means the first
+check matched; `conditionSatisfied` means a later check matched. Both are successful
+non-failing receipts and can belong to a settled prefix. A wait can never claim
+dispatched or unknown input. `CheckEvidence.collected` is optional for older/general
+records but required for settled wait proof.
+
+`WaitResult.evidence` optionally carries the typed condition witness. A satisfied
+non-window wait still requires a fresh value-private observation. A satisfied
+`windowAbsent` result instead requires a matching true witness with a valid
+collection interval and `observation: null`; no observation or fresh control refs
+are fabricated for the closed window. `alreadySatisfied` on standalone waits uses
+the same first-check meaning.
+
 `StepReceipt.route` is optional. The current executor records `axSetValue`,
 `axSelectedText`, or `axPress` at the dispatch boundary; an absent route does not
 invent a native method. `typeText` uses targeted `AXSelectedText` replacement of
@@ -244,10 +273,43 @@ steps were processed, not that the user's whole task was independently completed
 
 The current Swift runtime serializes revalidate → dispatch → critical readback
 across cooperating helpers for the same OS user with one stable advisory `flock`.
+It holds the lock across all steps of a mixed sequence, including waits; a pure-wait
+sequence needs no mutation lock.
 It holds ownership until physical work returns, even when a logical timeout or
 cancellation has already sealed a receipt. Owner close/crash releases the lock;
 the inode is not unlinked. This excludes neither the user nor unrelated automation.
 No lock spans a model call. The wire contract alone is not a locking implementation.
+
+## Requested projection feedback
+
+`ActRequest.feedback` is optional `FeedbackRequest {elementRefs, includeValues}`.
+Refs must be unique and number at most 256. `ActResult.feedback` is optional
+`ObservationFeedback {baseObservationId, collected, controls, invalidated, truncated}`.
+When present, its base must match the original act observation, returned refs must
+be requested refs, and values require explicit inclusion. Missing requested refs
+require `truncated: true`.
+
+Each `ControlFeedback` has `{elementRef, state, element}`. State is one of
+`changed`, `unchanged`, `invalidated`, or `unavailable`. Only changed state carries
+an `Element`, and that element must preserve the same base reference. Changed means
+the requested bounded public projection differs from the base, not that this action
+caused a UI change. Explicitly revealing a previously private value can change the
+projection without any mutation; values excluded by the request are redacted from
+both sides of the comparison.
+
+Top-level `invalidated` means the whole base window/observation binding is invalid,
+so it cannot carry live feedback. An individual removed/reused control can be
+invalidated while unrelated refs remain live and the summary flag stays false.
+Unknown reads produce unavailable status. The feedback payload is capped at 2 MiB;
+label/identifier/value export limits still apply. Truncation and unavailable or
+invalidated controls are not unchanged controls.
+
+Feedback is best effort and separate from delivery/proof. `feedback: null` is valid
+even for a completed request and means collection was unavailable or not returned;
+it is not an all-unchanged result. Present feedback remains fully validated, and
+unrequested feedback is rejected. It publishes no new observation, creates no refs,
+does not refresh the base TTL, and cannot turn unknown delivery into confirmed
+dispatch. Optional collection timing/failure must not erase settled receipts.
 
 Response/progress correlation also binds verification to each requested `expect`:
 confirmed/mismatch requires evidence for that exact condition, not a passing guard

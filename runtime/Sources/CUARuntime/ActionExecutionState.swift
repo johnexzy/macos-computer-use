@@ -5,15 +5,17 @@ public struct ActionWitness: Sendable {
     public let observationId: String
     public let collected: CollectionInterval
     public let target: TargetKey
-    public let elementRef: String
+    public let elementRef: String?
     public let condition: Condition
     public let matched: Bool
 }
 
-/// One atomic delivery ledger. A logical interruption seals a receipt without releasing physical mutation ownership.
+/// Immutable settled prefix plus one active step. Logical interruption never releases physical mutation ownership.
 public final class ActionExecutionState: @unchecked Sendable {
     private let lock = NSLock()
     private let act: ActRequest
+    private var prefix: [StepReceipt] = []
+    private var prefixChecks: [ActionWitness] = []
     private var delivery: Delivery = .notDispatched
     private var verification: Verification = .unverified
     private var evidence: [CheckEvidence] = []
@@ -22,11 +24,15 @@ public final class ActionExecutionState: @unchecked Sendable {
     private var reason: ReceiptReason = .nativeFailed
     private var stop: StopReason = .failed
     private var sealed = false
+    private var interrupted = false
+    private var feedback: ObservationFeedback?
+    private var finalReason: ReceiptReason?
 
     public init(act: ActRequest) { self.act = act }
 
     public func interrupt(_ interruption: Interruption) -> ActResult {
         lock.lock(); defer { lock.unlock() }
+        interrupted = true
         if !sealed {
             reason = interruption == .cancelled ? .cancelled : .deadlineExceeded
             stop = interruption == .cancelled ? .cancelled : .deadlineExceeded
@@ -36,24 +42,24 @@ public final class ActionExecutionState: @unchecked Sendable {
     }
 
     public func snapshot() -> ActResult {
-        lock.lock(); defer { lock.unlock() }
-        return resultLocked()
+        lock.lock(); defer { lock.unlock() }; return resultLocked()
     }
 
     public var witnesses: [ActionWitness] {
-        lock.lock(); defer { lock.unlock() }; return checks
+        lock.lock(); defer { lock.unlock() }; return prefixChecks + checks
+    }
+
+    var isSealed: Bool { lock.lock(); defer { lock.unlock() }; return sealed }
+
+    func checkActive(context: OperationContext) throws {
+        lock.lock(); defer { lock.unlock() }; try requireActive(context)
     }
 
     func beginDispatch(context: OperationContext, route: DeliveryRoute) throws {
         lock.lock(); defer { lock.unlock() }
-        guard !sealed else {
-            throw NativeFailure(reason == .deadlineExceeded ? .deadlineExceeded : .cancelled, "action already settled")
-        }
-        try context.check()
-        delivery = .unknown
-        verification = .unverified
-        evidence = []; checks = []
-        self.route = route
+        try requireActive(context)
+        delivery = .unknown; verification = .unverified
+        evidence = []; checks = []; self.route = route
     }
 
     func returnedSuccessfully() {
@@ -65,44 +71,76 @@ public final class ActionExecutionState: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         if !sealed {
             self.checks = checks
-            evidence = checks.map { CheckEvidence(observationId: $0.observationId, condition: $0.condition, matched: $0.matched) }
+            evidence = checks.map { CheckEvidence(observationId: $0.observationId, condition: $0.condition,
+                                                 matched: $0.matched, collected: $0.collected) }
             self.verification = verification
         }
     }
 
     func finish(reason: ReceiptReason? = nil, stop: StopReason = .completed) {
         lock.lock(); defer { lock.unlock() }
-        if !sealed {
-            self.reason = reason ?? .nativeFailed
-            self.stop = stop
-            sealed = true
+        if !sealed { self.reason = reason ?? .nativeFailed; self.stop = stop; sealed = true }
+    }
+
+    /// Commit before output admission. A timer during its write barrier sees the next step as not dispatched.
+    func settle(context: OperationContext, reason: ReceiptReason?) throws -> [StepReceipt]? {
+        lock.lock(); defer { lock.unlock() }
+        try requireActive(context)
+        // The final receipt has not been published. Keep it active until request-level checks finish.
+        if prefix.count + 1 == act.steps.count { finalReason = reason; return nil }
+        prefix.append(receiptLocked(reason: reason)); prefixChecks.append(contentsOf: checks)
+        delivery = .notDispatched; verification = .unverified; evidence = []; checks = []
+        route = nil; self.reason = .nativeFailed; stop = .failed
+        return prefix
+    }
+
+    func finalize(context: OperationContext) throws {
+        lock.lock(); defer { lock.unlock() }
+        try requireActive(context)
+        prefix.append(receiptLocked(reason: finalReason)); prefixChecks.append(contentsOf: checks)
+        stop = .completed; sealed = true; checks = []
+    }
+
+    // Kept for a single-step caller that completes directly after its check.
+    func complete(context: OperationContext, alreadySatisfied: Bool) {
+        do {
+            if try settle(context: context, reason: alreadySatisfied ? .alreadySatisfied : nil) == nil {
+                try finalize(context: context)
+            }
+        }
+        catch {
+            if let interruption = context.interruption { _ = interrupt(interruption) }
         }
     }
 
-    func complete(context: OperationContext, alreadySatisfied: Bool) {
+    func attachFeedback(_ value: ObservationFeedback) {
         lock.lock(); defer { lock.unlock() }
-        guard !sealed else { return }
-        if let interruption = context.interruption {
-            reason = interruption == .cancelled ? .cancelled : .deadlineExceeded
-            stop = interruption == .cancelled ? .cancelled : .deadlineExceeded
-        } else {
-            reason = alreadySatisfied ? .alreadySatisfied : .nativeFailed
-            stop = .completed
-        }
-        sealed = true
+        if !interrupted { feedback = value }
     }
 
     var hasEnteredDispatch: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return delivery != .notDispatched
+        lock.lock(); defer { lock.unlock() }; return delivery != .notDispatched
+    }
+
+    private func requireActive(_ context: OperationContext) throws {
+        guard !sealed else {
+            throw NativeFailure(reason == .deadlineExceeded ? .deadlineExceeded : .cancelled, "action already settled")
+        }
+        try context.check()
+    }
+
+    private func receiptLocked(reason: ReceiptReason?) -> StepReceipt {
+        StepReceipt(actionId: act.steps[prefix.count].actionId, delivery: delivery, verification: verification,
+                    reason: reason, evidence: evidence, route: route)
     }
 
     private func resultLocked() -> ActResult {
-        let step = act.steps[0] // Frame validation precedes construction of a pending action.
-        let receiptReason: ReceiptReason? = stop == .completed && reason != .alreadySatisfied ? nil : reason
-        return ActResult(observationId: act.observationId,
-            steps: [StepReceipt(actionId: step.actionId, delivery: delivery, verification: verification,
-                                reason: receiptReason, evidence: evidence, route: route)],
-            remainingSteps: UInt16(act.steps.count - 1), stopReason: stop)
+        var steps = prefix
+        if prefix.count < act.steps.count {
+            let currentReason: ReceiptReason? = stop == .completed && reason != .alreadySatisfied ? nil : reason
+            steps.append(receiptLocked(reason: currentReason))
+        }
+        return ActResult(observationId: act.observationId, steps: steps,
+            remainingSteps: UInt16(act.steps.count - steps.count), stopReason: stop, feedback: feedback)
     }
 }

@@ -20,6 +20,9 @@ final class RuntimeProcess: @unchecked Sendable {
             guard let self else { return }
             do { try self.output.send(response) }
             catch { self.diagnostic("output_failure"); self.session.shutdown() }
+        }, emitProgress: { [weak self] progress in
+            guard let self else { throw NativeFailure(.nativeFailed, "runtime output unavailable") }
+            return try self.output.sendProgress(progress)
         }, didShutdown: { [weak self] in self?.finish() })
         for number in [SIGTERM, SIGINT] {
             signal(number, SIG_IGN)

@@ -61,6 +61,7 @@ pub struct ActArgs {
     pub target: TargetKey,
     #[schemars(length(min = 1, max = 16))]
     pub steps: Vec<ActionStep>,
+    pub feedback: Option<FeedbackRequest>,
     #[serde(default = "default_budget")]
     #[schemars(range(min = 1, max = 60000))]
     pub budget_ms: u32,
@@ -282,7 +283,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Run one capability-supported background AX action using a live reference. Supports setValue, targeted selection replacement and press; delivery and state verification are independent. No global input fallback."
+        description = "Run 1-16 ordered typed background actions and predicate waits within one budget. Supports setValue, selection replacement and press on live references; stops at the first failed requirement. Optional feedback returns requested control updates tied to the base observation. No rollback or automatic replay."
     )]
     async fn act(
         &self,
@@ -295,6 +296,7 @@ impl Host {
                 observation_id: args.observation_id,
                 target: args.target,
                 steps: args.steps,
+                feedback: args.feedback,
             }),
             args.budget_ms,
             context,
@@ -304,7 +306,7 @@ impl Host {
 
     #[tool(
         name = "waitFor",
-        description = "Wait for an exact valueEquals condition on a live reference within one budget. Returns a fresh redacted observation when satisfied. Other predicates are unsupported."
+        description = "Wait within one budget for an exact value, enabled state, element presence/absence, or disappearance of the exact window identity. Partial reads cannot prove absence. Window disappearance returns timestamped evidence without creating a replacement target."
     )]
     async fn wait_for(
         &self,
@@ -329,7 +331,7 @@ impl ServerHandler for Host {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("macos-computer-use", env!("CARGO_PKG_VERSION")))
-            .with_instructions("Background authority is installed by the operator. Read capabilities before acting. Observations establish provenance, not freshness. Unknown delivery must be reconciled before retrying. Use only actions advertised by the live element. This runtime accepts one step per act request and never activates a window or sends global input.")
+            .with_instructions("Background authority is installed by the operator. Read capabilities before acting. Observations establish provenance, not freshness. Unknown delivery must be reconciled before retrying. Use only actions advertised by the live element. This runtime accepts up to 16 typed steps per act request under one deadline. Waits send no input. Requested feedback uses the original references; invalidated references require a fresh observation. The runtime never activates a window or sends global input.")
     }
 }
 

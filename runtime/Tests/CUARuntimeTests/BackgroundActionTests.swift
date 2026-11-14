@@ -10,6 +10,21 @@ private final class ActionNode: AXObject, @unchecked Sendable {
     let role: String
     init(_ role: String) { self.role = role }
 }
+private final class PrefixLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [[StepReceipt]] = []
+    func append(_ prefix: [StepReceipt], context: OperationContext) throws {
+        try context.check(); lock.lock(); values.append(prefix); lock.unlock()
+    }
+    var prefixes: [[StepReceipt]] { lock.lock(); defer { lock.unlock() }; return values }
+}
+private final class ActionClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UInt64
+    init(_ value: UInt64) { self.value = value }
+    func now() -> UInt64 { lock.lock(); defer { lock.unlock() }; return value }
+    func expire() { lock.lock(); value += UInt64(Limits.observationTTLMS) * 1_000_000; lock.unlock() }
+}
 private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchecked Sendable {
     enum Behavior { case apply, ignore, delayed, throwAfterWrite, readbackFailure, activate, activateBeforeDispatch, refuse, block }
     let app = ActionNode("AXApplication")
@@ -28,8 +43,12 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
     var pressAdvertised = true
     var changePreimage = false
     var flipForegroundAfterFirst = false
+    var flipForegroundAtRead: Int?
     var failButtonReadback = false
     var invalidateGuardBeforeHandoff = false
+    var valueAfterReads: Int?
+    var fieldPresent = true
+    var beforeHandoff: (@Sendable () -> Void)?
     private var foregroundReads = 0
     private var preimageReads = 0
     private var storedValue = "old"
@@ -43,12 +62,13 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
     func foreground() -> UInt32? {
         lock.lock(); defer { lock.unlock() }
         foregroundReads += 1
-        return flipForegroundAfterFirst && foregroundReads > 1 ? 200 : front
+        return (flipForegroundAfterFirst && foregroundReads > 1)
+            || (flipForegroundAtRead.map { foregroundReads >= $0 } ?? false) ? 200 : front
     }
     func application(pid: UInt32, context: OperationContext) throws -> any AXObject { try context.check(); return app }
     func windows(of application: any AXObject, context: OperationContext) throws -> AXChildren { try context.check(); return AXChildren(elements: [windowNode]) }
     func children(of element: any AXObject, limit: Int, context: OperationContext) throws -> AXChildren {
-        try context.check(); return AXChildren(elements: same(element, windowNode) ? [field, button] : [])
+        try context.check(); return AXChildren(elements: same(element, windowNode) ? (fieldPresent ? [field, button] : [button]) : [])
     }
     func parent(of element: any AXObject, context: OperationContext) throws -> (any AXObject)? {
         try context.check(); return same(element, app) ? nil : same(element, windowNode) ? app : windowNode
@@ -62,6 +82,7 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
         if includeValue && mutations == 0 {
             preimageReads += 1
             if changePreimage && preimageReads == 2 { storedValue = "different"; selectedRange = AXTextRange(location: 1, length: 0) }
+            if let valueAfterReads, preimageReads >= valueAfterReads { storedValue = "ready" }
         }
         if includeValue && mutations > 0 && behavior == .readbackFailure { throw NativeFailure(.nativeFailed, "readback unavailable") }
         if mutations > 0 && failButtonReadback && same(element, button) { throw NativeFailure(.nativeFailed, "second check unavailable") }
@@ -88,6 +109,7 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
         if behavior == .refuse { throw NativeFailure(.unsupported, "setter no longer advertised") }
         if behavior == .activateBeforeDispatch { lock.lock(); front = 200; lock.unlock() }
         if invalidateGuardBeforeHandoff { value = "changed" }
+        beforeHandoff?()
         try willDispatch()
         entered.signal()
         if behavior == .block { _ = release.wait(timeout: .now() + 2) }
@@ -141,16 +163,23 @@ final class BackgroundActionTests: XCTestCase {
         ActRequest(grantId: "grant", observationId: "origin", target: actionTarget.key,
             steps: [ActionStep(actionId: "action", operation: operation, precondition: precondition, expect: expect)])
     }
-    private func perform(_ backend: ActionBackend, _ act: ActRequest, includeValues: Bool = false, budget: UInt32 = 300) throws -> (ActResult, ActionExecutionState) {
+    private func perform(_ backend: ActionBackend, _ act: ActRequest, includeValues: Bool = false, budget: UInt32 = 300,
+                         progress: BackgroundActions.ProgressSink? = nil) throws -> (ActResult, ActionExecutionState) {
         let state = ActionExecutionState(act: act)
         let engine = BackgroundActions(coordinator: MutationCoordinator(directory: try directory()), foreground: backend.foreground)
         let result = engine.act(act, entry: entry(backend, includeValues: includeValues),
-                                context: OperationContext(budgetMs: budget), state: state)
+                                context: OperationContext(budgetMs: budget), state: state, progress: progress)
         let wireRequest = Request(version: 1, id: "request", epoch: "epoch", budgetMs: budget, body: .act(act))
         let response = Response(version: 1, id: "request", epoch: "epoch", body: .act(result))
         try Frame.response(response).validate()
         try response.validateFor(wireRequest, expectedEpoch: "epoch")
         return (result, state)
+    }
+    private func sequence(_ operations: [CUAProtocol.Operation]) -> ActRequest {
+        ActRequest(grantId: "grant", observationId: "origin", target: actionTarget.key,
+            steps: operations.enumerated().map {
+                ActionStep(actionId: "step-\($0.offset)", operation: $0.element, precondition: nil, expect: nil)
+            })
     }
     func testSetValueInfersExactPostconditionAndUsesFreshWitness() throws {
         let backend = ActionBackend(); let act = request()
@@ -163,6 +192,133 @@ final class BackgroundActionTests: XCTestCase {
         XCTAssertEqual(result.steps[0].evidence[0].condition, .valueEquals(ValueCondition(elementRef: "field", value: "new")))
         XCTAssertNotEqual(result.steps[0].evidence[0].observationId, "origin")
         XCTAssertEqual(state.witnesses.count, 1)
+    }
+    func testSixteenStepsUseOneSequenceAndCumulativeSettledPrefixes() throws {
+        let backend = ActionBackend(); let log = PrefixLog()
+        let act = sequence((0..<16).map { .setValue(SetValueOperation(elementRef: "field", value: "value-\($0)")) })
+        let (result, _) = try perform(backend, act, budget: 1000, progress: log.append)
+        XCTAssertEqual(backend.calls, 16)
+        XCTAssertEqual(backend.value, "value-15")
+        XCTAssertEqual(result.steps.count, 16)
+        XCTAssertEqual(result.remainingSteps, 0)
+        XCTAssertEqual(result.stopReason, .completed)
+        XCTAssertEqual(log.prefixes.map(\.count), Array(1..<16))
+        for prefix in log.prefixes { XCTAssertEqual(prefix, Array(result.steps.prefix(prefix.count))) }
+    }
+    func testMixedSequenceWaitIsReadOnlyAndAnExistingConditionDoesNotPress() throws {
+        let backend = ActionBackend(); let log = PrefixLog()
+        let act = sequence([
+            .setValue(SetValueOperation(elementRef: "field", value: "new")),
+            .waitFor(WaitOperation(condition: .valueEquals(ValueCondition(elementRef: "field", value: "new")))),
+            .press(ElementOperation(elementRef: "button"))
+        ])
+        let (result, _) = try perform(backend, act, progress: log.append)
+        XCTAssertEqual(backend.calls, 2)
+        XCTAssertEqual(result.steps[1].delivery, .notDispatched)
+        XCTAssertEqual(result.steps[1].reason, .alreadySatisfied)
+        XCTAssertNil(result.steps[1].route)
+        XCTAssertEqual(result.steps[2].delivery, .dispatched)
+        XCTAssertEqual(result.stopReason, .completed)
+    }
+    func testPureWaitSequenceDistinguishesLaterConditionAndNeedsNoForeground() throws {
+        let backend = ActionBackend(); backend.valueAfterReads = 2
+        let act = sequence([
+            .waitFor(WaitOperation(condition: .enabled(EnabledCondition(elementRef: "button", enabled: true)))),
+            .waitFor(WaitOperation(condition: .valueEquals(ValueCondition(elementRef: "field", value: "ready")))),
+            .waitFor(WaitOperation(condition: .elementExists(ElementCondition(selector: Selector(role: "AXButton", label: "Save", identifier: nil))))),
+            .waitFor(WaitOperation(condition: .elementAbsent(ElementCondition(selector: Selector(role: "AXCheckBox", label: nil, identifier: nil)))))
+        ])
+        let state = ActionExecutionState(act: act)
+        let engine = BackgroundActions(foreground: { nil })
+        let result = engine.act(act, entry: entry(backend), context: OperationContext(budgetMs: 300), state: state)
+        let req = Request(version: 1, id: "waits", epoch: "epoch", budgetMs: 300, body: .act(act))
+        try Response(version: 1, id: "waits", epoch: "epoch", body: .act(result)).validateFor(req, expectedEpoch: "epoch")
+        XCTAssertEqual(result.steps.map(\.reason), [.alreadySatisfied, .conditionSatisfied, .alreadySatisfied, .alreadySatisfied])
+        XCTAssertTrue(result.steps.allSatisfy { $0.delivery == .notDispatched && $0.route == nil })
+        XCTAssertEqual(backend.calls, 0)
+    }
+    func testSequenceCancellationAtPrefixBoundaryLeavesNextStepUnsent() throws {
+        let backend = ActionBackend()
+        let act = sequence([.setValue(SetValueOperation(elementRef: "field", value: "new")),
+                            .press(ElementOperation(elementRef: "button")),
+                            .setValue(SetValueOperation(elementRef: "field", value: "last"))])
+        let (result, _) = try perform(backend, act, progress: { _, context in context.cancel() })
+        XCTAssertEqual(backend.calls, 1)
+        XCTAssertEqual(result.steps.count, 2)
+        XCTAssertEqual(result.steps[0].delivery, .dispatched)
+        XCTAssertEqual(result.steps[1].delivery, .notDispatched)
+        XCTAssertEqual(result.stopReason, .cancelled)
+        XCTAssertEqual(result.remainingSteps, 1)
+    }
+    func testSequenceRevalidatesEachRetainedTargetAndStopsWithoutReselecting() throws {
+        let backend = ActionBackend()
+        let act = sequence([.setValue(SetValueOperation(elementRef: "field", value: "new")),
+                            .setValue(SetValueOperation(elementRef: "field", value: "last")),
+                            .press(ElementOperation(elementRef: "button"))])
+        let (result, _) = try perform(backend, act, progress: { _, _ in backend.fieldPresent = false })
+        XCTAssertEqual(backend.calls, 1)
+        XCTAssertEqual(result.steps[0].delivery, .dispatched)
+        XCTAssertEqual(result.steps[1].delivery, .notDispatched)
+        XCTAssertEqual(result.stopReason, .targetStale)
+        XCTAssertEqual(result.remainingSteps, 1)
+    }
+    func testWaitDeadlineAfterSettledMutationNeverClaimsInputForWait() throws {
+        let backend = ActionBackend(); let log = PrefixLog()
+        let act = sequence([.setValue(SetValueOperation(elementRef: "field", value: "new")),
+                            .waitFor(WaitOperation(condition: .valueEquals(ValueCondition(elementRef: "field", value: "never")))),
+                            .press(ElementOperation(elementRef: "button"))])
+        let (result, _) = try perform(backend, act, budget: 40, progress: log.append)
+        XCTAssertEqual(backend.calls, 1)
+        XCTAssertEqual(result.steps[0].delivery, .dispatched)
+        XCTAssertEqual(result.steps[1].delivery, .notDispatched)
+        XCTAssertEqual(result.steps[1].verification, .mismatch)
+        XCTAssertEqual(result.stopReason, .deadlineExceeded)
+        XCTAssertEqual(result.remainingSteps, 1)
+    }
+    func testFailedProgressWriteStopsBeforeNextMutation() throws {
+        let backend = ActionBackend()
+        let act = sequence([.setValue(SetValueOperation(elementRef: "field", value: "new")),
+                            .press(ElementOperation(elementRef: "button"))])
+        let (result, _) = try perform(backend, act, progress: { _, _ in throw NativeFailure(.nativeFailed, "test output failed") })
+        XCTAssertEqual(backend.calls, 1)
+        XCTAssertEqual(result.steps[0].delivery, .dispatched)
+        XCTAssertEqual(result.steps[1].delivery, .notDispatched)
+        XCTAssertEqual(result.stopReason, .failed)
+    }
+    func testSequenceDoesNotRefreshOriginTTLAtProgressOrDispatch() throws {
+        for expireAtHandoff in [false, true] {
+            let backend = ActionBackend()
+            let origin = entry(backend)
+            let clock = ActionClock(origin.createdAt)
+            if expireAtHandoff { backend.beforeHandoff = clock.expire }
+            let act = sequence([.setValue(SetValueOperation(elementRef: "field", value: "new")),
+                                .press(ElementOperation(elementRef: "button"))])
+            let state = ActionExecutionState(act: act)
+            let engine = BackgroundActions(coordinator: MutationCoordinator(directory: try directory()), now: clock.now, foreground: { 100 })
+            let result = engine.act(act, entry: origin, context: OperationContext(budgetMs: 300), state: state,
+                progress: { _, _ in clock.expire() })
+            let req = Request(version: 1, id: "ttl", epoch: "epoch", budgetMs: 300, body: .act(act))
+            try Response(version: 1, id: "ttl", epoch: "epoch", body: .act(result)).validateFor(req, expectedEpoch: "epoch")
+            XCTAssertEqual(result.stopReason, .targetStale)
+            XCTAssertEqual(backend.calls, expireAtHandoff ? 0 : 1)
+            XCTAssertEqual(result.steps.last?.delivery, .notDispatched)
+            XCTAssertEqual(result.steps.first?.delivery, expireAtHandoff ? .notDispatched : .dispatched)
+        }
+    }
+    func testFinalForegroundFailurePreservesKnownLastEffectAndWrittenPrefix() throws {
+        let backend = ActionBackend(); let log = PrefixLog()
+        // Baseline + four per-step samples each: the tenth is the final request sample.
+        backend.flipForegroundAtRead = 10
+        let act = sequence([.setValue(SetValueOperation(elementRef: "field", value: "new")),
+                            .setValue(SetValueOperation(elementRef: "field", value: "last"))])
+        let (result, _) = try perform(backend, act, progress: log.append)
+        XCTAssertEqual(backend.calls, 2)
+        XCTAssertEqual(result.stopReason, .failed)
+        XCTAssertEqual(result.steps.map(\.delivery), [.dispatched, .dispatched])
+        XCTAssertEqual(result.steps.map(\.verification), [.confirmed, .confirmed])
+        XCTAssertEqual(result.steps[1].reason, .nativeFailed)
+        XCTAssertEqual(result.remainingSteps, 0)
+        XCTAssertEqual(log.prefixes, [[result.steps[0]]])
     }
     func testExistingExactValueIsNotNewDelivery() throws {
         let backend = ActionBackend(); backend.value = "new"

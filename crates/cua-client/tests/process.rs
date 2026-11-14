@@ -29,6 +29,7 @@ async fn peer(scenario: &str) -> Client {
 fn act(count: usize) -> RequestBody {
     RequestBody::Act(ActRequest {
         grant_id: "model-must-not-select-this-grant".into(),
+        feedback: None,
         observation_id: "observation-1".into(),
         target: TargetKey {
             pid: 42,
@@ -206,6 +207,29 @@ async fn helper_death_drains_settled_progress_before_synthesizing_uncertainty() 
             .all(|receipt| receipt.delivery == Delivery::Dispatched)
     );
     assert_eq!(result.remaining_steps, 0);
+    client.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn helper_loss_during_a_pure_wait_preserves_prefix_without_unknown_input() {
+    let client = peer("eof_after_prefix").await;
+    let mut body = act(3);
+    let RequestBody::Act(request) = &mut body else {
+        unreachable!()
+    };
+    request.steps[1].operation = Operation::WaitFor(WaitOperation {
+        condition: Condition::ValueEquals(ValueCondition {
+            element_ref: "element-1".into(),
+            value: "ready".into(),
+        }),
+    });
+    let result = act_result(call(&client, body).await);
+    assert_eq!(result.stop_reason, StopReason::HelperDied);
+    assert_eq!(result.steps.len(), 2);
+    assert_eq!(result.steps[0].delivery, Delivery::Dispatched);
+    assert_eq!(result.steps[1].delivery, Delivery::NotDispatched);
+    assert_eq!(result.steps[1].reason, Some(ReceiptReason::HelperDied));
+    assert_eq!(result.remaining_steps, 1);
     client.shutdown().await;
 }
 

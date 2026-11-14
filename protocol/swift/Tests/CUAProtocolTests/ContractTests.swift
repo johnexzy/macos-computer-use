@@ -16,7 +16,7 @@ final class ContractTests: XCTestCase {
     }
     func testSharedValidFixturesDecodeAndRoundTrip() throws {
         let paths = try fixtures("valid")
-        XCTAssertEqual(paths.count, 37)
+        XCTAssertEqual(paths.count, 43)
         for path in paths {
             let frame = try Frame.decodeLine(Data(contentsOf: path))
             let encoded = try frame.encodeLine()
@@ -26,7 +26,7 @@ final class ContractTests: XCTestCase {
     }
     func testSharedInvalidFixturesAreRejected() throws {
         let paths = try fixtures("invalid")
-        XCTAssertEqual(paths.count, 47)
+        XCTAssertEqual(paths.count, 57)
         for path in paths {
             XCTAssertThrowsError(try Frame.decodeLine(Data(contentsOf: path)), path.lastPathComponent)
         }
@@ -36,6 +36,24 @@ final class ContractTests: XCTestCase {
         for text in ["{}\n{}\n", "{}\r\n", "diagnostic output\n"] {
             XCTAssertThrowsError(try Frame.decodeLine(Data(text.utf8)))
         }
+    }
+    func testFeedbackEncodedBudgetIncludesJSONEscaping() throws {
+        guard case .response(let response) = try fixture("act-feedback-response"),
+              case .act(let act) = response.body, let feedback = act.feedback,
+              let original = feedback.controls[0].element else { return XCTFail() }
+        let controls = (0..<8).map { index in
+            let reference = "feedback-\(index)"
+            return ControlFeedback(elementRef: reference, state: .changed,
+                element: Element(reference: reference, role: original.role, label: original.label,
+                    value: String(repeating: "\u{0000}", count: 65_536), bounds: original.bounds,
+                    enabled: original.enabled, actions: original.actions, identifier: original.identifier))
+        }
+        let oversized = ObservationFeedback(baseObservationId: feedback.baseObservationId, collected: feedback.collected,
+            controls: controls, invalidated: false, truncated: false)
+        let result = ActResult(observationId: act.observationId, steps: act.steps, remainingSteps: act.remainingSteps,
+            stopReason: act.stopReason, feedback: oversized)
+        XCTAssertThrowsError(try Frame.response(Response(version: response.version, id: response.id,
+            epoch: response.epoch, body: .act(result))).validate())
     }
     func testPartialTransformMapsResizedImageAndRejectsUnknownRegion() throws {
         guard case .response(let response) = try fixture("observe-partial-response"),
@@ -148,7 +166,7 @@ final class ContractTests: XCTestCase {
     func testSharedExpectationCorrelationCases() throws {
         struct Case: Decodable { let name: String; let valid: Bool; let request: Frame; let reply: Frame }
         let cases = try JSONDecoder().decode([Case].self, from: Data(contentsOf: fixtureRoot.appendingPathComponent("correlation.json")))
-        XCTAssertEqual(cases.count, 33)
+        XCTAssertEqual(cases.count, 50)
         for item in cases {
             try item.request.validate()
             try item.reply.validate()

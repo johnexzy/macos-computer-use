@@ -36,6 +36,7 @@ public final class RuntimeSession: @unchecked Sendable {
     private let actions: BackgroundActions
     private let limits: RuntimeLimits
     private let emit: @Sendable (Response) -> Void
+    private let emitProgress: (@Sendable (CUAProtocol.Progress) throws -> OutputTicket)?
     private let didShutdown: @Sendable () -> Void
     private var session: SessionContext?
     private var seen: Set<String> = []
@@ -49,10 +50,11 @@ public final class RuntimeSession: @unchecked Sendable {
                 limits: RuntimeLimits = RuntimeLimits(),
                 actions: BackgroundActions = BackgroundActions(),
                 emit: @escaping @Sendable (Response) -> Void,
+                emitProgress: (@Sendable (CUAProtocol.Progress) throws -> OutputTicket)? = nil,
                 didShutdown: @escaping @Sendable () -> Void = {}) {
         self.system = system; self.epoch = epoch; self.limits = limits
         self.actions = actions
-        self.emit = emit; self.didShutdown = didShutdown
+        self.emit = emit; self.emitProgress = emitProgress; self.didShutdown = didShutdown
         observations = ObservationRegistry(epoch: epoch)
         maintenance = DispatchSource.makeTimerSource(queue: control)
         maintenance.schedule(deadline: .now() + 1, repeating: 1)
@@ -206,16 +208,37 @@ public final class RuntimeSession: @unchecked Sendable {
             let native = try system.observe(params: params, observationId: nextObservationID(), context: context)
             return NativeResult(.observe(native.observation), handle: native.handle)
         case .act(let act):
-            guard act.steps.count == 1 else { return NativeResult(rejectedAct(act, reason: .unsupported, stop: .unsupported)) }
+            if emitProgress == nil && act.steps.count > 1 && act.steps.contains(where: {
+                if case .waitFor = $0.operation { return false }; return true
+            }) { return NativeResult(rejectedAct(act, reason: .unsupported, stop: .unsupported)) }
             let retained = try observations.lookup(act.observationId, epoch: epoch, target: act.target)
             guard let execution else { throw NativeFailure(.nativeFailed, "action state unavailable") }
-            return NativeResult(.act(actions.act(act, entry: retained, context: context, state: execution)))
+            let progress: BackgroundActions.ProgressSink?
+            if let emitProgress {
+                progress = { [self] prefix, context in
+                    // Admission and timer finals share control ordering. Never wait for stdout while holding control.
+                    let ticket = try control.sync {
+                        guard !closed, pending[request.id]?.execution === execution, !execution.isSealed else {
+                            throw NativeFailure(.cancelled, "request settled before progress admission")
+                        }
+                        try context.check()
+                        return try emitProgress(CUAProtocol.Progress(version: Limits.version, id: request.id, epoch: epoch,
+                            observationId: act.observationId, steps: prefix))
+                    }
+                    try ticket.wait(context: context)
+                }
+            } else { progress = nil }
+            return NativeResult(.act(actions.act(act, entry: retained, context: context, state: execution, progress: progress)))
         case .waitFor(let wait):
             let retained = try observations.lookup(wait.observationId, epoch: epoch, target: wait.target)
             let started = unixMilliseconds()
             let evaluated = try actions.wait(wait, entry: retained, context: context)
             guard evaluated.outcome == .satisfied else {
                 return NativeResult(.waitFor(WaitResult(outcome: evaluated.outcome, alreadySatisfied: false, observation: nil)))
+            }
+            if case .windowAbsent = wait.condition {
+                return NativeResult(.waitFor(WaitResult(outcome: .satisfied, alreadySatisfied: evaluated.alreadySatisfied,
+                    observation: nil, evidence: evaluated.evidence)))
             }
             let native = try system.observe(params: ObserveRequest(target: wait.target, includeScreenshot: false, includeValues: false),
                 observationId: nextObservationID(), context: context)
@@ -228,7 +251,8 @@ public final class RuntimeSession: @unchecked Sendable {
                 collected: CollectionInterval(startedUnixMs: min(started, original.collected.startedUnixMs), finishedUnixMs: finished),
                 windowBounds: original.windowBounds, accessibility: original.accessibility, accessibilityCollected: axInterval,
                 elements: original.elements, screenshot: nil)
-            return NativeResult(.waitFor(WaitResult(outcome: .satisfied, alreadySatisfied: evaluated.alreadySatisfied, observation: observation)), handle: native.handle)
+            return NativeResult(.waitFor(WaitResult(outcome: .satisfied, alreadySatisfied: evaluated.alreadySatisfied,
+                observation: observation, evidence: evaluated.evidence)), handle: native.handle)
         case .hello, .cancel:
             throw NativeFailure(.invalidRequest, "control request reached native worker")
         }
