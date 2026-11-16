@@ -242,6 +242,103 @@ async fn a_correlated_wait_timeout_survives_host_deadline_reconciliation_but_lat
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn host_deadline_classifies_cooperative_wait_cancellation_without_losing_evidence() {
+    let client = peer("cooperative_wait_cancel").await;
+    let condition = Condition::ValueEquals(ValueCondition {
+        element_ref: "element-1".into(),
+        value: "ready".into(),
+    });
+    let response = client
+        .call(
+            RequestBody::WaitFor(WaitRequest {
+                observation_id: "observation-1".into(),
+                target: TargetKey {
+                    pid: 42,
+                    window_id: 7,
+                },
+                condition: condition.clone(),
+            }),
+            Duration::from_millis(50),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let ResponseBody::WaitFor(wait) = response.body else {
+        panic!("expected negative wait receipt");
+    };
+    assert_eq!(wait.outcome, WaitOutcome::TimedOut);
+    assert!(!wait.already_satisfied);
+    let observation = wait
+        .observation
+        .expect("negative observation was discarded");
+    assert_eq!(observation.observation_id, "negative-wait-observation");
+    assert_eq!(
+        observation.target,
+        TargetKey {
+            pid: 42,
+            window_id: 7
+        }
+    );
+    assert_eq!(
+        wait.evidence.as_deref(),
+        Some(&CheckEvidence {
+            observation_id: "negative-wait-check".into(),
+            condition,
+            matched: false,
+            collected: Some(CollectionInterval {
+                started_unix_ms: 1,
+                finished_unix_ms: 2
+            }),
+        })
+    );
+    assert!(matches!(
+        call(&client, RequestBody::Capabilities(Empty {}))
+            .await
+            .body,
+        ResponseBody::Capabilities(_)
+    ));
+    client.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn explicit_user_wait_cancellation_remains_cancelled_and_reusable() {
+    let client = peer("cooperative_wait_cancel").await;
+    let cancellation = CancellationToken::new();
+    let trigger = cancellation.clone();
+    tokio::spawn(async move {
+        sleep(Duration::from_millis(50)).await;
+        trigger.cancel();
+    });
+    let response = client
+        .call(
+            RequestBody::WaitFor(WaitRequest {
+                observation_id: "observation-1".into(),
+                target: TargetKey {
+                    pid: 42,
+                    window_id: 7,
+                },
+                condition: Condition::ValueEquals(ValueCondition {
+                    element_ref: "element-1".into(),
+                    value: "ready".into(),
+                }),
+            }),
+            Duration::from_secs(1),
+            cancellation,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(response.body, ResponseBody::WaitFor(wait)
+        if wait.outcome == WaitOutcome::Cancelled && wait.evidence.is_some()));
+    assert!(matches!(
+        call(&client, RequestBody::Capabilities(Empty {}))
+            .await
+            .body,
+        ResponseBody::Capabilities(_)
+    ));
+    client.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn helper_loss_during_a_pure_wait_preserves_prefix_without_unknown_input() {
     let client = peer("eof_after_prefix").await;
     let mut body = act(3);
@@ -342,6 +439,57 @@ async fn deadline_after_mutation_preserves_prefix_and_never_restarts() {
     assert_eq!(error.kind, ClientErrorKind::Closed);
     client.shutdown().await;
     assert_reaped(pid).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn host_deadline_classifies_cooperative_act_cancellation_without_rewriting_prefix() {
+    let client = peer("cooperative_cancel").await;
+    let condition = Condition::Enabled(EnabledCondition {
+        element_ref: "element-1".into(),
+        enabled: true,
+    });
+    let mut body = act(3);
+    if let RequestBody::Act(request) = &mut body {
+        request.steps[0].expect = Some(condition.clone());
+    }
+    let response = client
+        .call(body, Duration::from_millis(50), CancellationToken::new())
+        .await
+        .unwrap();
+    encode_line(&Frame::Response(response.clone())).expect("terminal receipt must remain valid");
+    let result = act_result(response);
+    assert_eq!(result.stop_reason, StopReason::DeadlineExceeded);
+    assert_eq!(result.steps.len(), 2);
+    assert_eq!(
+        result.steps[0],
+        StepReceipt {
+            action_id: "action-1".into(),
+            delivery: Delivery::Dispatched,
+            verification: Verification::Confirmed,
+            reason: None,
+            evidence: vec![CheckEvidence {
+                observation_id: "after".into(),
+                condition,
+                matched: true,
+                collected: None,
+            }],
+            route: None,
+        }
+    );
+    assert_eq!(result.steps[1].delivery, Delivery::NotDispatched);
+    assert_eq!(result.steps[1].verification, Verification::Unverified);
+    assert_eq!(
+        result.steps[1].reason,
+        Some(ReceiptReason::DeadlineExceeded)
+    );
+    assert_eq!(result.remaining_steps, 1);
+    assert!(matches!(
+        call(&client, RequestBody::Capabilities(Empty {}))
+            .await
+            .body,
+        ResponseBody::Capabilities(_)
+    ));
+    client.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

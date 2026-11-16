@@ -444,13 +444,31 @@ fn interrupted_final(
     if let ResponseBody::Act(result) = &mut response.body {
         if result.stop_reason == StopReason::Completed {
             result.stop_reason = terminal(kind).1;
+        } else if kind == ClientErrorKind::DeadlineExceeded
+            && result.stop_reason == StopReason::Cancelled
+        {
+            // A host deadline uses the cancellation control; retain facts while naming its cause.
+            result.stop_reason = StopReason::DeadlineExceeded;
+            if let Some(last) = result.steps.last_mut()
+                && last.reason == Some(ReceiptReason::Cancelled)
+            {
+                last.reason = Some(ReceiptReason::DeadlineExceeded);
+            }
         }
         return Ok(response);
     }
     // Correlated negative wait receipts remain useful; a late satisfied read cannot extend the host deadline.
-    if matches!(request.body, RequestBody::WaitFor(_))
-        && matches!(&response.body, ResponseBody::WaitFor(result) if matches!(result.outcome, WaitOutcome::TimedOut | WaitOutcome::Cancelled))
+    if let (RequestBody::WaitFor(_), ResponseBody::WaitFor(result)) =
+        (&request.body, &mut response.body)
+        && matches!(
+            result.outcome,
+            WaitOutcome::TimedOut | WaitOutcome::Cancelled
+        )
     {
+        // The helper receives the same cancel control for user cancellation and host timeout.
+        if kind == ClientErrorKind::DeadlineExceeded {
+            result.outcome = WaitOutcome::TimedOut;
+        }
         return Ok(response);
     }
     // A validated pre-dispatch native rejection remains useful evidence that no input was sent.

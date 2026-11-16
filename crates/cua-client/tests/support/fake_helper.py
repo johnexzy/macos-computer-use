@@ -14,6 +14,7 @@ if len(sys.argv) > 2 and scenario not in {"clean_eof_cleanup", "stdout_held_open
 epoch = "helper-epoch-test"
 authority = None
 pending = None
+pending_wait = None
 calls = 0
 write_lock = threading.Lock()
 
@@ -125,6 +126,22 @@ for line in sys.stdin:
             pending = None
             continue
         emit(response(request, "cancel", {"requestId": params["requestId"], "status": "requested"}))
+        if pending_wait is not None:
+            original = pending_wait
+            wait_params = original["body"]["params"]
+            emit(response(original, "waitFor", {
+                "outcome": "cancelled", "alreadySatisfied": False,
+                "observation": {
+                    "observationId": "negative-wait-observation", "target": wait_params["target"],
+                    "collected": {"startedUnixMs": 1, "finishedUnixMs": 2},
+                    "windowBounds": {"x": 0, "y": 0, "width": 100, "height": 100},
+                    "accessibility": "unavailable", "accessibilityCollected": None,
+                    "elements": [], "screenshot": None,
+                },
+                "evidence": {"observationId": "negative-wait-check", "condition": wait_params["condition"],
+                             "matched": False, "collected": {"startedUnixMs": 1, "finishedUnixMs": 2}},
+            }))
+            pending_wait = None
         if pending is not None:
             original, prefix = pending
             steps = original["body"]["params"]["steps"]
@@ -158,6 +175,9 @@ for line in sys.stdin:
         os._exit(0)
     if scenario == "late":
         threading.Thread(target=delayed_reply, args=(request,), daemon=True).start()
+        continue
+    if method == "waitFor" and scenario == "cooperative_wait_cancel":
+        pending_wait = request
         continue
     if method == "waitFor" and scenario in {"late_wait_timeout", "late_wait_satisfied"}:
         time.sleep(0.075)
