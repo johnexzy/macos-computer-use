@@ -69,6 +69,7 @@ test("all exact model roles are pinned only in the Claude child environment", ()
   assert.equal(parent.ANTHROPIC_DEFAULT_HAIKU_MODEL, "claude-other"); assert.equal(parent.CLAUDE_CODE_SUBAGENT_MODEL, "haiku");
   assert.equal(child.ANTHROPIC_API_KEY, "fake-key");
   assert.equal(child.CLAUDE_CODE_DISABLE_TERMINAL_TITLE, "1");
+  assert.equal(child.MAX_STRUCTURED_OUTPUT_RETRIES, "1", "one initial structured-output attempt, with no repair retry");
   assert.equal(claudeEnvironment({ model: "sonnet", env: {} }).ANTHROPIC_DEFAULT_SONNET_MODEL, undefined);
 });
 test("unmeasured cost or an exhausted reservation stops subsequent model calls", () => {

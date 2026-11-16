@@ -67,6 +67,10 @@ alias probe has no exact ID yet and is still rejected if multiple models appear.
 Every model call also sets `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in its child environment
 to skip the background session-title request. These are documented controls recognized
 by the installed CLI; observed per-model usage remains the enforcement check.
+The child sets `MAX_STRUCTURED_OUTPUT_RETRIES=1`: this CLI setting counts total
+structured-output attempts, including the initial attempt. Zero can reject a
+decision before generation; one permits the initial attempt without a repair retry.
+The attempt bound is recorded per invocation and is identical across all lanes.
 The controller reserves 13 seconds for the bounded eight-second MCP call plus
 five-second oracle read, clips model time to the remaining budget less that reserve,
 and checks admission again before dispatching a tool.

@@ -99,7 +99,8 @@ export function claudeEnvironment({ model, env = process.env }) {
     "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL",
   ].map((key) => [key, model])) : {};
-  return { ...env, ...roles, CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "1", CLAUDE_CODE_MAX_OUTPUT_TOKENS: "1500", MAX_STRUCTURED_OUTPUT_RETRIES: "0" };
+  // Despite its name, this is the total attempt count, including the first attempt.
+  return { ...env, ...roles, CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "1", CLAUDE_CODE_MAX_OUTPUT_TOKENS: "1500", MAX_STRUCTURED_OUTPUT_RETRIES: "1" };
 }
 export async function invokeClaude({ binary = "claude", model, budgetUsd, systemPrompt, prompt, cwd, timeoutMs = 60000, pinnedModel, env = process.env }) {
   const args = claudeArguments({ model, budgetUsd, systemPrompt });
@@ -123,7 +124,7 @@ export async function invokeClaude({ binary = "claude", model, budgetUsd, system
   const parsed = parseResult(redact(stdout, env), code, pinnedModel);
   return { ...parsed, ok: parsed.ok && !failure && signal === null, error: failure || parsed.error,
     elapsedMs: performance.now() - start, exitCode: code, signal, stderr: redact(stderr, env),
-    invocation: { binary, args, timeoutMs, backgroundTitleRequestDisabled: true, modelRoleOverrides: Object.fromEntries(Object.entries(childEnv)
+    invocation: { binary, args, timeoutMs, backgroundTitleRequestDisabled: true, maxStructuredOutputAttempts: 1, modelRoleOverrides: Object.fromEntries(Object.entries(childEnv)
       .filter(([key]) => ["ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"].includes(key))) }, responseBytes: Buffer.byteLength(stdout) };
 }
