@@ -74,13 +74,21 @@ replacement, its close button removed the exact window, persisted UTF-8 bytes
 matched, and reference bytes stayed unchanged. The continuous monitor was
 available and observed zero controlled-target activations. Local evidence is under
 `.artifacts/textedit-probe-74a09f0e-21ae-432c-aed4-544615c500b0/` in
-`write-close-report.json` and `trace-write-close.json`. This proves that one scratch
-case worked; it does not establish six-document or model-task success. The runner
+`write-close-report.json` and `trace-write-close.json`. That scratch probe alone
+did not establish six-document or model-task success. The runner
 rechecks all seven documents' read-only control capabilities before each trial.
 If TextEdit requires an unsupported dialog or another action, report the assigned
 trial as `setup_blocked` or failed as appropriate. Do not save with AppleScript or another
 setup command and report that as end-to-end CUA completion. A future assisted-save
 variant would need a different, explicitly disclosed task boundary.
+
+The subsequent clean `9a539e4` composed scripted campaign passed 3/3 six-document
+tasks: 18 exact persisted target files and three preserved reference files, with
+confirmed closes, no cleanup errors and an available monitor through final stop.
+Median measured task time was 3.244 seconds. This private-oracle-informed reference
+made no model calls; it provides no autonomous success or model-cost result.
+Raw local evidence is `.artifacts/per78-textedit-reference-final/{report.json,trace.jsonl}`;
+sanitized hashes and counts are in the [remediation record](evidence/per-7-per-8-remediation-2026-11-16.json).
 
 ## Setup, reset and cleanup
 
@@ -114,7 +122,9 @@ Use `--lane single`, `composed`, or `both`; the latter reverses lane order on th
 second repetition and uses the same seed contents with fresh UUID workspaces.
 Every assigned trial stays in the report, including setup blocks and unknown
 outcomes. Existing campaign output directories are refused rather than overwritten.
-The model mode requires an explicit budget within the remaining authorization:
+The model mode requires a newly approved scope and explicit budget. All paid
+runs are currently on hold; the following is usage documentation, not permission
+to spend the prior budget remainder:
 
 ```sh
 node test/realworld/run.mjs --mode model --lane both --repetitions 2 \
@@ -217,8 +227,13 @@ Report per task and per lane:
   cost, including probes, failed calls and rejected proposals. Missing cost stays
   unknown. Estimates do not establish a provider-side hard billing cap.
 
-The remaining authorized budget from the prior verification is USD2.64089675;
-root owns paid-call admission. A planned reservation must include all probes and
-failures and stop before exhausting that remainder. No paid call is performed by
-these support modules or pure tests. Four tasks would still be a small diagnostic,
-not an arbitrary-app reliability estimate or a general speed/cost claim.
+The arithmetic remainder from the prior USD5 cap is USD2.64089675. The user's
+newer instruction requires scope and budget approval before any further paid
+run; that remainder is not automatic spending authority. No paid call is
+performed by these support modules or pure tests.
+
+Keep this twelve-input real-app regression alongside the proposed PER-14 fixture
+benchmark. The existing model mode uses the per-decision harness; a headline
+PER-14 evaluation instead needs one actual agent session per trial. See the
+[keep/merge/drop recommendation](per-14-benchmark-comparison.md) before extending
+either workload. The proposed pilot and main run are not approved here.

@@ -108,11 +108,16 @@ it does not rewrite the whole value, change selection, post keys, or activate th
 app. Expected text edits use the current UTF-16 selection and are rechecked before
 dispatch. `press` requires the control to advertise `AXPress`. Each native call
 installs a timeout on the exact AX object using the remaining whole-operation
-budget. Explicitly disabled controls are refused. A text setter may use a confirmed
-settable attribute when `AXEnabled` is specifically unsupported; this proves a
+budget. Explicitly disabled controls are refused. A text setter on `AXTextField`
+or `AXTextArea` may use a confirmed settable attribute when `AXEnabled` is
+specifically unsupported; this proves a
 programmatic capability, not enabled state or successful effect. Other unknown
 enabled reads remain unsupported, and `press` requires positive enabled state.
 An `enabled` predicate stays unknown when the attribute is unsupported.
+
+Explicitly unsupported enabled metadata makes the exported state partial, but
+does not by itself make an otherwise fully visited tree incomplete for absence
+checks. Unreadable nodes still make negative traversal evidence incomplete.
 
 Action guards and explicit expectations support the same typed conditions as
 waits. Every `setValue` also requires an intrinsic exact readback of its
@@ -128,6 +133,13 @@ input and has no delivery route. If the first check matches, it returns
 scan does not prove absence; unknown values, enabled states, or incomplete
 negative scans remain unavailable. A positive match can establish presence even
 when another subtree is unreadable.
+
+An AX `cannotComplete` read can be sampled again only at an existing wait or
+post-dispatch readback boundary, within the original deadline and reference TTL.
+An unavailable sample is not a false predicate witness. Setters stay outside
+these polling loops and are never repeated. Pre-dispatch failures and native
+setter errors remain terminal; a later readable value cannot upgrade failed
+delivery. Observation preserves readable siblings when one node is unavailable.
 
 `windowAbsent` has empty parameters and refers only to the request's exact
 `(pid, windowId)`. It checks a complete `.optionAll` CG list without requiring a
@@ -219,8 +231,12 @@ The client serializes requests through a bounded queue. It validates replies and
 monotonic progress prefixes against the pending operation, epoch and expectation.
 A deadline includes queueing. Cancellation before handoff can establish no dispatch;
 after handoff the client reconciles the original reply during a bounded grace period,
-then terminates an unresponsive helper. Known receipts survive. Correlated negative wait receipts also survive host-deadline
-reconciliation; late satisfied reads cannot extend that deadline. A protocol violation
+then terminates an unresponsive helper. Known receipts survive. Correlated
+negative wait receipts also survive host-deadline
+reconciliation. A native cancellation caused by the host's deadline is reported
+as deadline expiry while retaining its delivery and proof; explicit user
+cancellation keeps its own cause. Late satisfied reads cannot extend that
+deadline. A protocol violation
 reports the known prefix and all unacknowledged action IDs as uncertainty rather
 than claiming an untrusted helper left later steps unsent.
 An incomplete stdout drain also leaves the entire unacknowledged suffix uncertain.
@@ -263,14 +279,28 @@ host budget before the remaining time is handed to the typed client.
 
 ## Verification and measurements
 
-The [16 November verification record](evidence/per-7-per-8-verification-2026-11-16.json)
-and [comparison report](evaluation-results-2026-11-16.md) separate completed runs
-from milestone acceptance. Rebuilt scripted lanes passed 54/54 trials. The native
-campaign retained six failures in 36 trials; all 18 matched Claude trials ran,
-with an overall result of eight passed, nine failed and one unknown. Native
-confirmation and target-identity checks held, but controller errors and foreground
-changes leave acceptance incomplete. Earlier failures and paid attempts remain
-in the evidence. No overall speed, token, or cost improvement is established.
+The [remediation record](evidence/per-7-per-8-remediation-2026-11-16.json) records
+the corrected source at `9a539e4`: 266 automated tests passed with no skips,
+36/36 native composition trials passed, and rebuilt scripted lanes passed 54/54
+conformance trials (36 strict completions, 12 correct refusals, six honest
+noncompletions). The legacy reference retained six wrong-target failures in 27
+trials. The existing TextEdit composed reference passed 3/3 scripted tasks,
+covering 18 persisted target documents and three protected references.
+
+The continuous observer remained available through cleanup and saw no controlled
+target activation in the accepted campaigns. Unrelated app switching was recorded
+separately. A deliberate target-activation test stopped the next mutation; a
+30-run timeout stress test retained the verified prefix and unsent suffix.
+These are unpaid conformance checks, not autonomous reliability or speed evidence.
+
+The [historical verification record](evidence/per-7-per-8-verification-2026-11-16.json)
+and [paid comparison report](evaluation-results-2026-11-16.md) remain unchanged:
+the earlier native campaign passed 30/36 and the matched Claude campaign passed
+eight of 18, failed nine and left one unknown. Its failures are not replaced by
+the new unpaid results. Post-fix model confirmation remains pending; the user has
+put all paid runs on hold until scope and budget approval. No overall speed,
+token or cost improvement is established. See the [PER-14 comparison and scope
+recommendation](per-14-benchmark-comparison.md) before larger benchmark work.
 
 ```sh
 npm run build:runtime

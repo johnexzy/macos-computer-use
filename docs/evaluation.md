@@ -4,6 +4,13 @@ The [16 November results](evaluation-results-2026-11-16.md) record the completed
 repeated campaigns and matched Claude comparison, including failures, cost and
 the remaining acceptance gaps.
 
+The [subsequent remediation record](evidence/per-7-per-8-remediation-2026-11-16.json)
+records corrected unpaid checks; it does not replace the historical paid results.
+All further paid runs are on hold pending the user's scope and budget approval.
+The [PER-14 recommendation](per-14-benchmark-comparison.md) proposes an actual
+agent session for the larger workload; this per-decision harness remains the
+receipt and replay regression suite.
+
 New reports use schema version 2 and explicit evaluation policy version 2. Historical
 reports retain their original controller behavior and foreground criteria; these
 changes do not regrade or pool those campaigns.
