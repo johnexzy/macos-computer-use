@@ -11,9 +11,14 @@ func checkAXRead(_ result: AXError, context: OperationContext, allowMissing: Boo
     throw NativeFailure(.nativeFailed, "AX read failed")
 }
 
-func decodeAXEnabled(_ result: AXError, value: CFTypeRef?, context: OperationContext) throws -> (value: Bool?, unsupported: Bool) {
+func decodeAXEnabled(_ result: AXError, value: CFTypeRef?, context: OperationContext) throws -> (value: Bool?, unsupported: Bool, completeForTraversal: Bool) {
     try checkAXRead(result, context: context, allowMissing: true)
-    return (result == .success ? value as? Bool : nil, result == .attributeUnsupported)
+    let enabled: Bool?
+    if result == .success, let value, CFGetTypeID(value) == CFBooleanGetTypeID() { enabled = value as? Bool }
+    else { enabled = nil }
+    let unsupported = result == .attributeUnsupported
+    // A declared unsupported state is not an omitted node or an unreadable subtree.
+    return (enabled, unsupported, enabled != nil || unsupported)
 }
 
 func decodeAXDescription(_ result: AXError, value: CFTypeRef?, context: OperationContext) throws -> (value: String?, complete: Bool) {

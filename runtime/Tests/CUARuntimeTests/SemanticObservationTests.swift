@@ -1,3 +1,4 @@
+import ApplicationServices
 import CUAProtocol
 @testable import CUARuntime
 import Foundation
@@ -369,6 +370,27 @@ final class PredicateAndFeedbackTests: XCTestCase {
         XCTAssertNil(try evaluator.evaluate(.enabled(EnabledCondition(elementRef: reference, enabled: false)), handle: handle, context: context()).evidence)
         fixture.first.value = ""
         XCTAssertEqual(try evaluator.evaluate(.valueEquals(ValueCondition(elementRef: reference, value: "")), handle: handle, context: context()).matched, true)
+    }
+    func testUnsupportedEnabledStateDoesNotHideCompleteRoleAbsence() throws {
+        let fixture = SemanticFixture()
+        let unsupported = try decodeAXEnabled(.attributeUnsupported, value: nil, context: context())
+        for node in [fixture.window, fixture.second] {
+            node.enabledKnown = unsupported.value != nil
+            node.enabled = unsupported.value ?? false
+            node.complete = unsupported.completeForTraversal
+        }
+        let native = try fixture.observe()
+        let handle = native.handle as! SemanticObservationHandle
+        let reference = native.observation.elements[1].reference
+        XCTAssertEqual(native.observation.accessibility, .partial)
+        XCTAssertNil(native.observation.elements[1].enabled)
+        XCTAssertTrue(try handle.scan(context: context()).complete)
+        let absent = Condition.elementAbsent(ElementCondition(selector: Selector(role: "AXCheckBox", label: nil, identifier: nil)))
+        let evaluator = PredicateEvaluator()
+        XCTAssertEqual(try evaluator.evaluate(absent, handle: handle, context: context()).matched, true)
+        XCTAssertNil(try evaluator.evaluate(.enabled(EnabledCondition(elementRef: reference, enabled: true)), handle: handle, context: context()).matched)
+        fixture.window.complete = try decodeAXEnabled(.noValue, value: nil, context: context()).completeForTraversal
+        XCTAssertNil(try evaluator.evaluate(absent, handle: handle, context: context()).matched)
     }
     func testWindowAbsenceUsesIndependentExactPresenceWithoutRequiringLiveAXWindow() throws {
         let fixture = SemanticFixture()

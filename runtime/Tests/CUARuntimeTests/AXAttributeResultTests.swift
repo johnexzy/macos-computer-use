@@ -48,10 +48,17 @@ final class AXAttributeResultTests: XCTestCase {
         let context = OperationContext(budgetMs: 100)
         let unsupported = try decodeAXEnabled(.attributeUnsupported, value: nil, context: context)
         XCTAssertNil(unsupported.value); XCTAssertTrue(unsupported.unsupported)
+        XCTAssertTrue(unsupported.completeForTraversal)
         let missing = try decodeAXEnabled(.noValue, value: nil, context: context)
         XCTAssertNil(missing.value); XCTAssertFalse(missing.unsupported)
+        XCTAssertFalse(missing.completeForTraversal)
         let disabled = try decodeAXEnabled(.success, value: kCFBooleanFalse, context: context)
         XCTAssertEqual(disabled.value, false); XCTAssertFalse(disabled.unsupported)
+        XCTAssertTrue(disabled.completeForTraversal)
+        for value in [nil, "unknown" as CFString, NSNumber(value: 0), NSNumber(value: 1)] as [CFTypeRef?] {
+            let unreadable = try decodeAXEnabled(.success, value: value, context: context)
+            XCTAssertNil(unreadable.value); XCTAssertFalse(unreadable.completeForTraversal)
+        }
         XCTAssertThrowsError(try decodeAXEnabled(.failure, value: nil, context: context)) {
             XCTAssertEqual(($0 as? NativeFailure)?.code, .nativeFailed)
         }

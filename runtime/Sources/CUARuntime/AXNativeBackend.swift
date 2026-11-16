@@ -90,7 +90,7 @@ public struct MacOSAXBackend: AXReading {
             enabled: enabled.value ?? false, enabledKnown: enabled.value != nil, value: boundedValue,
             valueSettable: settable, selectedTextSettable: textSettable, selectedRange: range,
             actions: Array(actions.prefix(32)),
-            complete: description.complete && enabled.value != nil && rawLabel == label
+            complete: description.complete && enabled.completeForTraversal && rawLabel == label
                 && (rawIdentifier?.utf8.count ?? 0) <= 1024 && (subrole?.utf8.count ?? 0) <= 1024
                 && value == boundedValue && actions.count <= 32,
             subrole: subrole, enabledUnsupported: enabled.unsupported)
