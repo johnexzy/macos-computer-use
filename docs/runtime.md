@@ -252,14 +252,14 @@ host budget before the remaining time is handed to the typed client.
 
 ## Verification and measurements
 
-The [PER-7/PER-8 verification record](evidence/per-7-per-8-verification-2026-11-14.json)
-separates implementation from milestone acceptance. The latest automated checks
-passed 186 tests, with one desktop-dependent legacy cursor test skipped while the
-Mac was locked. The corrected native build passed all 12 composition scenarios
-once, including actual Swift-child death at three causal fault boundaries.
-Repeated campaigns and the matched Claude comparison remain pending an unlocked
-desktop. Earlier failed campaigns and both paid model attempts are retained in
-the record; no speed, token, or cost improvement is established yet.
+The [16 November verification record](evidence/per-7-per-8-verification-2026-11-16.json)
+and [comparison report](evaluation-results-2026-11-16.md) separate completed runs
+from milestone acceptance. Rebuilt scripted lanes passed 54/54 trials. The native
+campaign retained six failures in 36 trials; all 18 matched Claude trials ran,
+with an overall result of eight passed, nine failed and one unknown. Native
+confirmation and target-identity checks held, but controller errors and foreground
+changes leave acceptance incomplete. Earlier failures and paid attempts remain
+in the evidence. No overall speed, token, or cost improvement is established.
 
 ```sh
 npm run build:runtime

@@ -1,5 +1,9 @@
 # Matched fixture evaluation
 
+The [16 November results](evaluation-results-2026-11-16.md) record the completed
+repeated campaigns and matched Claude comparison, including failures, cost and
+the remaining acceptance gaps.
+
 `test/evaluation/run.mjs` compares the actual legacy MCP server, the rebuilt server
 restricted to one action per request, and the rebuilt composed-action API. It uses
 the same nine fixture cases, values, common instructions, permissions and controller
