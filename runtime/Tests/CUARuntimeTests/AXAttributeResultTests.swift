@@ -14,10 +14,28 @@ final class AXAttributeResultTests: XCTestCase {
         XCTAssertTrue(supported.complete)
     }
     func testOptionalDescriptionDoesNotSwallowIdentityPermissionOrMessagingErrors() {
-        for (result, expected) in [(AXError.invalidUIElement, ErrorCode.staleElement), (.apiDisabled, .permissionDenied), (.cannotComplete, .nativeFailed)] {
+        for (result, expected) in [(AXError.invalidUIElement, ErrorCode.staleElement), (.apiDisabled, .permissionDenied)] {
             XCTAssertThrowsError(try decodeAXDescription(result, value: nil, context: OperationContext(budgetMs: 100))) {
                 XCTAssertEqual(($0 as? NativeFailure)?.code, expected)
             }
+        }
+        XCTAssertThrowsError(try decodeAXDescription(.cannotComplete, value: nil, context: OperationContext(budgetMs: 100))) {
+            XCTAssertTrue($0 is AXReadUnavailable)
+        }
+    }
+    func testCannotCompleteIsUnknownOnlyBeforeAnInterruption() {
+        XCTAssertThrowsError(try checkAXRead(.cannotComplete, context: OperationContext(budgetMs: 100))) {
+            XCTAssertTrue($0 is AXReadUnavailable)
+        }
+        let expired = OperationContext(receivedAt: 0, budgetMs: 1, now: { 1_000_000 })
+        let cancelled = OperationContext(budgetMs: 100); cancelled.cancel()
+        for (context, expected) in [(expired, ErrorCode.deadlineExceeded), (cancelled, .cancelled)] {
+            XCTAssertThrowsError(try checkAXRead(.cannotComplete, context: context)) {
+                XCTAssertEqual(($0 as? NativeFailure)?.code, expected)
+            }
+        }
+        XCTAssertThrowsError(try checkAXRead(.failure, context: OperationContext(budgetMs: 100))) {
+            XCTAssertEqual(($0 as? NativeFailure)?.code, .nativeFailed)
         }
     }
     func testSuccessfulDescriptionWithUnreadableTypeIsPartialRatherThanKnownAbsent() throws {

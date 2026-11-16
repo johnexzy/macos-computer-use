@@ -94,10 +94,12 @@ public struct BackgroundActions: Sendable {
         while true {
             try context.check()
             try checkLifetime(entry)
-            let evaluation = try predicates.evaluate(request.condition, handle: handle, context: context)
-            if evaluation.matched == true {
-                return WaitEvaluation(outcome: .satisfied, alreadySatisfied: first, evidence: evaluation.evidence)
-            }
+            do {
+                let evaluation = try predicates.evaluate(request.condition, handle: handle, context: context)
+                if evaluation.matched == true {
+                    return WaitEvaluation(outcome: .satisfied, alreadySatisfied: first, evidence: evaluation.evidence)
+                }
+            } catch is AXReadUnavailable { /* No state evidence; sample again within this budget. */ }
             first = false
             try pause(context)
         }
@@ -109,10 +111,12 @@ public struct BackgroundActions: Sendable {
         while true {
             try state.checkActive(context: context)
             try checkLifetime(entry)
-            if let check = try evaluate(condition, handle: handle, context: context) {
-                state.checked([check], verification: check.matched ? .confirmed : .mismatch)
-                if check.matched { return first ? .alreadySatisfied : .conditionSatisfied }
-            }
+            do {
+                if let check = try evaluate(condition, handle: handle, context: context) {
+                    state.checked([check], verification: check.matched ? .confirmed : .mismatch)
+                    if check.matched { return first ? .alreadySatisfied : .conditionSatisfied }
+                }
+            } catch is AXReadUnavailable { /* Keep the last genuine witness, if any. */ }
             first = false
             try pause(context)
         }
@@ -226,16 +230,22 @@ public struct BackgroundActions: Sendable {
         while true {
             try context.check()
             try checkLifetime(entry)
-            let checks = try recordChecks(required, handle: handle, context: context, state: state)
-            let privateMatched: Bool
-            if let expected = privateTextExpectation {
-                let current = try handle.resolve(reference, includeValue: true, context: context)
-                guard handle.backend.same(current.object, resolved.object) else { throw NativeFailure(.staleElement, "readback target changed") }
-                privateMatched = current.snapshot.value == expected
-            } else { privateMatched = true }
-            try checkForeground(before, targetPID: handle.target.key.pid)
-            if let mutationFailure { throw mutationFailure }
-            if checks.count == required.count && checks.allSatisfy(\.matched) && privateMatched { return false }
+            do {
+                let checks = try recordChecks(required, handle: handle, context: context, state: state)
+                let privateMatched: Bool
+                if let expected = privateTextExpectation {
+                    let current = try handle.resolve(reference, includeValue: true, context: context)
+                    guard handle.backend.same(current.object, resolved.object) else { throw NativeFailure(.staleElement, "readback target changed") }
+                    privateMatched = current.snapshot.value == expected
+                } else { privateMatched = true }
+                try checkForeground(before, targetPID: handle.target.key.pid)
+                if let mutationFailure { throw mutationFailure }
+                if checks.count == required.count && checks.allSatisfy(\.matched) && privateMatched { return false }
+            } catch is AXReadUnavailable {
+                // Only effect reads may repeat. An actual setter error must still stop this action.
+                if let mutationFailure { throw mutationFailure }
+                try checkForeground(before, targetPID: handle.target.key.pid)
+            }
             try pause(context)
         }
     }

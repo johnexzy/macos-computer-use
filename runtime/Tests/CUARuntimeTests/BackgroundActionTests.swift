@@ -49,10 +49,14 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
     var failButtonReadback = false
     var invalidateGuardBeforeHandoff = false
     var valueAfterReads: Int?
+    var unavailableValueReadNumbers: Set<Int> = []
+    var unavailableAfterDispatchReads = 0
+    var alwaysValueUnavailable = false
     var fieldPresent = true
     var beforeHandoff: (@Sendable () -> Void)?
     private var foregroundReads = 0
     private var preimageReads = 0
+    private var valueReads = 0
     private var storedValue = "old"
     private var pendingValue: String?
     private var pendingReads = 0
@@ -82,6 +86,14 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
     func snapshot(of element: any AXObject, includeValue: Bool, context: OperationContext) throws -> AXNodeSnapshot? {
         try context.check()
         lock.lock(); defer { lock.unlock() }
+        if includeValue && same(element, field) {
+            valueReads += 1
+            if alwaysValueUnavailable || unavailableValueReadNumbers.contains(valueReads) { throw AXReadUnavailable() }
+            if mutations > 0 && unavailableAfterDispatchReads > 0 {
+                unavailableAfterDispatchReads -= 1
+                throw AXReadUnavailable()
+            }
+        }
         if includeValue && mutations == 0 {
             preimageReads += 1
             if changePreimage && preimageReads == 2 { storedValue = "different"; selectedRange = AXTextRange(location: 1, length: 0) }
@@ -482,6 +494,37 @@ final class BackgroundActionTests: XCTestCase {
         XCTAssertEqual(result.steps[0].verification, .confirmed)
         XCTAssertEqual(result.stopReason, .completed)
     }
+    func testReadbackCannotCompleteResamplesWithoutRepeatingTheWriter() throws {
+        let backend = ActionBackend(); backend.unavailableAfterDispatchReads = 1
+        let (result, _) = try perform(backend, request())
+        XCTAssertEqual(backend.calls, 1)
+        XCTAssertEqual(result.stopReason, .completed)
+        XCTAssertEqual(result.steps[0].delivery, .dispatched)
+        XCTAssertEqual(result.steps[0].verification, .confirmed)
+        XCTAssertEqual(result.steps[0].evidence.count, 1)
+        XCTAssertEqual(result.steps[0].evidence.first?.matched, true)
+    }
+    func testUnavailableReadCannotHideAnActualSetterError() throws {
+        let backend = ActionBackend(); backend.behavior = .throwAfterWrite
+        backend.unavailableAfterDispatchReads = 1
+        let (result, _) = try perform(backend, request())
+        XCTAssertEqual(backend.calls, 1)
+        XCTAssertEqual(result.stopReason, .failed)
+        XCTAssertEqual(result.steps[0].delivery, .unknown)
+        XCTAssertEqual(result.steps[0].verification, .unverified)
+        XCTAssertTrue(result.steps[0].evidence.isEmpty)
+    }
+    func testUnavailablePredispatchReadsNeverRetryOrWrite() throws {
+        for read in 1...3 {
+            let backend = ActionBackend(); backend.unavailableValueReadNumbers = [read]
+            let guardCondition = Condition.valueEquals(ValueCondition(elementRef: "field", value: "old"))
+            let (result, _) = try perform(backend, request(precondition: guardCondition))
+            XCTAssertEqual(backend.calls, 0)
+            XCTAssertEqual(result.stopReason, .failed)
+            XCTAssertEqual(result.steps[0].delivery, .notDispatched)
+            XCTAssertEqual(result.steps[0].reason, .nativeFailed)
+        }
+    }
     func testNativeErrorAfterAnEffectPreservesUnknownDeliveryAndConfirmedState() throws {
         let backend = ActionBackend(); backend.behavior = .throwAfterWrite
         let (result, _) = try perform(backend, request())
@@ -654,6 +697,53 @@ final class BackgroundActionTests: XCTestCase {
         XCTAssertThrowsError(try engine.wait(missing, entry: retained, context: OperationContext(budgetMs: 20))) { error in
             XCTAssertEqual((error as? NativeFailure)?.code, .deadlineExceeded)
         }
+    }
+    func testPureWaitCannotCompleteThenPositiveIsLaterSatisfactionWithoutFalseEvidence() throws {
+        let backend = ActionBackend(); backend.value = "ready"; backend.unavailableValueReadNumbers = [1]
+        let wait = WaitOperation(condition: .valueEquals(ValueCondition(elementRef: "field", value: "ready")))
+        let (result, state) = try perform(backend, request(.waitFor(wait)))
+        XCTAssertEqual(backend.calls, 0)
+        XCTAssertEqual(result.stopReason, .completed)
+        XCTAssertEqual(result.steps[0].reason, .conditionSatisfied)
+        XCTAssertEqual(result.steps[0].verification, .confirmed)
+        XCTAssertEqual(result.steps[0].evidence.count, 1)
+        XCTAssertTrue(state.witnesses.allSatisfy(\.matched))
+    }
+    func testAllUnavailableWaitKeepsSettledPrefixAndNoInventedWitness() throws {
+        let backend = ActionBackend(); let log = PrefixLog()
+        let act = sequence([.setValue(SetValueOperation(elementRef: "field", value: "new")),
+            .waitFor(WaitOperation(condition: .valueEquals(ValueCondition(elementRef: "field", value: "never")))),
+            .press(ElementOperation(elementRef: "button"))])
+        let (result, _) = try perform(backend, act, budget: 40, progress: { prefix, context in
+            try log.append(prefix, context: context)
+            backend.alwaysValueUnavailable = true
+        })
+        XCTAssertEqual(backend.calls, 1)
+        XCTAssertEqual(result.stopReason, .deadlineExceeded)
+        XCTAssertEqual(result.remainingSteps, 1)
+        XCTAssertEqual(log.prefixes, [Array(result.steps.prefix(1))])
+        XCTAssertEqual(result.steps[1].delivery, .notDispatched)
+        XCTAssertEqual(result.steps[1].verification, .unverified)
+        XCTAssertTrue(result.steps[1].evidence.isEmpty)
+    }
+    func testStandaloneWaitResamplesCannotCompleteAndNeverCallsItAlreadySatisfied() throws {
+        let backend = ActionBackend(); backend.unavailableValueReadNumbers = [1]
+        let wait = WaitRequest(observationId: "origin", target: actionTarget.key,
+            condition: .valueEquals(ValueCondition(elementRef: "field", value: "old")))
+        let result = try BackgroundActions().wait(wait, entry: entry(backend), context: OperationContext(budgetMs: 100))
+        XCTAssertEqual(result.outcome, .satisfied)
+        XCTAssertFalse(result.alreadySatisfied)
+        XCTAssertEqual(result.evidence?.matched, true)
+        XCTAssertEqual(backend.calls, 0)
+    }
+    func testStandaloneWaitAllUnavailableExhaustsOriginalBudget() {
+        let backend = ActionBackend(); backend.alwaysValueUnavailable = true
+        let wait = WaitRequest(observationId: "origin", target: actionTarget.key,
+            condition: .valueEquals(ValueCondition(elementRef: "field", value: "old")))
+        XCTAssertThrowsError(try BackgroundActions().wait(wait, entry: entry(backend), context: OperationContext(budgetMs: 20))) {
+            XCTAssertEqual(($0 as? NativeFailure)?.code, .deadlineExceeded)
+        }
+        XCTAssertEqual(backend.calls, 0)
     }
     func testIndependentProcessLockExclusionAndCrashRelease() throws {
         let directory = try directory(); let lockPath = directory.appendingPathComponent("mutation.lock").path

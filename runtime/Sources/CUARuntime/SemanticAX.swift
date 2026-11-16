@@ -310,6 +310,9 @@ private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReadi
             } else {
                 for child in children.elements.reversed() { pending.append((child, depth + 1)) }
             }
+        } catch is AXReadUnavailable {
+            // Keep readable siblings without claiming that the unreadable subtree is absent.
+            complete = false
         } catch let error as NativeFailure where error.code == .staleElement || error.code == .nativeFailed {
             complete = false
         }

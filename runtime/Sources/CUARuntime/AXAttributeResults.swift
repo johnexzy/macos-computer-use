@@ -2,10 +2,14 @@ import ApplicationServices
 import CUAProtocol
 import Foundation
 
+/// A failed AX read supplies no state evidence. Only established polling loops may sample again.
+struct AXReadUnavailable: Error, Sendable {}
+
 func checkAXRead(_ result: AXError, context: OperationContext, allowMissing: Bool = false) throws {
     try context.check()
     if result == .success { return }
     if allowMissing && (result == .attributeUnsupported || result == .noValue || result == .actionUnsupported) { return }
+    if result == .cannotComplete { throw AXReadUnavailable() }
     if result == .invalidUIElement { throw NativeFailure(.staleElement, "AX object is invalid") }
     if result == .apiDisabled { throw NativeFailure(.permissionDenied, "Accessibility permission is unavailable") }
     throw NativeFailure(.nativeFailed, "AX read failed")

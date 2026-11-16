@@ -19,6 +19,7 @@ private final class SemanticNode: AXObject, @unchecked Sendable {
     var enabled = true
     var enabledKnown = true
     var readable = true
+    var readUnavailable = false
     var complete = true
     var childrenComplete = true
     var valueSettable = false
@@ -56,6 +57,7 @@ private final class SemanticBackend: AXReading, @unchecked Sendable {
     }
     func snapshot(of element: any AXObject, includeValue: Bool, context: OperationContext) throws -> AXNodeSnapshot? {
         try context.check(); let node = element as! SemanticNode
+        if node.readUnavailable { throw AXReadUnavailable() }
         guard node.readable else { throw NativeFailure(.nativeFailed, "injected unreadable node") }
         if includeValue { valueReads.append(node.identity) }
         return AXNodeSnapshot(role: node.role, title: node.title, label: node.title, identifier: node.identifier,
@@ -112,6 +114,19 @@ private struct SemanticFixture {
 }
 
 final class SemanticObservationTests: XCTestCase {
+    func testUnavailableReadKeepsReadableSiblingsWithoutProvingAbsence() throws {
+        let fixture = SemanticFixture()
+        fixture.second.readUnavailable = true
+        let native = try fixture.observe()
+        XCTAssertEqual(native.observation.accessibility, .partial)
+        XCTAssertEqual(native.observation.elements.compactMap(\.identifier), ["first"])
+        let handle = try XCTUnwrap(native.handle as? SemanticObservationHandle)
+        XCTAssertFalse(try handle.scan(context: OperationContext(budgetMs: 5000)).complete)
+        let missing = Condition.elementAbsent(ElementCondition(selector: Selector(role: "AXTextField", label: nil, identifier: "missing")))
+        XCTAssertNil(try PredicateEvaluator().evaluate(missing, handle: handle,
+            context: OperationContext(budgetMs: 5000)).matched)
+    }
+
     func testPrivateValuesAreNeverRequestedAndRepeatedLabelsHaveDistinctOpaqueReferences() throws {
         let fixture = SemanticFixture()
         let result = try fixture.observe()
