@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { parseCommand, parseResult, claudeArguments, claudeEnvironment, ModelBudget, apiKeyEnvironment, invokeClaude, preflightClaude } from "./model.mjs";
-import { judgeEpisode, summarize, usageSummary } from "./metrics.mjs";
+import { judgeEpisode as judgeWithRequiredWatch, summarize, usageSummary, completionGate, mergeForegroundWatches } from "./metrics.mjs";
 import { intendedRefusal, validateFixtureCommand, validateOriginalMutation, laneTools, LaneAdapter } from "./adapters.mjs";
 
 const command = { kind: "finish", tool: "", argsJson: "{}", claim: "incomplete", reason: "Stopped" };
@@ -15,6 +15,36 @@ const response = (extra = {}) => JSON.stringify({ type: "result", subtype: "succ
 const state = () => ({ pid: 42, foregroundPID: 99, activationCount: 0, windows: ["primary", "secondary"].map((window, i) => ({ key: window, windowId: 7 + i, generation: 1, pressCount: 0,
   controls: ["first", "second"].map((key) => ({ key, identifier: `${window}.${key}`, generation: 1, modelValue: "old", controlValue: "old", attempts: 0 })) })) });
 const goals = [{ identifier: "primary.first", value: "new" }];
+const watch = (extra = {}) => ({ targetPID: 42, available: true, truncated: false, targetActivations: 0,
+  startedForegroundPID: 99, finishedForegroundPID: 99, events: [], ...extra });
+const judgeEpisode = (args) => judgeWithRequiredWatch({ foregroundWatch: watch(), ...args });
+const wrap = (result, value) => ({ structuredContent: { body: { result, data: result === "act"
+  ? { stopReason: value.steps.at(-1)?.reason === "nativeFailed" ? "failed" : value.remainingSteps ? "deadlineExceeded" : "completed", ...value } : value } }, isError: result === "error" });
+const operation = (ref, id = ref) => ({ actionId: id, operation: { kind: "setValue", params: { elementRef: ref, value: "new" } } });
+const receipt = (step, delivery = step.operation.kind === "waitFor" ? "not_dispatched" : "dispatched", verification = "confirmed") => ({ actionId: step.actionId, delivery, verification,
+  reason: verification === "unverified" ? "nativeFailed" : step.operation.kind === "waitFor" ? "alreadySatisfied" : null, route: delivery === "dispatched" ? "axSetValue" : null,
+  evidence: verification === "confirmed" ? [{ observationId: `check-${step.actionId}`, matched: true,
+    condition: step.operation.kind === "waitFor" ? step.operation.params.condition : { kind: "valueEquals", params: step.operation.params } }] : [] });
+const act = (steps, extra = {}) => ({ tool: "act", args: { target: { pid: 42, windowId: 7 }, observationId: "original", budgetMs: 3000, steps, ...extra } });
+const observe = { tool: "observe", args: { target: { pid: 42, windowId: 7 }, includeValues: true, budgetMs: 3000 } };
+function fakeAdapter(handler, lane = "rebuild-composed") {
+  const calls = [], traces = [], fixture = state();
+  const adapter = new LaneAdapter(lane, fixture, (e) => traces.push(e));
+  const target = { type: "object", properties: { pid: { type: "integer" }, windowId: { type: "integer" } }, required: ["pid", "windowId"] };
+  const step = { type: "object", properties: { actionId: { type: "string" }, operation: { type: "object" } }, required: ["actionId", "operation"] };
+  adapter.setTools([
+    { name: "observe", description: "Observe", inputSchema: { type: "object", properties: { target, includeValues: { type: "boolean" }, budgetMs: { type: "integer", default: 5000, maximum: 60000 } }, required: ["target"] } },
+    { name: "act", description: "Act", inputSchema: { type: "object", properties: { target, observationId: { type: "string" }, budgetMs: { type: "integer" }, steps: { type: "array", items: step, minItems: 1, maxItems: 16 } }, required: ["target", "observationId", "steps"] } },
+    { name: "waitFor", description: "Wait", inputSchema: { type: "object", properties: { target, observationId: { type: "string" }, budgetMs: { type: "integer" }, condition: { type: "object" } }, required: ["target", "observationId", "condition"] } },
+  ]);
+  adapter.client = { callTool: async ({ name, arguments: args }) => {
+    calls.push({ name, args });
+    if (name === "observe") return wrap("observe", { observationId: calls.length === 1 ? "original" : "fresh", elements: ["first", "second"].map((key, i) => ({ reference: `ref${i + 1}`, identifier: `primary.${key}` })) });
+    return handler(name, args, fixture);
+  } };
+  adapter.beginCase(fixture);
+  return { adapter, calls, traces, fixture };
+}
 
 test("model JSON must be successful structured output with one pinned resolved model", () => {
   const parsed = parseResult(response()); assert.equal(parsed.ok, true); assert.equal(parsed.model, "claude-sonnet-specific");
@@ -25,6 +55,14 @@ test("model JSON must be successful structured output with one pinned resolved m
   assert.equal(parseResult("not JSON").costUsd, null);
   assert.throws(() => parseCommand({ ...command, unexpected: true }));
   assert.throws(() => parseCommand({ ...command, kind: "tool", tool: "act", argsJson: "[]" }));
+});
+test("bad command arguments are correctable only after successful pinned generation", () => {
+  const invalid = parseResult(response({ structured_output: { ...command, argsJson: "[]" } }));
+  assert.equal(invalid.ok, false); assert.equal(invalid.generationOk, true);
+  assert.equal(invalid.commandError.proposalDelivery, "not_dispatched");
+  const providerFailure = parseResult(response({ is_error: true, subtype: "error_during_execution" }));
+  assert.equal(providerFailure.generationOk, false); assert.equal(providerFailure.commandError, undefined);
+  assert.equal(parseResult(response(), 0, "claude-other").generationOk, false);
 });
 test("failure usage remains attributable, cache counters stay distinct, absent costs stay unknown", () => {
   const failed = parseResult(response({ is_error: true, subtype: "error_during_execution" }));
@@ -125,7 +163,7 @@ test("fixture allowlist preserves actual legacy selectors and bounds rebuilt com
   assert.doesNotThrow(() => validateFixtureCommand("legacy", "set_accessibility_value", { windowId: 7, selector: { title: "Value" }, value: "new" }, fixture));
   assert.throws(() => validateFixtureCommand("legacy", "set_accessibility_value", { windowId: 99, selector: {}, value: "new" }, fixture));
   assert.throws(() => validateFixtureCommand("legacy", "open_url", { windowId: 7 }, fixture));
-  const args = { target: { pid: 42, windowId: 7 }, budgetMs: 3000, steps: [1, 2].map((i) => ({ operation: { kind: "setValue", params: { elementRef: `ref${i}`, value: "new" } } })) };
+  const args = { target: { pid: 42, windowId: 7 }, budgetMs: 3000, steps: [1, 2].map((i) => ({ actionId: `action${i}`, operation: { kind: "setValue", params: { elementRef: `ref${i}`, value: "new" } } })) };
   assert.throws(() => validateFixtureCommand("rebuild-single", "act", args, fixture, new Set(["ref1", "ref2"])));
   assert.doesNotThrow(() => validateFixtureCommand("rebuild-composed", "act", args, fixture, new Set(["ref1", "ref2"])));
   const mutation = { observationId: "new", steps: [{ operation: { kind: "setValue", params: { elementRef: "new-ref", value: "new" } } }] };
@@ -137,8 +175,257 @@ test("fixture allowlist preserves actual legacy selectors and bounds rebuilt com
   assert.equal(laneTools("rebuild-single", [original])[0].inputSchema.properties.steps.maxItems, 1);
   assert.equal(laneTools("rebuild-composed", [original])[0].inputSchema.properties.steps.maxItems, 16);
   assert.equal(original.inputSchema.properties.steps.maxItems, 16);
-  args.steps.push({ operation: { kind: "waitFor", params: { condition: { kind: "valueEquals", params: { elementRef: "ref2", value: "new" } } } } });
+  for (const lane of ["rebuild-single", "rebuild-composed"]) {
+    const schema = laneTools(lane, [original])[0].inputSchema;
+    assert.ok(schema.required.includes("budgetMs")); assert.equal(schema.properties.budgetMs.maximum, 3000);
+    assert.equal(schema.properties.budgetMs.default, 3000);
+  }
+  args.steps.push({ actionId: "wait", operation: { kind: "waitFor", params: { condition: { kind: "valueEquals", params: { elementRef: "ref2", value: "new" } } } } });
   assert.doesNotThrow(() => validateFixtureCommand("rebuild-composed", "act", args, fixture, new Set(["ref1", "ref2"])));
+});
+test("an omitted budget receives pre-dispatch feedback and the corrected proposal alone reaches MCP", async () => {
+  const { adapter, calls } = fakeAdapter((_name, args) => wrap("act", { observationId: args.observationId, steps: args.steps.map((s) => receipt(s)), remainingSteps: 0 }));
+  await adapter.propose(observe);
+  const invalid = act([operation("ref1")]); delete invalid.args.budgetMs;
+  const rejected = await adapter.propose(invalid);
+  assert.equal(rejected.kind, "controller_rejection"); assert.match(rejected.feedback.message, /budgetMs/);
+  assert.equal(rejected.feedback.proposalDelivery, "not_dispatched"); assert.equal(calls.length, 1);
+  assert.deepEqual(adapter.ledger.snapshot(), {});
+  const repaired = await adapter.propose(act([operation("ref1")]));
+  assert.equal(repaired.kind, "tool_result"); assert.equal(calls.length, 2);
+  assert.equal(adapter.ledger.snapshot()["primary.first"].delivery, "dispatched");
+});
+test("duplicate action IDs reject before input and corrected unique IDs remain eligible", async () => {
+  const { adapter, calls } = fakeAdapter((_name, args) => wrap("act", { observationId: args.observationId, steps: args.steps.map((s) => receipt(s)), remainingSteps: 0 }));
+  await adapter.propose(observe);
+  const rejected = await adapter.propose(act([operation("ref1", "same"), operation("ref2", "same")]));
+  assert.equal(rejected.kind, "controller_rejection"); assert.match(rejected.feedback.message, /unique/);
+  assert.equal(rejected.feedback.proposalDelivery, "not_dispatched"); assert.equal(calls.length, 1);
+  assert.deepEqual(adapter.ledger.snapshot(), {});
+  assert.equal((await adapter.propose(act([operation("ref1", "first"), operation("ref2", "second")]))).kind, "tool_result");
+  assert.equal(calls.length, 2);
+});
+test("empty or oversized action IDs reject before MCP and remain correctable", async () => {
+  for (const id of ["", " \t", "é".repeat(65)]) {
+    const { adapter, calls } = fakeAdapter((_name, args) => wrap("act", { observationId: args.observationId, steps: args.steps.map((s) => receipt(s)), remainingSteps: 0 }));
+    await adapter.propose(observe);
+    const rejected = await adapter.propose(act([operation("ref1", id)]));
+    assert.equal(rejected.kind, "controller_rejection"); assert.match(rejected.feedback.message, /128 UTF-8 bytes/);
+    assert.equal(calls.length, 1); assert.deepEqual(adapter.ledger.snapshot(), {});
+    assert.equal((await adapter.propose(act([operation("ref1", "valid")]))).kind, "tool_result");
+    assert.equal(calls.length, 2);
+  }
+});
+test("wait guards reject before an earlier mutation can dispatch and guard removal repairs the proposal", async () => {
+  for (const guard of ["precondition", "expect"]) {
+    const { adapter, calls } = fakeAdapter((_name, args) => wrap("act", { observationId: args.observationId, steps: args.steps.map((s) => receipt(s)), remainingSteps: 0 }));
+    await adapter.propose(observe);
+    const condition = { kind: "valueEquals", params: { elementRef: "ref1", value: "new" } };
+    const wait = { actionId: "wait", operation: { kind: "waitFor", params: { condition } }, [guard]: condition };
+    const rejected = await adapter.propose(act([operation("ref1"), wait]));
+    assert.equal(rejected.kind, "controller_rejection"); assert.match(rejected.feedback.message, /external/);
+    assert.equal(calls.length, 1); assert.deepEqual(adapter.ledger.snapshot(), {});
+    delete wait[guard];
+    assert.equal((await adapter.propose(act([operation("ref1"), wait]))).kind, "tool_result");
+    assert.equal(calls.length, 2);
+  }
+});
+test("invalid feedback references reject before MCP and a repaired request retains mutation eligibility", async () => {
+  for (const refs of [["ref1", "ref1"], ["unissued"], Array.from({ length: 257 }, (_, i) => `issued-${i}`)]) {
+    const { adapter, calls } = fakeAdapter((_name, args) => wrap("act", { observationId: args.observationId, steps: args.steps.map((s) => receipt(s)), remainingSteps: 0 }));
+    await adapter.propose(observe);
+    for (let i = 0; i < 257; i++) adapter.refs.set(`issued-${i}`, { identifier: "primary.first", observationId: "fresh" });
+    const rejected = await adapter.propose(act([operation("ref1")], { feedback: { elementRefs: refs, includeValues: false } }));
+    assert.equal(rejected.kind, "controller_rejection"); assert.match(rejected.feedback.message, /256 unique issued/);
+    assert.equal(calls.length, 1); assert.deepEqual(adapter.ledger.snapshot(), {});
+    const repaired = await adapter.propose(act([operation("ref1")], { feedback: { elementRefs: ["ref1"], includeValues: false } }));
+    assert.equal(repaired.kind, "tool_result"); assert.equal(calls.length, 2);
+  }
+});
+test("text bounds and enabled-condition types reject before any mutation", async () => {
+  for (const placement of ["setter", "expect", "wait", "enabled"]) {
+    const { adapter, calls } = fakeAdapter((_name, args) => wrap("act", { observationId: args.observationId, steps: args.steps.map((s) => receipt(s)), remainingSteps: 0 }));
+    await adapter.propose(observe);
+    const tooLarge = "é".repeat(32_769), steps = [operation("ref1")];
+    if (placement === "setter") steps[0].operation.params.value = tooLarge;
+    if (placement === "expect") steps[0].expect = { kind: "valueEquals", params: { elementRef: "ref1", value: tooLarge } };
+    if (placement === "enabled") steps[0].expect = { kind: "enabled", params: { elementRef: "ref1", enabled: null } };
+    if (placement === "wait") steps.push({ actionId: "wait", operation: { kind: "waitFor", params: { condition: { kind: "valueEquals", params: { elementRef: "ref1", value: tooLarge } } } } });
+    const rejected = await adapter.propose(act(steps));
+    assert.equal(rejected.kind, "controller_rejection"); assert.match(rejected.feedback.message, placement === "enabled" ? /boolean/ : /65536 UTF-8/);
+    assert.equal(calls.length, 1); assert.deepEqual(adapter.ledger.snapshot(), {});
+    assert.equal((await adapter.propose(act([operation("ref1")]))).kind, "tool_result");
+    assert.equal(calls.length, 2);
+  }
+  assert.throws(() => validateFixtureCommand("legacy", "set_accessibility_value", { windowId: 7, selector: { identifier: "primary.first" }, value: "é".repeat(32_769) }, state()), /65536 UTF-8/);
+});
+test("replay rejection sends no second input and readback does not erase known delivery", async () => {
+  const { adapter, calls } = fakeAdapter((_name, args) => wrap("act", { observationId: args.observationId, steps: args.steps.map((s) => receipt(s)), remainingSteps: 0 }));
+  await adapter.propose(observe); await adapter.propose(act([operation("ref1")]));
+  const replay = await adapter.propose(act([operation("ref1", "retry")]));
+  assert.equal(replay.feedback.code, "mutation_replay_refused"); assert.equal(calls.length, 2);
+  assert.equal((await adapter.propose(observe)).kind, "tool_result"); assert.equal(calls.length, 3);
+  assert.equal(adapter.ledger.snapshot()["primary.first"].delivery, "dispatched");
+});
+test("a correlated partial prefix permits only original controls proven not dispatched or unsent", async () => {
+  for (const explicitRejectedReceipt of [false, true]) {
+    let actionCalls = 0;
+    const { adapter, calls } = fakeAdapter((_name, args) => {
+      actionCalls++;
+      const steps = actionCalls === 1 ? [receipt(args.steps[0]), ...(explicitRejectedReceipt ? [receipt(args.steps[1], "not_dispatched", "unverified")] : [])]
+        : args.steps.map((s) => receipt(s));
+      return wrap("act", { observationId: args.observationId, steps, remainingSteps: args.steps.length - steps.length });
+    });
+    await adapter.propose(observe);
+    await adapter.propose(act([operation("ref1"), operation("ref2")]));
+    assert.equal((await adapter.propose(act([operation("ref1", "replay")]))).feedback.code, "mutation_replay_refused");
+    assert.equal((await adapter.propose(act([operation("ref2", "correction")], { observationId: "fresh" }))).kind, "controller_rejection");
+    assert.equal((await adapter.propose(act([operation("ref2", "wrong-window")], { target: { pid: 42, windowId: 8 } }))).kind, "controller_rejection");
+    adapter.refs.set("replacement-ref", { identifier: "primary.second", observationId: "fresh" });
+    assert.equal((await adapter.propose(act([operation("replacement-ref", "retarget")]))).kind, "controller_rejection");
+    assert.equal((await adapter.propose(act([operation("ref2", "correction")]))).kind, "tool_result");
+    assert.equal(actionCalls, 2); assert.equal(calls.filter((c) => c.name === "act").length, 2);
+    assert.deepEqual([...adapter.ledger.blocked()].sort(), ["primary.first", "primary.second"]);
+  }
+});
+test("legacy accepted:false errors do not prove no input and cannot authorize replay", async () => {
+  const fixture = state(), calls = [];
+  const adapter = new LaneAdapter("legacy", fixture, () => {});
+  const target = { windowId: { type: "integer" } };
+  adapter.setTools([
+    { name: "inspect_accessibility", description: "Inspect", inputSchema: { type: "object", properties: target, required: ["windowId"] } },
+    { name: "set_accessibility_value", description: "Set", inputSchema: { type: "object", properties: { ...target, selector: { type: "object" }, value: { type: "string" } }, required: ["windowId", "selector", "value"] } },
+  ]);
+  adapter.client = { callTool: async ({ name }) => {
+    calls.push(name);
+    return name === "inspect_accessibility" ? { structuredContent: { elements: [{ identifier: "primary.first" }] } }
+      : { isError: true, structuredContent: { status: "error", execution: { accepted: false, verification: "none" } } };
+  } };
+  adapter.beginCase(fixture);
+  const read = { tool: "inspect_accessibility", args: { windowId: 7 } };
+  const mutation = { tool: "set_accessibility_value", args: { windowId: 7, selector: { identifier: "primary.first" }, value: "new" } };
+  await adapter.propose(read); await adapter.propose(mutation);
+  assert.equal(adapter.ledger.snapshot()["primary.first"].delivery, "unknown");
+  assert.equal((await adapter.propose(mutation)).feedback.code, "mutation_replay_refused");
+  assert.equal((await adapter.propose(read)).kind, "tool_result");
+  assert.deepEqual(calls, ["inspect_accessibility", "set_accessibility_value", "inspect_accessibility"]);
+});
+test("a missing or uncorrelated receipt cannot prove an unsent suffix eligible", async () => {
+  for (const result of [wrap("error", { code: "nativeFailed" }), wrap("act", { observationId: "other", steps: [], remainingSteps: 2 })]) {
+    const { adapter, calls } = fakeAdapter(() => result);
+    await adapter.propose(observe); await adapter.propose(act([operation("ref1"), operation("ref2")]));
+    assert.equal(adapter.ledger.snapshot()["primary.second"].delivery, "unknown");
+    assert.equal((await adapter.propose(act([operation("ref2", "retry")]))).feedback.code, "mutation_replay_refused");
+    assert.equal(calls.length, 2);
+  }
+});
+test("invalid native receipt shapes never authorize an alleged unsent suffix", async () => {
+  const first = receipt(operation("ref1"));
+  for (const invalid of [
+    { steps: [], remainingSteps: 2, stopReason: "failed" },
+    { steps: [first], remainingSteps: 1, stopReason: "completed" },
+    { steps: [{ ...first, verification: "invented" }], remainingSteps: 1, stopReason: "failed" },
+    { steps: [{ ...first, evidence: [null] }], remainingSteps: 1, stopReason: "failed" },
+    { steps: [first], remainingSteps: 1, stopReason: "invented" },
+  ]) {
+    const { adapter, calls } = fakeAdapter(() => wrap("act", { observationId: "original", ...invalid }));
+    await adapter.propose(observe); await adapter.propose(act([operation("ref1"), operation("ref2")]));
+    assert.equal(adapter.ledger.snapshot()["primary.second"].delivery, "unknown");
+    assert.equal((await adapter.propose(act([operation("ref2", "retry")]))).feedback.code, "mutation_replay_refused");
+    assert.equal(calls.length, 2);
+  }
+});
+test("API loss or native unknown seals submitted controls, allowing read reconciliation without mutation retry", async () => {
+  for (const throwTransport of [false, true]) {
+    const { adapter, calls, fixture } = fakeAdapter((_name, args, live) => {
+      const control = live.windows[0].controls[0]; control.modelValue = "new"; control.controlValue = "new"; control.attempts++;
+      if (throwTransport) throw new Error("MCP connection lost after input");
+      return wrap("act", { observationId: args.observationId, steps: [receipt(args.steps[0], "unknown", "unverified")], remainingSteps: 1 });
+    });
+    const before = structuredClone(fixture);
+    await adapter.propose(observe); await adapter.propose(act([operation("ref1"), operation("ref2")]));
+    assert.equal((await adapter.propose(act([operation("ref1", "retry")]))).feedback.code, "mutation_replay_refused");
+    if (throwTransport) assert.equal((await adapter.propose(act([operation("ref2", "retry")]))).feedback.code, "mutation_replay_refused");
+    assert.equal((await adapter.propose(observe)).kind, "tool_result");
+    assert.equal(calls.filter((c) => c.name === "act").length, 1);
+    assert.equal(adapter.ledger.snapshot()["primary.first"].delivery, "unknown");
+    assert.equal(completionGate(judgeEpisode({ before, after: fixture, goals, modelClaim: "complete" })).accepted, true);
+  }
+});
+test("policyV2 allows unrelated app switching but requires known evidence and no target activation", () => {
+  const before = state(), after = state(); after.windows[0].controls[0].modelValue = "new"; after.windows[0].controls[0].controlValue = "new";
+  after.foregroundPID = 100;
+  const unrelated = judgeEpisode({ before, after, goals, modelClaim: "complete" });
+  assert.equal(unrelated.foregroundPreserved, false); assert.equal(unrelated.unrelatedForegroundSwitch, true);
+  assert.equal(unrelated.targetActivationPreserved, true); assert.equal(completionGate(unrelated).accepted, true);
+  after.activationCount = 1;
+  assert.equal(judgeEpisode({ before, after, goals }).fixtureActivationCounterUnchanged, false);
+  assert.equal(judgeEpisode({ before, after, goals }).targetActivationPreserved, false);
+  after.activationCount = 0; after.foregroundPID = 42;
+  assert.equal(judgeEpisode({ before, after, goals, foregroundWatch: watch({ finishedForegroundPID: 42 }) }).strictCompletion, false);
+  after.foregroundPID = null;
+  const unknown = judgeEpisode({ before, after, goals, modelClaim: "complete", foregroundWatch: watch({ finishedForegroundPID: null }) });
+  assert.equal(unknown.targetActivationPreserved, null); assert.equal(unknown.outcome, "unknown");
+  assert.equal(unknown.falseCompletionClaim, false); assert.equal(unknown.completionClaimUnknown, true);
+  after.foregroundPID = 100;
+  assert.equal(judgeEpisode({ before, after, goals, foregroundWatch: watch({ targetActivations: 1 }) }).strictCompletion, false);
+  assert.equal(judgeEpisode({ before, after, goals, foregroundWatch: watch({ available: false }) }).targetActivationPreserved, null);
+});
+test("a fixture counter and restored endpoints cannot replace the required independent observer", () => {
+  const before = state(), after = state(); after.windows[0].controls[0].modelValue = "new"; after.windows[0].controls[0].controlValue = "new";
+  const missing = judgeWithRequiredWatch({ before, after, goals, modelClaim: "complete" });
+  assert.equal(missing.foregroundPreserved, true); assert.equal(missing.fixtureActivationCounterUnchanged, true);
+  assert.equal(missing.outcome, "unknown"); assert.equal(missing.strictCompletion, null);
+  assert.equal(missing.completionClaimUnknown, true); assert.equal(completionGate(missing).accepted, false);
+  const transient = judgeEpisode({ before, after, goals, foregroundWatch: watch({ targetActivations: 1 }) });
+  assert.equal(transient.foregroundPreserved, true); assert.equal(transient.fixtureActivationCounterUnchanged, true);
+  assert.equal(transient.outcome, "failed"); assert.equal(transient.strictCompletion, false);
+  for (const invalid of [watch({ truncated: true }), watch({ available: false }), watch({ targetPID: 43 }), watch({ startedForegroundPID: null })]) {
+    assert.equal(judgeEpisode({ before, after, goals, foregroundWatch: invalid }).strictCompletion, null);
+  }
+});
+test("positive fixture activation evidence vetoes a healthy zero-count independent monitor", () => {
+  for (const source of ["counter", "endpoint"]) {
+    const before = state(), after = state(); after.windows[0].controls[0].modelValue = "new"; after.windows[0].controls[0].controlValue = "new";
+    if (source === "counter") after.activationCount = 1;
+    else after.foregroundPID = 42;
+    const independent = watch();
+    const result = judgeEpisode({ before, after, goals, foregroundWatch: independent });
+    assert.equal(independent.targetActivations, 0);
+    assert.equal(result.positiveFixtureActivation, true); assert.equal(result.strictCompletion, false); assert.equal(result.outcome, "failed");
+  }
+  const before = state(), after = state(); after.windows[0].controls[0].modelValue = "new"; after.windows[0].controls[0].controlValue = "new"; after.activationCount = null;
+  assert.equal(judgeWithRequiredWatch({ before, after, goals }).strictCompletion, null);
+  assert.equal(judgeEpisode({ before, after, goals }).strictCompletion, true);
+});
+test("the final monitor stop can downgrade a pass and later gaps cannot erase a known activation", () => {
+  const before = state(), after = state(); after.windows[0].controls[0].modelValue = "new"; after.windows[0].controls[0].controlValue = "new";
+  const initial = watch(), preCleanup = watch({ finishedForegroundPID: 100 }), final = watch({ targetActivations: 1, finishedForegroundPID: 99 });
+  assert.equal(judgeEpisode({ before, after, goals, foregroundWatch: mergeForegroundWatches([initial, preCleanup], 42) }).strictCompletion, true);
+  const late = mergeForegroundWatches([initial, preCleanup, final], 42);
+  assert.equal(judgeEpisode({ before, after, goals, foregroundWatch: late }).strictCompletion, false);
+  const sampledTransition = mergeForegroundWatches([initial, watch({ finishedForegroundPID: 42 }), preCleanup], 42);
+  assert.equal(sampledTransition.targetActivations, 0); // Preserve the counter; retain the independent endpoint witness separately.
+  assert.equal(sampledTransition.observedTargetForegroundTransition, true);
+  assert.equal(judgeEpisode({ before, after, goals, foregroundWatch: sampledTransition }).strictCompletion, false);
+  const failedStop = { targetPID: 42, available: false, truncated: false };
+  assert.equal(judgeEpisode({ before, after, goals, foregroundWatch: mergeForegroundWatches([initial, preCleanup, failedStop], 42) }).strictCompletion, null);
+  assert.equal(judgeEpisode({ before, after, goals, foregroundWatch: mergeForegroundWatches([initial, final, failedStop], 42) }).strictCompletion, false);
+  assert.equal(judgeEpisode({ before, after, goals, foregroundWatch: mergeForegroundWatches([initial, failedStop, preCleanup], 42) }).strictCompletion, null);
+});
+test("independent completion rejects protected state changes, lost controls and false model claims", () => {
+  const before = state(), after = state();
+  let judgment = judgeEpisode({ before, after, goals, modelClaim: "complete" });
+  assert.equal(judgment.falseCompletionClaim, true); assert.equal(completionGate(judgment).accepted, false);
+  after.windows[0].controls[0].modelValue = "new"; after.windows[0].controls[0].controlValue = "new";
+  before.windows[1].controls[0].selection = { location: 0, length: 0 };
+  after.windows[1].controls[0].selection = { length: 0, location: 0 };
+  assert.equal(judgeEpisode({ before, after, goals }).strictCompletion, true);
+  for (const change of [s => s.windows[1].controls.pop(), s => { s.windows[1].controls[0].enabled = false; }, s => { s.windows[1].controls[0].attached = false; }]) {
+    const modified = structuredClone(after); change(modified);
+    judgment = judgeEpisode({ before, after: modified, goals, modelClaim: "complete" });
+    assert.equal(judgment.protectedStatePreserved, false); assert.equal(completionGate(judgment).accepted, false);
+  }
 });
 test("infrastructure failures cannot masquerade as intended stale-target refusals", () => {
   assert.equal(intendedRefusal({ isError: true, structuredContent: { body: { result: "error", data: { code: "nativeFailed" } } } }), false);

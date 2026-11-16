@@ -34,7 +34,7 @@ export function parseResult(stdout, exitCode = 0, pinnedModel = null) {
   const usage = { inputTokens: sum("inputTokens"), outputTokens: sum("outputTokens"),
     cacheReadInputTokens: sum("cacheReadInputTokens"), cacheCreationInputTokens: sum("cacheCreationInputTokens"),
     reasoningTokens: null };
-  const parsed = { ok: false, error: null, model, models, usage, costUsd: finite(result.total_cost_usd),
+  const parsed = { ok: false, generationOk: false, error: null, model, models, usage, costUsd: finite(result.total_cost_usd),
     usageSource: "cli_model_usage_all_models", primaryUsage: result.usage ?? null, costSource: "cli_reported_estimate",
     sessionId: result.session_id ?? null, durationApiMs: finite(result.duration_api_ms), numTurns: finite(result.num_turns),
     subtype: result.subtype ?? null, raw: result };
@@ -42,8 +42,9 @@ export function parseResult(stdout, exitCode = 0, pinnedModel = null) {
     parsed.error = `Claude invocation failed (${result.subtype || exitCode})`; return parsed;
   }
   if (!model || (pinnedModel && model !== pinnedModel)) { parsed.error = "Resolved model missing, mixed, or changed"; return parsed; }
+  parsed.generationOk = true;
   try { parsed.command = parseCommand(result.structured_output ?? JSON.parse(result.result)); parsed.ok = true; }
-  catch (error) { parsed.error = error.message; }
+  catch (error) { parsed.error = error.message; parsed.commandError = { kind: "controller_rejection", code: "invalid_command", message: error.message, proposalDelivery: "not_dispatched" }; }
   return parsed;
 }
 
@@ -122,7 +123,7 @@ export async function invokeClaude({ binary = "claude", model, budgetUsd, system
   const [code, signal] = await exited; clearTimeout(timer);
   // Provider/CLI errors must never persist a supplied key, even if an upstream message echoes it.
   const parsed = parseResult(redact(stdout, env), code, pinnedModel);
-  return { ...parsed, ok: parsed.ok && !failure && signal === null, error: failure || parsed.error,
+  return { ...parsed, ok: parsed.ok && !failure && signal === null, generationOk: parsed.generationOk === true && !failure && signal === null, error: failure || parsed.error,
     elapsedMs: performance.now() - start, exitCode: code, signal, stderr: redact(stderr, env),
     invocation: { binary, args, timeoutMs, backgroundTitleRequestDisabled: true, maxStructuredOutputAttempts: 1, modelRoleOverrides: Object.fromEntries(Object.entries(childEnv)
       .filter(([key]) => ["ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL",

@@ -10,6 +10,8 @@ import { performance } from "node:perf_hooks";
 import { Session, root, alive, deadline } from "./mcp-session.mjs";
 import { Fixture } from "../fixtures/macos/client.mjs";
 import { distribution } from "../baseline/metrics.mjs";
+import { buildForegroundMonitor, ForegroundMonitor } from "./support/foreground-monitor.mjs";
+import { foregroundProof, mergeForegroundWatches } from "../evaluation/metrics.mjs";
 
 const { values } = parseArgs({
   options: {
@@ -19,6 +21,7 @@ const { values } = parseArgs({
 });
 const repetitions = Number(values.repetitions);
 assert.ok(Number.isInteger(repetitions) && repetitions > 0 && repetitions <= 5);
+const monitorBinary = await buildForegroundMonitor();
 const output = path.resolve(
   values.output ||
     path.join(
@@ -46,6 +49,13 @@ const target = (s) => ({ pid: s.pid, windowId: win(s).windowId });
 const native = (r) => r.result?.structuredContent;
 const body = (r) => native(r)?.body;
 const data = (r) => body(r)?.data;
+function targetActivationProof(episode) {
+  const before = episode.oracle?.before, after = episode.oracle?.after;
+  if (!before?.pid) return null;
+  if (after && (after.activationCount > before.activationCount ||
+    (before.foregroundPID > 0 && before.foregroundPID !== before.pid && after.foregroundPID === before.pid))) return false;
+  return foregroundProof(mergeForegroundWatches(episode.foregroundWatchSamples || [], before.pid), before.pid);
+}
 const cases = [
   "mixed-sequence",
   "stop-on-failure",
@@ -88,6 +98,11 @@ const report = {
   repetitions,
   cases,
   episodes,
+  foregroundPolicy: {
+    version: 2,
+    acceptance: "known foreground samples, fixture counter and required independent activation monitor",
+    endpointEquality: "diagnostic; unrelated app switches are allowed",
+  },
   model: { runs: false, tokens: null, costUsd: null },
   notes: [
     "Scripted native conformance, not autonomous task reliability.",
@@ -105,9 +120,10 @@ try {
 }
 for (let repeat = 0; repeat < repetitions; repeat++)
   for (const caseId of cases) {
-    const episode = { caseId, repeat, outcome: "setup_blocked" };
+    const episode = { caseId, repeat, outcome: "setup_blocked", foregroundWatchSamples: [] };
     episodes.push(episode);
     let fixture,
+      monitor,
       blocker,
       blockerExit,
       measuring = false,
@@ -197,6 +213,11 @@ for (let repeat = 0; repeat < repetitions; repeat++)
         });
       const before = state;
       episode.oracle = { before };
+      monitor = new ForegroundMonitor(monitorBinary);
+      episode.foregroundWatch = await monitor.begin(state.pid);
+      episode.foregroundWatchSamples.push(episode.foregroundWatch);
+      assert.equal(episode.foregroundWatch.available, true);
+      assert.notEqual(episode.foregroundWatch.startedForegroundPID, state.pid);
       start = performance.now();
       measuring = true;
       const observationResponse = await call(session, "observe", {
@@ -547,9 +568,12 @@ for (let repeat = 0; repeat < repetitions; repeat++)
         assert.equal(field(after, "second").attached, false);
       if (caseId === "enabled-privacy-feedback")
         assert.equal(field(after, "second").enabled, false);
-      assert.equal(after.foregroundPID, before.foregroundPID);
+      episode.foregroundPreserved = after.foregroundPID === before.foregroundPID;
+      episode.foregroundWatch = await monitor.snapshot();
+      episode.foregroundWatchSamples.push(episode.foregroundWatch);
+      episode.targetActivationPreserved = targetActivationProof(episode);
       assert.equal(after.activationCount, before.activationCount);
-      episode.foregroundPreserved = true;
+      assert.equal(episode.targetActivationPreserved, true);
       episode.outcome = "passed";
     } catch (error) {
       episode.outcome = measuring ? "failed" : "setup_blocked";
@@ -560,6 +584,12 @@ for (let repeat = 0; repeat < repetitions; repeat++)
         } catch {}
       }
     } finally {
+      if (episode.oracle?.before && episode.oracle?.after) {
+        const { before, after } = episode.oracle;
+        episode.foregroundPreserved = before.foregroundPID != null && after.foregroundPID != null
+          ? before.foregroundPID === after.foregroundPID : null;
+        episode.targetActivationPreserved = targetActivationProof(episode);
+      }
       if (start !== undefined) episode.elapsedMs = performance.now() - start;
       if (blocker) {
         try {
@@ -588,6 +618,24 @@ for (let repeat = 0; repeat < repetitions; repeat++)
           episode.cleanupError = e.message;
         }
       }
+      if (monitor) {
+        try {
+          episode.foregroundWatchFinal = await monitor.close();
+          episode.foregroundWatchSamples.push(episode.foregroundWatchFinal);
+          episode.targetActivationPreserved = targetActivationProof(episode);
+          if (episode.targetActivationPreserved !== true) {
+            if (episode.outcome === "passed") {
+              episode.outcome = "failed";
+              episode.error = "Final activation evidence is unavailable or observes controlled-target activation";
+            }
+          }
+        } catch (error) {
+          episode.cleanupError = error.message;
+          episode.foregroundWatchSamples.push(null);
+          episode.targetActivationPreserved = targetActivationProof(episode);
+          if (episode.outcome === "passed") episode.outcome = "failed";
+        }
+      }
       console.log(
         JSON.stringify({
           caseId,
@@ -605,6 +653,8 @@ report.summary = {
   failed: episodes.filter((e) => e.outcome === "failed").length,
   setupBlocked: episodes.filter((e) => e.outcome === "setup_blocked").length,
   cleanupErrors: episodes.filter((e) => e.cleanupError).length,
+  unrelatedForegroundChanges: episodes.filter((e) => e.foregroundPreserved === false && e.targetActivationPreserved === true).length,
+  targetActivationFailures: episodes.filter((e) => e.targetActivationPreserved === false).length,
   latencyMs: distribution(episodes.map((e) => e.elapsedMs)),
 };
 await fs.writeFile(

@@ -4,6 +4,10 @@ The [16 November results](evaluation-results-2026-11-16.md) record the completed
 repeated campaigns and matched Claude comparison, including failures, cost and
 the remaining acceptance gaps.
 
+New reports use schema version 2 and explicit evaluation policy version 2. Historical
+reports retain their original controller behavior and foreground criteria; these
+changes do not regrade or pool those campaigns.
+
 `test/evaluation/run.mjs` compares the actual legacy MCP server, the rebuilt server
 restricted to one action per request, and the rebuilt composed-action API. It uses
 the same nine fixture cases, values, common instructions, permissions and controller
@@ -75,8 +79,8 @@ The child sets `MAX_STRUCTURED_OUTPUT_RETRIES=1`: this CLI setting counts total
 structured-output attempts, including the initial attempt. Zero can reject a
 decision before generation; one permits the initial attempt without a repair retry.
 The attempt bound is recorded per invocation and is identical across all lanes.
-The controller reserves 13 seconds for the bounded eight-second MCP call plus
-five-second oracle read, clips model time to the remaining budget less that reserve,
+The controller reserves 16 seconds for the bounded eight-second MCP call,
+five-second oracle read and three-second foreground sample, clips model time to the remaining budget less that reserve,
 and checks admission again before dispatching a tool.
 The runner stops further model calls if reported cost is missing or exhausted.
 Claude's own USD guard may only stop after a provider request; a reported overshoot
@@ -88,21 +92,48 @@ cap or exact billed cost from these client-side checks.
 Claude returns one structured JSON proposal at a time. Builtin tools, skills,
 browser integration, hooks/customizations and connected MCP servers are disabled.
 The controller, not Claude Code, invokes the selected lane's MCP tools. Each call
-passes its actual public schema/result to the model. Common task instructions are
-identical; API schemas, observations and their token overhead intentionally differ.
+passes its advertised lane schema and actual result to the model. The lane schema
+requires explicit rebuilt `budgetMs` in `1..3000`; legacy appearance waits require
+`timeoutMs` in `100..3000`. The original native schemas are retained separately.
+An AJV 2020-12 validator checks that exact lane schema before MCP handoff; the
+controller then applies fixture and original-reference restrictions.
+Action IDs must also be nonblank, unique within a request and at most 128 UTF-8
+bytes; wait steps cannot carry external precondition/expect guards. These native
+semantic constraints are checked before handoff so a rejected proposal can be corrected.
+Optional feedback is limited to 256 unique issued references. Text setters and exact
+value conditions use a common 65,536-byte UTF-8 ceiling, matching public readback
+capacity; this is a controller workload bound, not a claim that the private wire
+rejects every larger string. Enabled conditions require booleans.
+Common task instructions are identical; API schemas, observations and their token
+overhead intentionally differ.
 Each turn starts a fresh nonpersistent CLI process with the explicit history so
 session memory, compaction and hidden tool execution do not differ across lanes.
 
 The fixture allowlist requires exact IDs from the disposable fixture; it rejects
 other windows, app-name routing, screenshots, keys, global input and unrelated
-tools. The same controller policy permits one mutation attempt per requested
-control and stops automatic replay proposals. This is a harness constraint,
+tools. A validated pre-dispatch argument rejection returns structured feedback to
+the model. The model can correct its proposal within the default eight-decision,
+120-second episode and common cost limits. Rejections do not consume a control's
+mutation ownership or count as native tool calls. Successful pinned CLI generation
+with invalid command JSON is distinguished from a provider/model failure; provider
+failures still stop paid continuation.
+
+Mutation ownership is tracked per original control. Dispatched or unknown delivery,
+including dispatched-but-unverified effects, blocks mutation replay for that control.
+A correlated `not_dispatched` receipt or `remainingSteps` suffix can leave a control
+eligible for a corrected proposal using its original observation and reference.
+Missing or uncorrelated dispatch proof seals submitted controls as unknown.
+Readback does not rewrite that history; replay proposals receive model-visible
+rejection while observation/wait remains available. A bad proposal alone does not
+turn a previous known effect into an unknown result. This is a harness constraint,
 not evidence that the legacy runtime itself enforces retained identity or replay
 safety. The legacy lane uses its actual selectors and native inspection/set tools.
-Rebuilt mutations must use the first successful case observation ID and references;
+Rebuilt mutations must use the first successful case observation ID, exact target and references;
 new observations/waits may reconcile state but cannot authorize a replacement target.
 This explicit controller policy is not a new native identity guarantee. Legacy
-selectors retain their actual re-resolution semantics.
+selectors retain their actual re-resolution semantics. A legacy mutation error is
+not proof of no dispatch. An unresolved legacy selector conservatively blocks later
+mutations because distinct control ownership cannot be established.
 Its `wait_for_accessibility` waits for appearance; it is never re-labelled as an
 exact-value wait. Legacy has no native whole-request deadline: a transport timeout
 does not prove its OS work stopped. The rebuilt single lane advertises and enforces
@@ -122,7 +153,11 @@ foreground endpoints/activation counts. Setup and measured case activity are
 separate in the trace. Fixture oracle state is never supplied to the model.
 
 The fixture's model and native control values establish completion independently
-of AX readback. Every non-goal control and sibling-window press counter is checked.
+of AX readback. Original control identity, protected enabled/attached state, every
+non-goal control's values/selection/write counters, control/window membership and
+sibling-window press counters are checked. The independent `completionGate` is
+recorded separately from raw model finish claims; private oracle state is not fed
+back to repair a model's completion claim.
 Writing to a replacement generation is wrong-target dispatch even if its identifier
 matches. Infrastructure/API errors are not correct stale/ambiguous refusals.
 Expected refusal conformance is separate from strict mutation completion; already
@@ -137,6 +172,22 @@ instead of being relabelled false; stable/final-goal witnesses retain exact grad
 Satisfied standalone waits are also checked against the independent oracle.
 Native state-confirmation truth uses each read reference's observed generation;
 task completion/wrong-target grading separately uses the original selected generation.
+
+Policy version 2 requires an independent NSWorkspace activation monitor for every
+actual trial. It must remain available and untruncated, match the controlled PID,
+have known foreground endpoints, and report no new controlled-target activation.
+The monitor is compiled once outside graded timing, begins after readiness and
+before measurement, is sampled before grading, and stops after MCP/fixture cleanup.
+The final stop state is reconciled with earlier samples: a late observed activation
+can downgrade a pass; missing evidence cannot erase an earlier known activation.
+Unknown observer evidence cannot pass. Switching between unrelated apps is allowed.
+Fixture activation callbacks can be delayed while its main thread is blocked, so
+its counter and the earlier `foregroundPreserved`/`foregroundChanges` endpoint
+metrics cannot prove absence of transient activation. A known counter increase or
+sampled transition from another app to the controlled target still vetoes a pass,
+even if the independent monitor reports zero events. Observer
+samples are not supplied to the model. Activation evidence does not identify who
+caused an activation.
 
 Usage sums input/output tokens and cache-read/cache-creation counters from every
 `modelUsage` entry, including auxiliary models and failed/rejected calls. Top-level
