@@ -74,19 +74,21 @@ dropping a sibling. An absent exact CG pair is `targetNotFound`; an existing pai
 with unavailable process metadata is a native metadata failure. These per-call
 inputs and the later AX reads still do not form an atomic cross-API snapshot.
 
-Each issued reference retains the actual AX control, its observed role, and its raw
-AX identifier. Before a read or action, the runtime rechecks the exact CG target
+Each issued reference retains the actual AX control, its observed role/subrole,
+and its raw AX identifier. Before a read or action, the runtime rechecks the exact CG target
 and metadata, the retained window's `CFEqual` membership in current AX windows,
 the control's PID and owning-window link or parent chain, bounded live-tree
-membership, and its role/identifier. Recreated objects, changed identifiers/roles,
+membership, and its role/subrole/identifier. Recreated objects, changed identity metadata,
 wrong-window refs, and stale session refs are refused. A genuine in-place reorder
 may move a control without invalidating it; mutable labels, values, and control
 bounds are not treated as identity. Same-role reuse with no changed identifier is
 not an observable native generation guarantee.
 
 Collection is bounded to 1,024 tree nodes and depth 32, with at most 256 returned
-elements. Unreadable nodes, omitted unknown enabled states, traversal limits, and
-export limits produce partial coverage. Exported labels and identifiers are capped
+elements. Unreadable metadata, unknown enabled states, traversal limits, and
+export limits produce partial coverage. Enabled state is a required nullable field:
+`null` means unavailable, rather than observed disabled. Optional `subrole` identifies
+controls such as an unlabelled `AXCloseButton`. Exported labels, identifiers and subroles are capped
 at 1 KiB each and values at 64 KiB; oversized strings are omitted rather than
 fabricated or truncated into exact values. Encoded elements are bounded to 2 MiB.
 An absent value remains distinct from an actual empty string. With
@@ -106,7 +108,11 @@ it does not rewrite the whole value, change selection, post keys, or activate th
 app. Expected text edits use the current UTF-16 selection and are rechecked before
 dispatch. `press` requires the control to advertise `AXPress`. Each native call
 installs a timeout on the exact AX object using the remaining whole-operation
-budget. Unknown or disabled enabled states are refused.
+budget. Explicitly disabled controls are refused. A text setter may use a confirmed
+settable attribute when `AXEnabled` is specifically unsupported; this proves a
+programmatic capability, not enabled state or successful effect. Other unknown
+enabled reads remain unsupported, and `press` requires positive enabled state.
+An `enabled` predicate stays unknown when the attribute is unsupported.
 
 Action guards and explicit expectations support the same typed conditions as
 waits. Every `setValue` also requires an intrinsic exact readback of its
@@ -161,9 +167,14 @@ cancellation has already sealed its receipt. Closing/crashing the owner releases
 the lock; the lockfile is not unlinked. This does not exclude the human user,
 legacy helpers, or unrelated automation. No lock spans a model call.
 
-The runtime samples foreground PID before, around, and after background work and
-fails on observed change. These samples do not prove the absence of transient or
-external foreground changes. An absent foreground baseline is refused.
+The runtime samples foreground PID before, around, and after background work.
+When the controlled app begins in the background, observed activation of that app
+stops the sequence. Switching between unrelated apps is allowed and does not
+invalidate targeted AX effects. An already foreground target carries no promise
+to preserve focus. Unknown foreground samples are refused; samples alone cannot
+exclude transient activation or identify the actor. Benchmarks separately record
+activation counters or workspace activation events. Cleanup does not overwrite a
+known deadline or cancellation with a secondary foreground failure.
 
 ## Requested compact feedback
 

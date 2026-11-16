@@ -102,6 +102,7 @@ extension ObservationFeedback {
                 try identifier(element.role)
                 try validRect(element.bounds)
                 try require((element.label?.utf8.count ?? 0) <= 1024 && (element.identifier?.utf8.count ?? 0) <= 1024
+                            && (element.subrole?.utf8.count ?? 0) <= 1024
                             && (element.value?.utf8.count ?? 0) <= 65_536, "feedback projection exceeds string limit")
             }
         }
@@ -180,6 +181,7 @@ extension Observation {
         for element in elements {
             try identifier(element.role)
             try validRect(element.bounds)
+            try require((element.subrole?.utf8.count ?? 0) <= 1024, "element subrole exceeds string limit")
         }
         try screenshot?.validate()
         if let screenshot { try channelInterval(screenshot.collected, within: collected) }

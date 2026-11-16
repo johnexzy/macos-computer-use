@@ -9,6 +9,7 @@ private final class SemanticNode: AXObject, @unchecked Sendable {
     var role: String
     var title: String?
     var identifier: String?
+    var subrole: String?
     var bounds: Rect
     var children: [SemanticNode] = []
     weak var parent: SemanticNode?
@@ -59,7 +60,8 @@ private final class SemanticBackend: AXReading, @unchecked Sendable {
         return AXNodeSnapshot(role: node.role, title: node.title, label: node.title, identifier: node.identifier,
             bounds: node.bounds, enabled: node.enabled, enabledKnown: node.enabledKnown,
             value: includeValue ? node.value : nil, valueSettable: node.valueSettable,
-            selectedTextSettable: node.selectedTextSettable, actions: node.actions, complete: node.complete)
+            selectedTextSettable: node.selectedTextSettable, actions: node.actions, complete: node.complete,
+            subrole: node.subrole)
     }
     func same(_ lhs: any AXObject, _ rhs: any AXObject) -> Bool {
         (lhs as! SemanticNode).identity == (rhs as! SemanticNode).identity
@@ -157,6 +159,21 @@ final class SemanticObservationTests: XCTestCase {
         }
         fixture.first.identifier = "first"; fixture.first.role = "AXButton"
         XCTAssertThrowsError(try handle.resolve(reference, includeValue: true, context: OperationContext(budgetMs: 5000))) {
+            XCTAssertEqual(($0 as? NativeFailure)?.code, .staleElement)
+        }
+        XCTAssertTrue(fixture.backend.valueReads.isEmpty)
+    }
+    func testUnlabelledCloseButtonSubroleIsExportedAndCannotBeReusedAsMinimize() throws {
+        let fixture = SemanticFixture()
+        fixture.first.role = "AXButton"; fixture.first.title = nil; fixture.first.identifier = nil
+        fixture.first.subrole = "AXCloseButton"
+        let result = try fixture.observe()
+        let element = result.observation.elements[0]
+        XCTAssertNil(element.label)
+        XCTAssertEqual(element.subrole, "AXCloseButton")
+        fixture.first.subrole = "AXMinimizeButton"
+        let handle = result.handle as! SemanticObservationHandle
+        XCTAssertThrowsError(try handle.resolve(element.reference, includeValue: true, context: OperationContext(budgetMs: 100))) {
             XCTAssertEqual(($0 as? NativeFailure)?.code, .staleElement)
         }
         XCTAssertTrue(fixture.backend.valueReads.isEmpty)
@@ -275,7 +292,10 @@ final class SemanticObservationTests: XCTestCase {
         fixture.second.readable = true; fixture.second.enabledKnown = false
         let unknown = try fixture.observe()
         XCTAssertEqual(unknown.observation.accessibility, .partial)
-        XCTAssertEqual(unknown.observation.elements.count, 1)
+        XCTAssertEqual(unknown.observation.elements.count, 2)
+        XCTAssertNil(unknown.observation.elements[1].enabled)
+        let encoded = try JSONEncoder().encode(unknown.observation.elements[1])
+        XCTAssertTrue(String(decoding: encoded, as: UTF8.self).contains("\"enabled\":null"))
     }
     func testCancellationAndUnsupportedScreenshotsDoNotStartAXCollection() throws {
         let fixture = SemanticFixture()
@@ -292,11 +312,13 @@ final class SemanticObservationTests: XCTestCase {
         fixture.first.value = String(repeating: "a", count: 65_537)
         fixture.first.title = String(repeating: "l", count: 1025)
         fixture.first.identifier = String(repeating: "i", count: 1025)
+        fixture.first.subrole = String(repeating: "s", count: 1025)
         let result = try fixture.observe(values: true)
         XCTAssertEqual(result.observation.accessibility, .partial)
         XCTAssertNil(result.observation.elements[0].value)
         XCTAssertNil(result.observation.elements[0].label)
         XCTAssertNil(result.observation.elements[0].identifier)
+        XCTAssertNil(result.observation.elements[0].subrole)
     }
     func testAggregateEncodedPayloadIsBoundedEvenWithEscapedControlCharacters() throws {
         let fixture = SemanticFixture()
@@ -377,6 +399,19 @@ final class PredicateAndFeedbackTests: XCTestCase {
         XCTAssertEqual(disclosed.controls[0].element?.value, "new private value")
         XCTAssertEqual(disclosed.baseObservationId, native.observation.observationId)
         XCTAssertFalse(disclosed.invalidated)
+    }
+    func testFeedbackPreservesUnknownEnabledAndSubroleProjection() throws {
+        let fixture = SemanticFixture()
+        fixture.first.enabledKnown = false; fixture.first.subrole = "AXSearchTextField"
+        let native = try fixture.observe()
+        let reference = native.observation.elements[0].reference
+        let unchanged = FeedbackCollector().collect(FeedbackRequest(elementRefs: [reference], includeValues: false), entry: retained(native), context: context())
+        XCTAssertEqual(unchanged.controls[0].state, .unchanged)
+        XCTAssertTrue(unchanged.truncated)
+        let disclosed = FeedbackCollector().collect(FeedbackRequest(elementRefs: [reference], includeValues: true), entry: retained(native), context: context())
+        XCTAssertEqual(disclosed.controls[0].state, .changed)
+        XCTAssertNil(disclosed.controls[0].element?.enabled)
+        XCTAssertEqual(disclosed.controls[0].element?.subrole, "AXSearchTextField")
     }
     func testExplicitValueDisclosureChangesProjectionEvenWithoutAMutation() throws {
         let fixture = SemanticFixture()

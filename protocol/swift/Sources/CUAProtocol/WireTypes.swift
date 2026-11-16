@@ -549,10 +549,11 @@ public struct Element: Codable, Equatable, Sendable {
     public let label: String?
     public let value: String?
     public let bounds: Rect
-    public let enabled: Bool
+    public let enabled: Bool?
     public let actions: [ElementAction]
     public let identifier: String?
-    public init(reference: String, role: String, label: String?, value: String?, bounds: Rect, enabled: Bool, actions: [ElementAction], identifier: String? = nil) {
+    public let subrole: String?
+    public init(reference: String, role: String, label: String?, value: String?, bounds: Rect, enabled: Bool?, actions: [ElementAction], identifier: String? = nil, subrole: String? = nil) {
         self.reference = reference
         self.role = role
         self.label = label
@@ -561,9 +562,10 @@ public struct Element: Codable, Equatable, Sendable {
         self.enabled = enabled
         self.actions = actions
         self.identifier = identifier
+        self.subrole = subrole
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case reference, role, label, value, bounds, enabled, actions, identifier
+        case reference, role, label, value, bounds, enabled, actions, identifier, subrole
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -572,9 +574,10 @@ public struct Element: Codable, Equatable, Sendable {
         label = try c.decodeIfPresent(String.self, forKey: .label)
         value = try c.decodeIfPresent(String.self, forKey: .value)
         bounds = try c.decode(Rect.self, forKey: .bounds)
-        enabled = try c.decode(Bool.self, forKey: .enabled)
+        enabled = try c.decode(Bool?.self, forKey: .enabled)
         actions = try c.decode([ElementAction].self, forKey: .actions)
         identifier = try c.decodeIfPresent(String.self, forKey: .identifier)
+        subrole = try c.decodeIfPresent(String.self, forKey: .subrole)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -586,6 +589,7 @@ public struct Element: Codable, Equatable, Sendable {
         try c.encode(enabled, forKey: .enabled)
         try c.encode(actions, forKey: .actions)
         try c.encode(identifier, forKey: .identifier)
+        try c.encode(subrole, forKey: .subrole)
     }
 }
 

@@ -24,7 +24,7 @@ fn shared_valid_fixtures_decode_and_round_trip() {
     let paths = fixtures("valid");
     assert_eq!(
         paths.len(),
-        43,
+        44,
         "keep the shared fixture inventory deliberate"
     );
     for path in paths {
@@ -39,7 +39,7 @@ fn shared_valid_fixtures_decode_and_round_trip() {
 #[test]
 fn shared_invalid_fixtures_are_rejected() {
     let paths = fixtures("invalid");
-    assert_eq!(paths.len(), 57);
+    assert_eq!(paths.len(), 59);
     for path in paths {
         assert!(
             decode_line(&fs::read(&path).unwrap()).is_err(),
@@ -312,4 +312,19 @@ fn observations_expose_independent_channel_times_and_capabilities_include_click(
     };
     assert!(capabilities.actions.contains(&ActionKind::Click));
     assert!(serde_json::from_str::<ElementAction>("\"click\"").is_err());
+}
+
+#[cfg(feature = "schema")]
+#[test]
+fn enabled_schema_requires_the_field_and_preserves_unknown_null() {
+    let schema = serde_json::to_value(schemars::schema_for!(cua_protocol::Element)).unwrap();
+    assert!(
+        schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("enabled"))
+    );
+    let types = schema["properties"]["enabled"]["type"].as_array().unwrap();
+    assert!(types.contains(&serde_json::json!("boolean")));
+    assert!(types.contains(&serde_json::json!("null")));
 }

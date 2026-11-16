@@ -48,7 +48,15 @@ public struct BackgroundActions: Sendable {
             let before = hasMutation ? foreground() : nil
             if hasMutation && before == nil { throw NativeFailure(.unsupported, "foreground baseline is unavailable") }
             defer {
-                if !state.isSealed && before != nil && foreground() != before { state.finish(reason: .nativeFailed, stop: .failed) }
+                if !state.isSealed && before != nil {
+                    // Cleanup must not seal a secondary foreground error ahead of a known interruption.
+                    if let interruption = context.interruption { _ = state.interrupt(interruption) }
+                    else {
+                        do { try checkForeground(before, targetPID: request.target.pid) }
+                        catch let failure as NativeFailure { finish(state, failure: failure) }
+                        catch { state.finish(reason: .nativeFailed, stop: .failed) }
+                    }
+                }
             }
             let handle = try semanticHandle(entry, observationId: request.observationId, target: request.target)
             for step in request.steps {
@@ -61,12 +69,12 @@ public struct BackgroundActions: Sendable {
                     let already = try execute(step, entry: entry, handle: handle, context: context, state: state, before: before)
                     reason = already ? .alreadySatisfied : nil
                 }
-                if before != nil { try checkForeground(before) }
+                if before != nil { try checkForeground(before, targetPID: request.target.pid) }
                 if let prefix = try state.settle(context: context, reason: reason), let progress {
                     try progress(prefix, context)
                 }
             }
-            if before != nil { try checkForeground(before) }
+            if before != nil { try checkForeground(before, targetPID: request.target.pid) }
             try state.finalize(context: context)
         }
         do {
@@ -123,8 +131,7 @@ public struct BackgroundActions: Sendable {
         default: throw NativeFailure(.unsupported, "background operation is not implemented")
         }
         let resolved = try handle.resolve(reference, includeValue: true, context: context)
-        guard resolved.snapshot.enabledKnown else { throw NativeFailure(.unsupported, "target enabled state is unavailable") }
-        guard resolved.snapshot.enabled else { throw NativeFailure(.unsupported, "target is disabled") }
+        try requireEnabledSnapshot(resolved.snapshot, allowUnsupported: route != .axPress)
         switch step.operation {
         case .setValue: guard resolved.snapshot.valueSettable else { throw NativeFailure(.unsupported, "AXValue is not settable") }
         case .press: guard resolved.snapshot.actions.contains("AXPress") else { throw NativeFailure(.unsupported, "AXPress is not advertised") }
@@ -167,15 +174,16 @@ public struct BackgroundActions: Sendable {
                 return true
             }
         }
-        try checkForeground(before)
+        try checkForeground(before, targetPID: handle.target.key.pid)
         try context.check()
         // Resolve again inside the shared mutation boundary; never reselect by a label.
         let typing: Bool
         if case .typeText = step.operation { typing = true } else { typing = false }
         let live = try handle.resolve(reference, includeValue: typing, context: context)
-        guard handle.backend.same(live.object, resolved.object), live.snapshot.enabledKnown, live.snapshot.enabled else {
+        guard handle.backend.same(live.object, resolved.object) else {
             throw NativeFailure(.staleElement, "target changed before dispatch")
         }
+        try requireEnabledSnapshot(live.snapshot, allowUnsupported: route != .axPress)
         if typing && (live.snapshot.value != resolved.snapshot.value || live.snapshot.selectedRange != resolved.snapshot.selectedRange) {
             throw NativeFailure(.staleElement, "text value or selection changed before dispatch")
         }
@@ -191,7 +199,7 @@ public struct BackgroundActions: Sendable {
                     throw NativeFailure(.nativeFailed, "precondition changed before dispatch")
                 }
             }
-            try checkForeground(before)
+            try checkForeground(before, targetPID: handle.target.key.pid)
             try checkLifetime(entry)
             try state.beginDispatch(context: context, route: route)
         }
@@ -211,7 +219,7 @@ public struct BackgroundActions: Sendable {
         catch { mutationFailure = NativeFailure(.nativeFailed, "native action returned an error") }
         if !state.hasEnteredDispatch, let mutationFailure { throw mutationFailure }
         if required.isEmpty && privateTextExpectation == nil {
-            try checkForeground(before)
+            try checkForeground(before, targetPID: handle.target.key.pid)
             if let mutationFailure { throw mutationFailure }
             return false
         }
@@ -225,7 +233,7 @@ public struct BackgroundActions: Sendable {
                 guard handle.backend.same(current.object, resolved.object) else { throw NativeFailure(.staleElement, "readback target changed") }
                 privateMatched = current.snapshot.value == expected
             } else { privateMatched = true }
-            try checkForeground(before)
+            try checkForeground(before, targetPID: handle.target.key.pid)
             if let mutationFailure { throw mutationFailure }
             if checks.count == required.count && checks.allSatisfy(\.matched) && privateMatched { return false }
             try pause(context)
@@ -276,8 +284,12 @@ public struct BackgroundActions: Sendable {
     private func pause(_ context: OperationContext) throws {
         Thread.sleep(forTimeInterval: Double(try context.nativeTimeoutSeconds(maximum: 0.005)))
     }
-    private func checkForeground(_ before: UInt32?) throws {
-        if foreground() != before { throw NativeFailure(.nativeFailed, "foreground changed during background operation") }
+    private func checkForeground(_ before: UInt32?, targetPID: UInt32) throws {
+        guard let current = foreground() else { throw NativeFailure(.unsupported, "foreground state is unavailable") }
+        // Exact AX input does not depend on which unrelated app the person is using.
+        if before != targetPID && current == targetPID {
+            throw NativeFailure(.nativeFailed, "controlled target became foreground during background operation")
+        }
     }
     private func finish(_ state: ActionExecutionState, failure: NativeFailure) {
         switch failure.code {
@@ -297,7 +309,7 @@ extension MacOSAXBackend: AXMutating {
     public func setValue(_ value: String, on object: any AXObject, context: OperationContext,
                          willDispatch: @Sendable () throws -> Void) throws {
         let element = try nativeElement(object, context: context)
-        try requireEnabled(element, context: context)
+        try requireEnabled(element, allowUnsupported: true, context: context)
         try requireSettable(kAXValueAttribute as CFString, element: element, context: context)
         try installTimeout(element, context: context)
         try willDispatch()
@@ -308,7 +320,7 @@ extension MacOSAXBackend: AXMutating {
     public func press(_ object: any AXObject, context: OperationContext,
                       willDispatch: @Sendable () throws -> Void) throws {
         let element = try nativeElement(object, context: context)
-        try requireEnabled(element, context: context)
+        try requireEnabled(element, allowUnsupported: false, context: context)
         try installTimeout(element, context: context)
         var names: CFArray?
         guard AXUIElementCopyActionNames(element, &names) == .success,
@@ -324,7 +336,7 @@ extension MacOSAXBackend: AXMutating {
     public func replaceSelectedText(_ text: String, on object: any AXObject, context: OperationContext,
                                     willDispatch: @Sendable () throws -> Void) throws {
         let element = try nativeElement(object, context: context)
-        try requireEnabled(element, context: context)
+        try requireEnabled(element, allowUnsupported: true, context: context)
         try requireSettable(kAXSelectedTextAttribute as CFString, element: element, context: context)
         try installTimeout(element, context: context)
         try willDispatch()
@@ -352,9 +364,27 @@ private func requireSettable(_ attribute: CFString, element: AXUIElement, contex
         throw NativeFailure(.unsupported, "AX attribute is not currently settable")
     }
 }
-private func requireEnabled(_ element: AXUIElement, context: OperationContext) throws {
+private func requireEnabledSnapshot(_ snapshot: AXNodeSnapshot, allowUnsupported: Bool) throws {
+    if snapshot.enabledKnown {
+        guard snapshot.enabled else { throw NativeFailure(.unsupported, "target is disabled") }
+    } else {
+        guard allowUnsupported && snapshot.enabledUnsupported && isWritableAXTextRole(snapshot.role) else {
+            throw NativeFailure(.unsupported, "target enabled state is unavailable")
+        }
+    }
+}
+private func requireEnabled(_ element: AXUIElement, allowUnsupported: Bool, context: OperationContext) throws {
     try installTimeout(element, context: context)
     var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(element, kAXEnabledAttribute as CFString, &value) == .success,
-          let enabled = value as? Bool, enabled else { throw NativeFailure(.unsupported, "AX target is not confirmed enabled") }
+    let result = AXUIElementCopyAttributeValue(element, kAXEnabledAttribute as CFString, &value)
+    let enabled = try decodeAXEnabled(result, value: value, context: context)
+    if enabled.value == true { return }
+    if allowUnsupported && enabled.unsupported {
+        try installTimeout(element, context: context)
+        var role: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+        try checkAXRead(result, context: context, allowMissing: true)
+        if let role = role as? String, isWritableAXTextRole(role) { return }
+    }
+    throw NativeFailure(.unsupported, "AX target is disabled or its enabled state is unavailable")
 }

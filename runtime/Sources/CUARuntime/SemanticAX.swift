@@ -18,7 +18,10 @@ public struct AXChildren: Sendable {
 public struct AXElementIdentity: Equatable, Sendable {
     public let role: String
     public let identifier: String?
-    public init(role: String, identifier: String?) { self.role = role; self.identifier = identifier }
+    public let subrole: String?
+    public init(role: String, identifier: String?, subrole: String? = nil) {
+        self.role = role; self.identifier = identifier; self.subrole = subrole
+    }
 }
 
 public struct AXNodeSnapshot: Sendable {
@@ -26,22 +29,26 @@ public struct AXNodeSnapshot: Sendable {
     public let title: String?
     public let label: String?
     public let identifier: String?
+    public let subrole: String?
     public let bounds: Rect
     public let enabled: Bool
     public let enabledKnown: Bool
+    public let enabledUnsupported: Bool
     public let value: String?
     public let valueSettable: Bool
     public let selectedTextSettable: Bool
     public let selectedRange: AXTextRange?
     public let actions: [String]
     public let complete: Bool
-    public var identity: AXElementIdentity { AXElementIdentity(role: role, identifier: identifier) }
+    public var identity: AXElementIdentity { AXElementIdentity(role: role, identifier: identifier, subrole: subrole) }
     public init(role: String, title: String? = nil, label: String? = nil, identifier: String? = nil,
                 bounds: Rect, enabled: Bool = true, enabledKnown: Bool = true, value: String? = nil,
                 valueSettable: Bool = false, selectedTextSettable: Bool = false, selectedRange: AXTextRange? = nil,
-                actions: [String] = [], complete: Bool = true) {
+                actions: [String] = [], complete: Bool = true, subrole: String? = nil, enabledUnsupported: Bool = false) {
         self.role = role; self.title = title; self.label = label; self.identifier = identifier
+        self.subrole = subrole
         self.bounds = bounds; self.enabled = enabled; self.enabledKnown = enabledKnown; self.value = value
+        self.enabledUnsupported = enabledUnsupported
         self.valueSettable = valueSettable; self.selectedTextSettable = selectedTextSettable
         self.selectedRange = selectedRange; self.actions = actions; self.complete = complete
     }
@@ -142,13 +149,13 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
             throw NativeFailure(.staleElement, "retained control is not in the current bounded window tree")
         }
         guard try backend.identity(of: object, context: context) == retained.identity else {
-            throw NativeFailure(.staleElement, "retained control role or identifier changed")
+            throw NativeFailure(.staleElement, "retained control role, subrole or identifier changed")
         }
         guard let snapshot = try backend.snapshot(of: object, includeValue: includeValue, context: context) else {
             throw NativeFailure(.staleElement, "retained control cannot be read")
         }
         guard snapshot.identity == retained.identity else {
-            throw NativeFailure(.staleElement, "retained control role or identifier changed")
+            throw NativeFailure(.staleElement, "retained control role, subrole or identifier changed")
         }
         try requireOwningWindow(object, window: retainedWindow, pid: target.key.pid, backend: backend, context: context)
         try validateWindow(context: context)
@@ -187,14 +194,15 @@ public struct SemanticAXObserver: Sendable {
             if elements.count == Limits.maxElements { complete = false; break }
             let reference = "element-\(UUID().uuidString)"
             let s = node.snapshot
-            guard s.enabledKnown else { complete = false; continue }
+            if !s.enabledKnown { complete = false }
             guard !s.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, s.role.utf8.count <= 128 else {
                 complete = false; continue
             }
             let label = bounded(s.label, bytes: 1024)
             let identifier = bounded(s.identifier, bytes: 1024)
+            let subrole = bounded(s.subrole, bytes: 1024)
             let value = params.includeValues ? bounded(s.value, bytes: 65_536) : nil
-            if label != s.label || identifier != s.identifier || (params.includeValues && value != s.value) { complete = false }
+            if label != s.label || identifier != s.identifier || subrole != s.subrole || (params.includeValues && value != s.value) { complete = false }
             var actions: [ElementAction] = []
             if backend is any AXMutating {
                 if s.valueSettable { actions.append(.setValue) }
@@ -202,7 +210,8 @@ public struct SemanticAXObserver: Sendable {
                 if s.selectedTextSettable { actions.append(.typeText) }
             }
             let element = Element(reference: reference, role: s.role, label: label, value: value,
-                                  bounds: s.bounds, enabled: s.enabled, actions: actions, identifier: identifier)
+                                  bounds: s.bounds, enabled: s.enabledKnown ? s.enabled : nil, actions: actions,
+                                  identifier: identifier, subrole: subrole)
             let size = try encoder.encode(element).count
             if encodedBytes + size > 2 * 1024 * 1024 { complete = false; break }
             encodedBytes += size

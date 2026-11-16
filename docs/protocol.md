@@ -63,7 +63,7 @@ limits are **32 retained observations**, **60 seconds maximum retention**, **256
 elements per observation**, and **256 returned targets**, with explicit truncation
 or partial coverage. The constants are shared and the persistent runtime enforces
 retention. Semantic element references are opaque retained AX objects with observed
-role/identifier identity, not indices or selectors for a model to reconstruct.
+role/subrole/identifier identity, not indices or selectors for a model to reconstruct.
 The original 60-second expiry continues during a sequence. Each step/predicate and
 mutation handoff checks it; progress, waits, and feedback do not refresh it.
 
@@ -172,14 +172,16 @@ AX provides no OS-attested `CGWindowID` association or atomic snapshot guarantee
 Catalog calls use one running-application bundle map for every CG row; missing
 metadata cannot silently remove a process sibling during association. Exact CG
 absence is distinguished from unavailable process metadata.
-Each reference retains an actual object plus observed role and raw identifier;
-live `CFEqual` tree/window membership, ownership, role, and identifier are checked
+Each reference retains an actual object plus observed role, subrole and raw identifier;
+live `CFEqual` tree/window membership, ownership and identity metadata are checked
 before use. Changed labels, values, or control positions do not remap the reference.
-An unchanged role/identifier is not a native object-generation guarantee.
+Unchanged identity metadata is not a native object-generation guarantee.
 
 Observation traversal is bounded to 1,024 nodes/depth 32 and 256 returned elements.
 Unreadability, unknown enabled states, traversal bounds, or omitted oversized
-exports produce partial coverage. Labels/identifiers are capped at 1 KiB, values at
+exports produce partial coverage. `Element.enabled` is required and nullable:
+`null` discloses unavailable state, not false. Optional `Element.subrole` carries
+native semantic identity such as `AXCloseButton`. Labels/identifiers/subroles are capped at 1 KiB, values at
 64 KiB, and encoded elements at 2 MiB. Omitted values are not empty strings. Values
 excluded from observation are not requested through `AXValue`; internal action
 proof can read values without adding them to returned observations or diagnostics.
@@ -301,7 +303,7 @@ Top-level `invalidated` means the whole base window/observation binding is inval
 so it cannot carry live feedback. An individual removed/reused control can be
 invalidated while unrelated refs remain live and the summary flag stays false.
 Unknown reads produce unavailable status. The feedback payload is capped at 2 MiB;
-label/identifier/value export limits still apply. Truncation and unavailable or
+label/identifier/subrole/value export limits still apply. Truncation and unavailable or
 invalidated controls are not unchanged controls.
 
 Feedback is best effort and separate from delivery/proof. `feedback: null` is valid

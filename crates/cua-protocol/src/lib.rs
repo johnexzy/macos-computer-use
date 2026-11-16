@@ -200,10 +200,31 @@ record!(Screenshot {
     image_to_screen: ImageTransform,
     collected: CollectionInterval
 });
-record!(Element {
-    reference: String, role: String, label: Option<String>, value: Option<String>,
-    bounds: Rect, enabled: bool, actions: Vec<ElementAction>, identifier: Option<String>
-});
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Element {
+    pub reference: String,
+    pub role: String,
+    pub label: Option<String>,
+    pub value: Option<String>,
+    pub bounds: Rect,
+    // A required nullable field: unavailable enabled state is not observed false.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[cfg_attr(
+        feature = "schema",
+        schemars(required, schema_with = "nullable_enabled_schema")
+    )]
+    pub enabled: Option<bool>,
+    pub actions: Vec<ElementAction>,
+    pub identifier: Option<String>,
+    pub subrole: Option<String>,
+}
+
+#[cfg(feature = "schema")]
+fn nullable_enabled_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    <Option<bool> as schemars::JsonSchema>::json_schema(generator)
+}
 record!(ObserveRequest {
     target: TargetKey,
     include_screenshot: bool,
@@ -599,6 +620,7 @@ impl ObservationFeedback {
                 require(
                     element.label.as_ref().is_none_or(|s| s.len() <= 1024)
                         && element.identifier.as_ref().is_none_or(|s| s.len() <= 1024)
+                        && element.subrole.as_ref().is_none_or(|s| s.len() <= 1024)
                         && element.value.as_ref().is_none_or(|s| s.len() <= 65_536),
                     "feedback projection exceeds string limit",
                 )?;
@@ -769,6 +791,10 @@ impl Observation {
         for element in &self.elements {
             id(&element.role)?;
             rect(&element.bounds)?;
+            require(
+                element.subrole.as_ref().is_none_or(|s| s.len() <= 1024),
+                "element subrole exceeds string limit",
+            )?;
         }
         if let Some(screenshot) = &self.screenshot {
             screenshot.validate()?;

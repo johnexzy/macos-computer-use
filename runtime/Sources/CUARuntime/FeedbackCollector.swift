@@ -40,12 +40,14 @@ public struct FeedbackCollector: Sendable {
             if let original = base[reference] {
                 do {
                     let snapshot = try handle.resolve(reference, includeValue: request.includeValues, context: context).snapshot
-                    guard snapshot.enabledKnown, !snapshot.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    guard !snapshot.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                           snapshot.role.utf8.count <= 128 else { continue }
                     let label = exportString(snapshot.label, limit: 1024)
                     let identifier = exportString(snapshot.identifier, limit: 1024)
+                    let subrole = exportString(snapshot.subrole, limit: 1024)
                     let value = request.includeValues ? exportString(snapshot.value, limit: 65_536) : nil
-                    if !snapshot.complete || label != snapshot.label || identifier != snapshot.identifier
+                    if !snapshot.complete || !snapshot.enabledKnown || label != snapshot.label || identifier != snapshot.identifier
+                        || subrole != snapshot.subrole
                         || (request.includeValues && value != snapshot.value) { truncated = true }
                     var actions: [ElementAction] = []
                     if handle.backend is any AXMutating {
@@ -54,10 +56,11 @@ public struct FeedbackCollector: Sendable {
                         if snapshot.selectedTextSettable { actions.append(.typeText) }
                     }
                     let current = Element(reference: reference, role: snapshot.role, label: label, value: value,
-                        bounds: snapshot.bounds, enabled: snapshot.enabled, actions: actions, identifier: identifier)
+                        bounds: snapshot.bounds, enabled: snapshot.enabledKnown ? snapshot.enabled : nil, actions: actions,
+                        identifier: identifier, subrole: subrole)
                     let previous = Element(reference: original.reference, role: original.role, label: original.label,
                         value: request.includeValues ? original.value : nil, bounds: original.bounds,
-                        enabled: original.enabled, actions: original.actions, identifier: original.identifier)
+                        enabled: original.enabled, actions: original.actions, identifier: original.identifier, subrole: original.subrole)
                     feedback = current == previous
                         ? ControlFeedback(elementRef: reference, state: .unchanged)
                         : ControlFeedback(elementRef: reference, state: .changed, element: current)

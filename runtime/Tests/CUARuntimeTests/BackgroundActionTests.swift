@@ -7,7 +7,7 @@ import XCTest
 private let actionTarget = Target(key: TargetKey(pid: 42, windowId: 7), bundleId: "test.fixture", title: "Fixture",
                                   bounds: Rect(x: 0, y: 0, width: 600, height: 400))
 private final class ActionNode: AXObject, @unchecked Sendable {
-    let role: String
+    var role: String
     init(_ role: String) { self.role = role }
 }
 private final class PrefixLog: @unchecked Sendable {
@@ -37,6 +37,7 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
     var behavior: Behavior = .apply
     var enabled = true
     var enabledKnown = true
+    var enabledUnsupported = false
     var settable = true
     var selectedSettable = true
     var selectedRange: AXTextRange? = AXTextRange(location: 0, length: 0)
@@ -44,6 +45,7 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
     var changePreimage = false
     var flipForegroundAfterFirst = false
     var flipForegroundAtRead: Int?
+    var flippedForegroundPID: UInt32 = 42
     var failButtonReadback = false
     var invalidateGuardBeforeHandoff = false
     var valueAfterReads: Int?
@@ -59,11 +61,12 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
     var value: String { get { lock.lock(); defer { lock.unlock() }; return storedValue }
         set { lock.lock(); storedValue = newValue; lock.unlock() } }
     var calls: Int { lock.lock(); defer { lock.unlock() }; return mutations }
+    func setForeground(_ pid: UInt32?) { lock.lock(); front = pid; lock.unlock() }
     func foreground() -> UInt32? {
         lock.lock(); defer { lock.unlock() }
         foregroundReads += 1
         return (flipForegroundAfterFirst && foregroundReads > 1)
-            || (flipForegroundAtRead.map { foregroundReads >= $0 } ?? false) ? 200 : front
+            || (flipForegroundAtRead.map { foregroundReads >= $0 } ?? false) ? flippedForegroundPID : front
     }
     func application(pid: UInt32, context: OperationContext) throws -> any AXObject { try context.check(); return app }
     func windows(of application: any AXObject, context: OperationContext) throws -> AXChildren { try context.check(); return AXChildren(elements: [windowNode]) }
@@ -91,15 +94,16 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
             if pendingReads == 0 { storedValue = pending; pendingValue = nil }
         }
         let role = (element as! ActionNode).role
+        let isField = same(element, field)
         return AXNodeSnapshot(role: role, title: role == "AXWindow" ? actionTarget.title : nil,
             label: role == "AXTextField" ? "Field" : role == "AXButton" ? "Save" : nil,
             bounds: role == "AXWindow" ? actionTarget.bounds : Rect(x: 10, y: 20, width: 200, height: 30),
             enabled: enabled, enabledKnown: enabledKnown,
-            value: includeValue && role == "AXTextField" ? storedValue : nil,
-            valueSettable: role == "AXTextField" && settable,
-            selectedTextSettable: role == "AXTextField" && selectedSettable,
-            selectedRange: role == "AXTextField" ? selectedRange : nil,
-            actions: role == "AXButton" && pressAdvertised ? ["AXPress"] : [])
+            value: includeValue && isField ? storedValue : nil,
+            valueSettable: isField && settable,
+            selectedTextSettable: isField && selectedSettable,
+            selectedRange: isField ? selectedRange : nil,
+            actions: role == "AXButton" && pressAdvertised ? ["AXPress"] : [], enabledUnsupported: enabledUnsupported)
     }
     func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult { try context.check(); return TargetsResult(targets: [actionTarget], truncated: false) }
     func window(_ key: TargetKey, context: OperationContext) throws -> Target { try context.check(); return actionTarget }
@@ -107,7 +111,7 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
     private func mutate(_ expected: String?, context: OperationContext, willDispatch: @Sendable () throws -> Void) throws {
         try context.check()
         if behavior == .refuse { throw NativeFailure(.unsupported, "setter no longer advertised") }
-        if behavior == .activateBeforeDispatch { lock.lock(); front = 200; lock.unlock() }
+        if behavior == .activateBeforeDispatch { lock.lock(); front = 42; lock.unlock() }
         if invalidateGuardBeforeHandoff { value = "changed" }
         beforeHandoff?()
         try willDispatch()
@@ -119,7 +123,7 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
             if behavior == .delayed { pendingValue = expected; pendingReads = 3 }
             else { storedValue = expected }
         }
-        if behavior == .activate { front = 200 }
+        if behavior == .activate { front = 42 }
         lock.unlock()
         if behavior == .throwAfterWrite { throw NativeFailure(.nativeFailed, "setter returned an error after effect") }
     }
@@ -152,7 +156,7 @@ final class BackgroundActionTests: XCTestCase {
             target: actionTarget, window: backend.windowNode, observationId: "origin", includeValues: includeValues,
             references: [
                 "field": RetainedAXElement(object: backend.field,
-                    snapshot: AXNodeSnapshot(role: "AXTextField", bounds: actionTarget.bounds)),
+                    snapshot: AXNodeSnapshot(role: backend.field.role, bounds: actionTarget.bounds)),
                 "button": RetainedAXElement(object: backend.button,
                     snapshot: AXNodeSnapshot(role: "AXButton", bounds: actionTarget.bounds))
             ])
@@ -320,6 +324,94 @@ final class BackgroundActionTests: XCTestCase {
         XCTAssertEqual(result.remainingSteps, 0)
         XCTAssertEqual(log.prefixes, [[result.steps[0]]])
     }
+    func testUnrelatedForegroundSwitchBeforeHandoffAllowsTargetedAXInput() throws {
+        let backend = ActionBackend()
+        backend.beforeHandoff = { backend.setForeground(200) }
+        let (result, _) = try perform(backend, request())
+        XCTAssertEqual(backend.calls, 1)
+        XCTAssertEqual(result.steps[0].delivery, .dispatched)
+        XCTAssertEqual(result.steps[0].verification, .confirmed)
+        XCTAssertEqual(result.stopReason, .completed)
+    }
+    func testInitiallyForegroundTargetDoesNotRequireExclusiveDesktopUse() throws {
+        let backend = ActionBackend(); backend.setForeground(42)
+        backend.beforeHandoff = { backend.setForeground(200) }
+        let (result, _) = try perform(backend, request())
+        XCTAssertEqual(backend.calls, 1)
+        XCTAssertEqual(result.steps[0].verification, .confirmed)
+        XCTAssertEqual(result.stopReason, .completed)
+    }
+    func testGenuineReadbackFailureRemainsFailedAfterUnrelatedForegroundSwitch() throws {
+        let backend = ActionBackend(); backend.behavior = .readbackFailure
+        backend.beforeHandoff = { backend.setForeground(200) }
+        let (result, _) = try perform(backend, request())
+        XCTAssertEqual(backend.calls, 1)
+        XCTAssertEqual(result.steps[0].delivery, .dispatched)
+        XCTAssertEqual(result.steps[0].verification, .unverified)
+        XCTAssertEqual(result.steps[0].reason, .nativeFailed)
+        XCTAssertEqual(result.stopReason, .failed)
+    }
+    func testUnrelatedFinalForegroundSwitchPreservesCompletedSequenceAndPrefix() throws {
+        let backend = ActionBackend(); let log = PrefixLog()
+        backend.flipForegroundAtRead = 10; backend.flippedForegroundPID = 200
+        let act = sequence([.setValue(SetValueOperation(elementRef: "field", value: "new")),
+                            .setValue(SetValueOperation(elementRef: "field", value: "last"))])
+        let (result, _) = try perform(backend, act, progress: log.append)
+        XCTAssertEqual(backend.calls, 2)
+        XCTAssertEqual(result.stopReason, .completed)
+        XCTAssertEqual(result.steps.map(\.delivery), [.dispatched, .dispatched])
+        XCTAssertEqual(result.steps.map(\.verification), [.confirmed, .confirmed])
+        XCTAssertEqual(log.prefixes, [[result.steps[0]]])
+    }
+    func testUnrelatedForegroundSwitchDoesNotReplaceMixedWaitDeadline() throws {
+        let backend = ActionBackend(); let log = PrefixLog()
+        let act = sequence([.setValue(SetValueOperation(elementRef: "field", value: "new")),
+                            .waitFor(WaitOperation(condition: .valueEquals(ValueCondition(elementRef: "field", value: "never")))),
+                            .press(ElementOperation(elementRef: "button"))])
+        let (result, _) = try perform(backend, act, budget: 40, progress: { prefix, context in
+            try log.append(prefix, context: context); backend.setForeground(200)
+        })
+        XCTAssertEqual(backend.calls, 1)
+        XCTAssertEqual(result.stopReason, .deadlineExceeded)
+        XCTAssertEqual(result.steps[0].verification, .confirmed)
+        XCTAssertEqual(result.steps[1].delivery, .notDispatched)
+        XCTAssertEqual(result.steps[1].verification, .mismatch)
+        XCTAssertEqual(result.remainingSteps, 1)
+        XCTAssertEqual(log.prefixes, [[result.steps[0]]])
+    }
+    func testKnownInterruptionWinsOverCleanupTargetActivationWithoutChangingPrefix() throws {
+        for cancelled in [false, true] {
+            let backend = ActionBackend(); let log = PrefixLog(); let clock = ActionClock(0)
+            let act = sequence([.setValue(SetValueOperation(elementRef: "field", value: "new")),
+                                .waitFor(WaitOperation(condition: .valueEquals(ValueCondition(elementRef: "field", value: "never")))),
+                                .press(ElementOperation(elementRef: "button"))])
+            let state = ActionExecutionState(act: act)
+            let context = OperationContext(receivedAt: 0, budgetMs: 300, now: clock.now)
+            let engine = BackgroundActions(coordinator: MutationCoordinator(directory: try directory()), foreground: backend.foreground)
+            let result = engine.act(act, entry: entry(backend), context: context, state: state,
+                progress: { prefix, context in
+                    try log.append(prefix, context: context)
+                    backend.setForeground(42)
+                    if cancelled { context.cancel() } else { clock.expire() }
+                })
+            XCTAssertEqual(result.stopReason, cancelled ? .cancelled : .deadlineExceeded)
+            XCTAssertEqual(result.steps[0].delivery, .dispatched)
+            XCTAssertEqual(result.steps[0].verification, .confirmed)
+            XCTAssertEqual(result.steps[1].delivery, .notDispatched)
+            XCTAssertEqual(result.steps[1].reason, cancelled ? .cancelled : .deadlineExceeded)
+            XCTAssertEqual(result.remainingSteps, 1)
+            XCTAssertEqual(backend.calls, 1)
+            XCTAssertEqual(log.prefixes, [[result.steps[0]]])
+        }
+    }
+    func testUnknownForegroundDuringHandoffRefusesInput() throws {
+        let backend = ActionBackend()
+        backend.beforeHandoff = { backend.setForeground(nil) }
+        let (result, _) = try perform(backend, request())
+        XCTAssertEqual(backend.calls, 0)
+        XCTAssertEqual(result.steps[0].delivery, .notDispatched)
+        XCTAssertEqual(result.stopReason, .unsupported)
+    }
     func testExistingExactValueIsNotNewDelivery() throws {
         let backend = ActionBackend(); backend.value = "new"
         let (result, _) = try perform(backend, request())
@@ -328,6 +420,51 @@ final class BackgroundActionTests: XCTestCase {
         XCTAssertEqual(result.steps[0].verification, .confirmed)
         XCTAssertEqual(result.steps[0].reason, .alreadySatisfied)
         XCTAssertNil(result.steps[0].route)
+    }
+    func testUnsupportedEnabledTextControlCanUseConfirmedWritableAttributes() throws {
+        for role in ["AXTextField", "AXTextArea"] {
+            for operation in [CUAProtocol.Operation.setValue(SetValueOperation(elementRef: "field", value: "new")),
+                              .typeText(TypeTextOperation(elementRef: "field", text: "X"))] {
+                let backend = ActionBackend(); backend.field.role = role
+                backend.enabledKnown = false; backend.enabledUnsupported = true
+                let (result, _) = try perform(backend, request(operation), includeValues: true)
+                XCTAssertEqual(backend.calls, 1)
+                XCTAssertEqual(result.steps[0].delivery, .dispatched)
+                XCTAssertEqual(result.steps[0].verification, .confirmed)
+                XCTAssertEqual(result.stopReason, .completed)
+            }
+        }
+    }
+    func testUnsupportedEnabledDoesNotAuthorizePressDisabledOrNonwritableTargets() throws {
+        for option in 0..<4 {
+            let backend = ActionBackend(); backend.enabledUnsupported = true
+            backend.enabledKnown = option == 1
+            if option == 1 { backend.enabled = false }
+            if option == 2 { backend.settable = false }
+            if option == 3 { backend.selectedSettable = false }
+            let operation: CUAProtocol.Operation = option == 0 ? .press(ElementOperation(elementRef: "button"))
+                : option == 3 ? .typeText(TypeTextOperation(elementRef: "field", text: "X"))
+                : .setValue(SetValueOperation(elementRef: "field", value: "new"))
+            let (result, _) = try perform(backend, request(operation))
+            XCTAssertEqual(backend.calls, 0)
+            XCTAssertEqual(result.steps[0].delivery, .notDispatched)
+            XCTAssertEqual(result.stopReason, .unsupported)
+        }
+    }
+    func testUnsupportedEnabledExceptionIsLimitedToExactTextRoles() throws {
+        for operation in [CUAProtocol.Operation.setValue(SetValueOperation(elementRef: "field", value: "new")),
+                          .typeText(TypeTextOperation(elementRef: "field", text: "X"))] {
+            let backend = ActionBackend(); backend.field.role = "AXSlider"
+            backend.enabledKnown = false; backend.enabledUnsupported = true
+            let (result, _) = try perform(backend, request(operation))
+            XCTAssertTrue(backend.settable); XCTAssertTrue(backend.selectedSettable)
+            XCTAssertEqual(backend.calls, 0)
+            XCTAssertEqual(result.stopReason, .unsupported)
+        }
+        let enabledWidget = ActionBackend(); enabledWidget.field.role = "AXSlider"
+        let (result, _) = try perform(enabledWidget, request())
+        XCTAssertEqual(enabledWidget.calls, 1)
+        XCTAssertEqual(result.stopReason, .completed)
     }
     func testIgnoredSetterDoesNotPassAnUnrelatedEnabledExpectation() throws {
         let backend = ActionBackend(); backend.behavior = .ignore
