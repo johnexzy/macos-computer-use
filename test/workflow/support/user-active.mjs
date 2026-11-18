@@ -112,6 +112,10 @@ export class UserActiveActivity {
   }
   async transition(checkpoint, index) {
     const actorPID = this.evidence.actorPIDs[index];
+    const previousActor = this.evidence.actorPIDs.indexOf(this.foregroundPID);
+    if (previousActor !== -1) {
+      await this.actors[previousActor].call("yield", { ownedPIDs: this.evidence.actorPIDs, nextActorPID: actorPID });
+    }
     const response = await this.actors[index].call("activate", { ownedPIDs: this.evidence.actorPIDs, expectedForegroundPID: this.foregroundPID });
     assert.equal(response.state.pid, actorPID); assert.equal(response.state.foregroundPID, actorPID);
     const deadline = performance.now() + 1000;
@@ -142,7 +146,12 @@ export class UserActiveActivity {
   async close() {
     let failure;
     try {
-      if (this.evidence.actorPIDs.length === 2) this.evidence.restore = await this.actors[0].call("restore", { ownedPIDs: this.evidence.actorPIDs });
+      if (this.evidence.actorPIDs.length === 2) {
+        const current = (await this.snapshot()).finishedForegroundPID;
+        const actor = this.evidence.actorPIDs.indexOf(current);
+        this.evidence.restore = actor === -1 ? { restored: false, reason: "unowned_foreground_preserved" }
+          : await this.actors[actor].call("restore", { ownedPIDs: this.evidence.actorPIDs });
+      }
     } catch (error) { failure = error; }
     const results = await Promise.allSettled(this.actors.map(actor => actor.close()));
     this.evidence.cleanupComplete = results.every(result => result.status === "fulfilled");

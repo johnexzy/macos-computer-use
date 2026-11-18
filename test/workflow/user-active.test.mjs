@@ -16,9 +16,14 @@ function fakeActivity(options = {}) {
         call: async (command, args) => {
           state.calls.push({ pid, command, args });
           if (command === "restore") {
-            const restored = args.ownedPIDs.includes(state.current);
+            const restored = pid === state.current;
             if (restored) state.current = 99;
             return { restored, reason: restored ? "prior_focus_restored" : "unowned_foreground_preserved" };
+          }
+          if (command === "yield") {
+            assert.equal(state.current, pid, "foreground_changed_before_actor_yield");
+            assert.ok(args.ownedPIDs.includes(args.nextActorPID));
+            return { state: { pid, foregroundPID: pid } };
           }
           assert.equal(state.current, args.expectedForegroundPID, "foreground_changed_before_actor_activation");
           state.current = pid; activations += 1;
@@ -56,6 +61,7 @@ test("independent actor events follow shared logical milestones and survive clea
   await activity.close();
   activity.evidence.controlledProcessesStopped = true;
   assert.deepEqual(activity.evidence.transitions.map(s => [s.checkpoint, s.actorPID]), [["task_start", 101], ["after:first", 102], ["after:second", 101]]);
+  assert.deepEqual(state.calls.filter(call => call.command === "yield").map(call => [call.pid, call.args.nextActorPID]), [[101, 102], [102, 101]]);
   assert.equal(gradeUserActive(activity.evidence, 42, ["first", "second"]), true);
   assert.equal(activity.evidence.restore.restored, true);
   assert.deepEqual(state.closed.sort(), [101, 102]);

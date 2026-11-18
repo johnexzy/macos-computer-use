@@ -6,6 +6,7 @@ private struct Request: Decodable, Sendable {
     let command: String
     let ownedPIDs: [Int32]?
     let expectedForegroundPID: Int32?
+    let nextActorPID: Int32?
 }
 
 @MainActor
@@ -79,6 +80,14 @@ private final class Actor: NSObject, NSApplicationDelegate {
               owned.allSatisfy({ $0 > 0 }), owned.contains(ProcessInfo.processInfo.processIdentifier),
               let current = currentPID() else { reject(request, "invalid_owned_processes"); return }
         switch request.command {
+        case "yield":
+            guard current == ProcessInfo.processInfo.processIdentifier,
+                  let next = request.nextActorPID, next != current, owned.contains(next),
+                  let actor = NSRunningApplication(processIdentifier: next), !actor.isTerminated else {
+                reject(request, "foreground_changed_before_actor_yield"); return
+            }
+            if #available(macOS 14, *) { NSApplication.shared.yieldActivation(to: actor) }
+            reply(request, reason: "actor_yielded")
         case "activate":
             guard current == request.expectedForegroundPID,
                   owned.contains(current) || current == previous?.processIdentifier else {
@@ -86,12 +95,13 @@ private final class Actor: NSObject, NSApplicationDelegate {
             }
             busy = true
             window.makeKeyAndOrderFront(nil)
-            NSApplication.shared.activate(ignoringOtherApps: false)
+            if #available(macOS 14, *) { NSApplication.shared.activate() }
+            else { NSApplication.shared.activate(ignoringOtherApps: true) }
             awaitForeground(request, pid: ProcessInfo.processInfo.processIdentifier,
                 deadline: DispatchTime.now().uptimeNanoseconds + 1_000_000_000, restoring: false)
         case "restore":
             // Never reclaim focus after the person has switched to an unowned application.
-            guard owned.contains(current) else { reply(request, reason: "unowned_foreground_preserved", restored: false); return }
+            guard current == ProcessInfo.processInfo.processIdentifier else { reply(request, reason: "new_foreground_preserved", restored: false); return }
             guard let previous, !owned.contains(previous.processIdentifier), !previous.isTerminated,
                   let birth = previousBirth,
                   let live = NSRunningApplication(processIdentifier: previous.processIdentifier),
@@ -101,7 +111,14 @@ private final class Actor: NSObject, NSApplicationDelegate {
             }
             busy = true
             // Public AppKit provides no atomic compare-and-activate operation.
-            guard previous.activate(options: []) else {
+            let requested: Bool
+            if #available(macOS 14, *), let currentApp = NSRunningApplication(processIdentifier: current) {
+                NSApplication.shared.yieldActivation(to: live)
+                requested = live.activate(from: currentApp, options: [])
+            } else {
+                requested = live.activate(options: [])
+            }
+            guard requested else {
                 reply(request, reason: "prior_activation_refused", restored: false); return
             }
             awaitForeground(request, pid: previous.processIdentifier,
