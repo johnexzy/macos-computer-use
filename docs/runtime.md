@@ -25,8 +25,9 @@ It can run outside the checkout without Node or a SwiftPM working directory:
 The host locates `cua-runtime` beside itself. `--helper PATH` overrides that location.
 Background execution is the default. Only the operator's `--allow-foreground` flag
 installs a foreground grant; MCP arguments cannot install or upgrade authority.
-Universal distribution and the default npm entry-point migration follow later.
-The existing Node/Swift npm entry point remains available for the PER-1 comparison.
+The [native archive and client migration guide](native-delivery.md) covers
+universal installation. The existing Node/Swift npm entry point remains
+available for the legacy lane.
 
 The official [rmcp 3.10.0 SDK](https://github.com/modelcontextprotocol/rust-sdk/releases/tag/rmcp-v3.10.0)
 is pinned. It supports MCP revision 2026-07-28 with per-request metadata/discovery

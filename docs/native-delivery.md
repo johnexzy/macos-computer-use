@@ -68,8 +68,9 @@ The command is a path, not a shell command string. Use no `npx`, `node`, `swift`
 build command or shell quoting inside it. The bundled helper resolves relative to
 the actual host executable. `--helper` is an explicit development override;
 production client configuration should omit it. Background authority is the
-default; tool arguments cannot upgrade it. `--allow-foreground` is an operator
-grant and does not add unsupported action implementations.
+default. With the operator's `--allow-foreground` grant, an individual
+`act` request can select foreground input with `foreground: true`. The
+background route remains the default for other calls.
 
 Connect the client and call `capabilities` before protected operations. It uses
 preflight APIs and does not request permissions. Permission booleans are evidence
@@ -98,12 +99,14 @@ points still start v3; installing an archive does not migrate them automatically
 | `inspect_accessibility` | `observe` with explicit `includeValues`; opaque refs belong to that observation/target. |
 | `wait_for_accessibility` | `waitFor` with typed element existence/absence, enabled, exact value or window absence. Selectors are not arbitrary substring queries. |
 | `screenshot` | `observe(includeScreenshot:true)` on an exact target; MCP image plus explicit transform metadata. No full-desktop capture. |
-| `find_text` | `observe(includeOcr:true,ocrQuery:...)`; Vision substring geometry in image pixels. This does not authorize a coordinate click. |
+| `find_text` | `observe(includeOcr:true,ocrQuery:...)` returns Vision substring geometry in image pixels. Include a screenshot to prepare a foreground click. |
 | `wait_for_text` | No OCR wait predicate. A bounded caller can request fresh visual observations. |
 | `set_accessibility_value` | `act` → `setValue`; intrinsic exact readback, including already-satisfied state. |
 | `perform_accessibility_action` | `act` → `press` for advertised AXPress. Other actions such as focus/increment/show-menu remain unsupported. |
 | `type_text` | `act` → `typeText` only on an explicit live AXSelectedText-settable element; no global typing or whole-value substitution. |
-| `mouse_click`, `click_text`, `press_key`, `scroll` | Unsupported. The native runtime refuses these before input; there is no coordinate/global-input fallback. |
+| `mouse_click`, `click_text` | A foreground `click` step sends a left click after fresh pixel, window and focus checks. For text, obtain the point from an observation that includes OCR and its matching screenshot. |
+| `press_key` | A foreground `key` step on the exact focused AX reference. Supported keys are Return, Tab, Escape, Backspace and arrows. |
+| `scroll` | Unsupported. |
 | `launch_app`, `open_url`, `run_applescript` | Unsupported; use separate explicitly authorized setup when required. |
 | Cursor overlay | No native overlay/daemon is installed. |
 
