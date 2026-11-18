@@ -69,7 +69,11 @@ fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let mut helper = std::env::current_exe()?.with_file_name("cua-runtime");
+    // MCP clients may launch a symlink outside the archive. Resolve its real
+    // location before selecting the sibling helper, independently of cwd/PATH.
+    let mut helper = std::env::current_exe()?
+        .canonicalize()?
+        .with_file_name("cua-runtime");
     let mut mode = ExecutionMode::BackgroundRequired;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {

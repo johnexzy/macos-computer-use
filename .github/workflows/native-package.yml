@@ -1,0 +1,51 @@
+name: Native package verification
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust tools and both native targets
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Rust checks
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+          cargo test --workspace --all-features --locked
+      - name: Swift build and protocol conformance
+        run: |
+          swift test --package-path protocol/swift
+          swift test
+      - name: Build universal review archive
+        run: sh scripts/package-native.sh .artifacts/native-review
+      - name: Verify clean installed archive without Node or compilers on PATH
+        run: python3 test/distribution/package-smoke.py .artifacts/native-review/*.tar.gz > .artifacts/native-review/smoke.json
+      - name: Retain review artifact and smoke evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-review-${{ matrix.runner }}
+          path: .artifacts/native-review/
+          if-no-files-found: error
+  rust-minimum:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify documented minimum Rust toolchain
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal
+          cargo +1.88.0 check --workspace --all-targets --all-features --locked

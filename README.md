@@ -6,7 +6,7 @@
 
 A native **Model Context Protocol (MCP)** server for macOS inspection and desktop automation.
 
-The Rust + Swift rebuild runs alongside the existing Node/Swift server. It now supports semantic observations and a narrow background action path:
+The Rust + Swift rebuild runs alongside the existing Node/Swift server. It now supports semantic observations and a narrow background action path. The [native installation and migration guide](docs/native-delivery.md) covers the standalone universal archive, client configuration, compatibility gaps, rollback and release checks; its end-user binaries require no Node or local compiler.
 
 - [Legacy baseline and measurement boundaries](docs/baseline.md) (PER-1)
 - [Disposable two-window macOS fixture](docs/fixture.md)
@@ -22,7 +22,7 @@ The Rust + Swift rebuild runs alongside the existing Node/Swift server. It now s
 | `act` | Up to 16 ordered retained-control `setValue`, selected-text `typeText`, `press`, or read-only `waitFor` steps, with separate delivery and verification receipts. |
 | `waitFor` | Wait for presence, absence, enabled state, exact value, or exact window-key absence; closed-window proof needs no new observation. |
 
-The new runtime associates CG and AX windows through unique PID, exact logical bounds, and available titles. This is a public-metadata association, not an OS-attested window-ID mapping or atomic snapshot. Each action revalidates the retained AX object, owning window, observed role, and raw AX identifier. Duplicate labels never select a replacement control. Images, OCR, keys, scrolling, and coordinate actions remain unsupported.
+The new runtime associates CG and AX windows through unique PID, exact logical bounds, and available titles. This is a public-metadata association, not an OS-attested window-ID mapping or atomic snapshot. Each action revalidates the retained AX object, owning window, observed role, and raw AX identifier. Duplicate labels never select a replacement control. Keys, scrolling, and coordinate actions remain unsupported. On macOS 14+, explicit screenshot/OCR observations return visual evidence and transforms; macOS 13 retains semantic operation with an unsupported visual channel.
 
 Sequences use one target, one original observation, and one whole-request deadline. Settled progress is written before the next input step. References keep their original 60-second expiry. Optional feedback reports bounded changes to requested public projections using the same refs; `feedback: null` means unavailable, not unchanged. Values require explicit inclusion. Read-only waits never claim input dispatch.
 
