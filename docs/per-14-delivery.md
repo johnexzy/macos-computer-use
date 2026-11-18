@@ -54,12 +54,14 @@ The [19 November pilot report](per-14-pilot-2026-11-19.md) records the first 12 
 
 The main plan assigns 180 trials across both tasks, three variants, three lanes and ten seeds per task. Each of the six lane orders occurs ten times across the paired groups. This balances positions and immediate predecessors across the campaign. Execution requires separate main budget approval and a finalized, reviewed pilot. Each pilot assignment needs a distinct session with the pinned model, the expected tool inventory and a reported cost. Failed trials with verified session evidence remain eligible for review. The actor variant schedules two switches at fixed offsets of 750 ms and 2,000 ms after Claude initializes. The monitor must confirm the switches before the session ends. This gives every lane the same timed perturbation without changing which fields it may batch. The report retains actual switch evidence, including missed switches.
 
+The reviewed terminal pilot took 16 minutes and 22 seconds for 12 trials and recorded an estimated API-equivalent cost of USD 3.89. Scaling that pace to 180 trials gives a planning baseline of 4.1 hours and USD 58 in equivalent usage. The 60 user-active assignments and additional seeds can change both estimates. Recheck the seat's available quota and usage credits in `/usage` immediately before an included-usage run.
+
 ```sh
-node test/workflow/pilot.mjs --stage main --execute \
-  --reviewed-pilot .artifacts/workflow-paid-pilot/report.json \
+caffeinate -di node test/workflow/pilot.mjs --stage main --execute --auth terminal \
+  --reviewed-pilot .artifacts/per14-terminal-pilot-015e302/report.json \
   --budget-usd "$PER14_APPROVED_MAIN_USD" --per-trial-usd "$PER14_APPROVED_MAIN_TRIAL_USD" \
-  --api-key-file "$PER14_PRIVATE_KEY_PATH" --output .artifacts/workflow-paid-main
-node test/workflow/report.mjs .artifacts/workflow-paid-main/report.json > docs/per-14-results.md
+  --output .artifacts/per14-terminal-main
+node test/workflow/report.mjs .artifacts/per14-terminal-main/report.json > docs/per-14-results.md
 ```
 
 Publish measured results after reviewing the paired JSON and the rendered tables. The lane summary leads with cost per successful task. The cohort tables show Wilson 95% intervals, latency sample counts, safety assessment coverage, unrelated app switches and pre-handoff refusals. The tool inventory lists the tools advertised to the model and the subset eligible for background use in the fixture. Trials stopped by the turn, time or dollar limit remain in the denominator as budget stops. Deployable Rust/Swift binaries and client migration belong to PER-11. [PER-14 in Linear](https://linear.app/komonapp/issue/PER-14/measure-success-rate-speed-and-token-cost-on-a-realistic-30-50-action)
