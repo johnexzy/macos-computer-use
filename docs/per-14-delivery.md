@@ -20,6 +20,7 @@ node test/workflow/scripted.mjs --variant user-active --output .artifacts/workfl
 node test/workflow/session-live.mjs .artifacts/workflow-session-smoke
 node test/workflow/session-loopback.mjs .artifacts/workflow-cli-loopback
 node test/workflow/pilot.mjs
+node test/workflow/pilot.mjs --stage main
 ```
 
 Run the live commands serially. The user-active check deliberately puts its two test apps in the foreground at defined workflow milestones. It yields if the user changes apps and only attempts to restore the original application while a test actor remains in front. Confirmation comes from the independent foreground monitor. The check uses public AppKit calls, where the check and activation can race.
@@ -40,6 +41,18 @@ Each trial starts one Claude Code process with a fixed model, turn limit, wall-c
 
 The legacy inventory retains the 17 default tool names. Exact owned-window reads and semantic edits are available. App launch, URLs, coordinate input, and separate typing and key routes are listed as restricted. This measures the current lanes under a common disposable background scope. An attempted edit to a disposable Notes control reaches the fixture and fails grading. Legacy continues to resolve selectors through its own implementation.
 
-The report retains the full assigned denominator, independent oracle grade, model claim, tool manifest, session stream, timing, model usage and version hashes. Dollars per successful task includes the reported cost of failures. If costs are missing or there are zero strict successes, that ratio is unavailable. Unknown spend or a reported cap overshoot stops further admission. The CLI dollar limit is an estimate and can be exceeded by an in-flight request. [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference)
+The report retains the full assigned denominator, independent oracle grade, model claim, tool manifest, session stream, timing, model usage and version hashes. It includes matched trial records and results by task, variant and lane. Dollars per successful task includes the reported cost of failures. If costs are missing or there are zero strict successes, that ratio is unavailable. Unknown spend or a reported cap overshoot stops further admission. SIGINT and SIGTERM stop active input and model work, then write an interrupted checkpoint. The CLI dollar limit is an estimate and can be exceeded by an in-flight request. [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference)
 
-The proposed larger run follows pilot review and a separate budget decision. Deployable Rust/Swift binaries and client migration belong to PER-11. [PER-14 in Linear](https://linear.app/komonapp/issue/PER-14/measure-success-rate-speed-and-token-cost-on-a-realistic-30-50-action)
+## Run the main campaign after pilot review
+
+The main plan assigns 180 trials across both tasks, three variants, three lanes and ten seeds per task. Execution requires a finalized reviewed pilot report for the same model and separate main budget approval. The actor variant schedules two switches at fixed offsets of 750 ms and 2,000 ms after Claude initializes. The monitor must confirm the switches before the session ends. This gives every lane the same timed perturbation without changing which fields it may batch. The report retains actual switch evidence, including missed switches.
+
+```sh
+node test/workflow/pilot.mjs --stage main --execute \
+  --reviewed-pilot .artifacts/workflow-paid-pilot/report.json \
+  --budget-usd "$PER14_APPROVED_MAIN_USD" --per-trial-usd "$PER14_APPROVED_MAIN_TRIAL_USD" \
+  --api-key-file "$PER14_PRIVATE_KEY_PATH" --output .artifacts/workflow-paid-main
+node test/workflow/report.mjs .artifacts/workflow-paid-main/report.json > docs/per-14-results.md
+```
+
+Publish measured results after reviewing the paired JSON and the rendered tables, which include Wilson 95% intervals and latency sample counts. Deployable Rust/Swift binaries and client migration belong to PER-11. [PER-14 in Linear](https://linear.app/komonapp/issue/PER-14/measure-success-rate-speed-and-token-cost-on-a-realistic-30-50-action)

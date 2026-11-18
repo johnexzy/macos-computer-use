@@ -9,6 +9,10 @@ const maxStreamBytes = 32 * 1024 * 1024;
 const valid = (value) => Number.isFinite(value) && value >= 0 ? value : null;
 const usageFields = ["inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"];
 const namespaced = (tools) => tools.map(tool => `mcp__${laneName}__${tool.name}`).sort();
+const assistantModel = (record) => {
+  const model = record.type === "assistant" ? record.message?.model : null;
+  return typeof model === "string" && model.startsWith("claude-") ? model : null;
+};
 
 export const workflowSystemPrompt = [
   "Complete the disposable macOS workflow using only the supplied MCP tools. Discover the owned source and work windows and read the actual source through the tools.",
@@ -52,17 +56,19 @@ export function summarizeSession(records, { model, tools, exitCode, failure }) {
   const sessionId = init?.session_id ?? null;
   const inventoryOk = matchesInit(init, tools, model);
   const ordered = init && result && records.indexOf(init) < records.indexOf(result);
-  const modelOk = models.length === 1 && models[0] === model;
+  const observedAssistantModels = [...new Set(records.map(assistantModel).filter(Boolean))];
+  const modelOk = models.length === 1 && models[0] === model && observedAssistantModels.every(value => value === model);
   const sameSession = Boolean(sessionId && result?.session_id === sessionId && records.every(r => !r.session_id || r.session_id === sessionId));
   const text = typeof result?.result === "string" ? result.result.trim() : "";
   const claim = text === "COMPLETE" ? "complete" : text === "INCOMPLETE" ? "incomplete" : null;
-  return { ok: Boolean(!failure && exitCode === 0 && ordered && result.subtype === "success" && result.is_error !== true && inventoryOk && modelOk && sameSession && claim !== null),
-    sessionId, sameSession, inventoryOk, modelOk, models, usage, costUsd: valid(result?.total_cost_usd), costSource: "cli_reported_estimate",
+  return { ok: Boolean(!failure && exitCode === 0 && ordered && result.subtype === "success" && result.is_error !== true && inventoryOk && modelOk && sameSession),
+    sessionId, sameSession, inventoryOk, modelOk, models, observedAssistantModels, usage, costUsd: valid(result?.total_cost_usd), costSource: "cli_reported_estimate",
     numTurns: valid(result?.num_turns), apiMs: valid(result?.duration_api_ms), subtype: result?.subtype ?? null, claim,
     terminalResults: results.length, initEvents: inits.length, exitCode, failure };
 }
 
-export async function runSession({ binary, prefix = [], env, cwd, model, tools, config, prompt, budgetUsd, turns, timeoutMs, onReady, onStop }) {
+export async function runSession({ binary, prefix = [], env, cwd, model, tools, config, prompt, budgetUsd, turns, timeoutMs, onReady, onStop, abortSignal }) {
+  abortSignal?.throwIfAborted();
   const args = sessionArguments({ model, budgetUsd, turns, config, tools });
   const childEnv = { ...claudeEnvironment({ env, model }), CLAUDE_CODE_MAX_OUTPUT_TOKENS: "8192", ENABLE_TOOL_SEARCH: "false",
     DISABLE_NON_ESSENTIAL_MODEL_CALLS: "1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", MCP_TIMEOUT: "10000" };
@@ -96,6 +102,8 @@ export async function runSession({ binary, prefix = [], env, cwd, model, tools, 
     if (!record || typeof record !== "object" || !record.type) { stop("Invalid Claude stream record"); return; }
     hash.update(`${text}\n`);
     records.push(record);
+    const observedModel = assistantModel(record);
+    if (observedModel && observedModel !== model) stop("Assistant used a different Claude model");
     if (record.type === "system" && record.subtype === "init") {
       if (terminalSeen || initialized || !matchesInit(record, tools, model)) stop("Unexpected CLI tool inventory, model, server status or stream order");
       else if (!failure) {
@@ -118,6 +126,8 @@ export async function runSession({ binary, prefix = [], env, cwd, model, tools, 
     child.once("close", (code, signal) => resolve({ code, signal }));
   });
   const timer = setTimeout(() => stop("Agent session wall-clock budget exceeded"), timeoutMs);
+  const abort = () => stop("Campaign interrupted");
+  abortSignal?.addEventListener("abort", abort, { once: true });
   child.stdout.on("data", (chunk) => {
     bytes += chunk.length;
     if (bytes > maxStreamBytes) { stop("Agent stream exceeded byte limit"); return; }
@@ -132,6 +142,7 @@ export async function runSession({ binary, prefix = [], env, cwd, model, tools, 
   const exit = await exited;
   finished = true;
   clearTimeout(timer);
+  abortSignal?.removeEventListener("abort", abort);
   if (forceStop) {
     if (signal(0)) signal("SIGKILL");
     forceStop.abort();

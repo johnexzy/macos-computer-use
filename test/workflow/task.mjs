@@ -62,7 +62,7 @@ export function gradeUserActive(evidence, targetPID, milestones) {
   if (!Number.isSafeInteger(evidence.previousForegroundPID) || evidence.previousForegroundPID <= 0 ||
       evidence.previousForegroundPID === targetPID || evidence.actorPIDs.includes(evidence.previousForegroundPID)) return null;
   const expected = ["task_start", ...milestones.map(id => `after:${id}`)];
-  return evidence.controlledProcessesStopped === true && evidence.cleanupComplete === true && Array.isArray(evidence.transitions) && evidence.transitions.length === 3 && evidence.transitions.every((step, i) =>
+  return !evidence.sessionEndedDuringSwitch && evidence.controlledProcessesStopped === true && evidence.cleanupComplete === true && Array.isArray(evidence.transitions) && evidence.transitions.length === 3 && evidence.transitions.every((step, i) =>
     step.checkpoint === expected[i] && step.actorPID === evidence.actorPIDs[i % 2] &&
     step.beforePID === (i ? evidence.actorPIDs[(i - 1) % 2] : evidence.previousForegroundPID) &&
     step.monitorKnown === true && step.activationCount > 0 && Number.isFinite(step.observedUptimeNs));

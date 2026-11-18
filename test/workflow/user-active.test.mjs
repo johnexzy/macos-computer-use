@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { gradeUserActive, gradeWorkflow, makeTask, workflowVariants } from "./task.mjs";
-import { UserActiveActivity } from "./support/user-active.mjs";
+import { UserActiveActivity, exerciseDuringAgent } from "./support/user-active.mjs";
 
 function fakeActivity(options = {}) {
   const state = { current: 99, events: [], calls: [], closed: [], ticks: 0 };
@@ -23,6 +23,7 @@ function fakeActivity(options = {}) {
           if (command === "yield") {
             assert.equal(state.current, pid, "foreground_changed_before_actor_yield");
             assert.ok(args.ownedPIDs.includes(args.nextActorPID));
+            options.afterYield?.();
             return { state: { pid, foregroundPID: pid } };
           }
           assert.equal(state.current, args.expectedForegroundPID, "foreground_changed_before_actor_activation");
@@ -98,6 +99,32 @@ test("actor cleanup failure cannot disappear behind completed task activity", as
   await activity.start(); await activity.afterMutation(["first"]); await activity.afterMutation(["second"]);
   await assert.rejects(activity.close(), /close failed/);
   assert.equal(gradeUserActive(activity.evidence, 42, ["first", "second"]), false);
+});
+
+test("agent activity switches without a mutation and excludes a switch that settles after session end", async () => {
+  const { activity } = fakeActivity();
+  await activity.start();
+  const controller = new AbortController();
+  const original = activity.advance.bind(activity);
+  activity.advance = async () => {
+    await original();
+    if (activity.nextMilestone === 2) controller.abort();
+  };
+  await assert.rejects(exerciseDuringAgent(activity, controller.signal, [0, 0]), { name: "AbortError" });
+  await activity.close();
+  activity.evidence.controlledProcessesStopped = true;
+  assert.equal(activity.evidence.transitions.length, 3);
+  assert.equal(gradeUserActive(activity.evidence, 42, ["first", "second"]), false);
+});
+
+test("terminal session during a cooperative yield cancels the unissued activation", async () => {
+  const controller = new AbortController();
+  const { activity, state } = fakeActivity({ afterYield: () => controller.abort() });
+  await activity.start();
+  await assert.rejects(exerciseDuringAgent(activity, controller.signal, [0, 0]), { name: "AbortError" });
+  assert.equal(state.current, 101);
+  assert.equal(state.calls.filter(call => call.command === "activate").length, 1);
+  await activity.close();
 });
 
 test("goal truth needs complete user-active coverage and independent final foreground proof", () => {

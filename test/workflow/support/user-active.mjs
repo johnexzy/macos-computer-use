@@ -110,12 +110,14 @@ export class UserActiveActivity {
     this.evidence.actorPIDs = pids; this.evidence.previousForegroundPID = previous; this.foregroundPID = previous;
     await this.transition("task_start", 0);
   }
-  async transition(checkpoint, index) {
+  async transition(checkpoint, index, signal) {
+    signal?.throwIfAborted();
     const actorPID = this.evidence.actorPIDs[index];
     const previousActor = this.evidence.actorPIDs.indexOf(this.foregroundPID);
     if (previousActor !== -1) {
       await this.actors[previousActor].call("yield", { ownedPIDs: this.evidence.actorPIDs, nextActorPID: actorPID });
     }
+    signal?.throwIfAborted();
     const response = await this.actors[index].call("activate", { ownedPIDs: this.evidence.actorPIDs, expectedForegroundPID: this.foregroundPID });
     assert.equal(response.state.pid, actorPID); assert.equal(response.state.foregroundPID, actorPID);
     const deadline = performance.now() + 1000;
@@ -140,7 +142,12 @@ export class UserActiveActivity {
     const milestone = this.milestones[this.nextMilestone];
     if (!milestone || !ids.includes(milestone)) return;
     assert.equal(ids.at(-1), milestone, "A causal actor milestone must end its mutation batch");
-    await this.transition(`after:${milestone}`, (this.nextMilestone + 1) % 2);
+    await this.advance();
+  }
+  async advance(signal) {
+    const milestone = this.milestones[this.nextMilestone];
+    assert.ok(milestone, "No planned actor switch remains");
+    await this.transition(`after:${milestone}`, (this.nextMilestone + 1) % 2, signal);
     this.nextMilestone += 1;
   }
   async close() {
@@ -157,5 +164,18 @@ export class UserActiveActivity {
     this.evidence.cleanupComplete = results.every(result => result.status === "fulfilled");
     for (const result of results) if (result.status === "rejected") failure ??= result.reason;
     if (failure) throw failure;
+  }
+}
+
+export const agentActivityOffsetsMs = [750, 2000];
+
+export async function exerciseDuringAgent(activity, signal, offsets = agentActivityOffsetsMs) {
+  const start = performance.now();
+  for (const offset of offsets) {
+    await sleep(Math.max(0, offset - (performance.now() - start)), undefined, { signal });
+    await activity.advance(signal);
+    // Only switches confirmed while the session is live count toward coverage.
+    if (signal.aborted) activity.evidence.sessionEndedDuringSwitch = true;
+    signal.throwIfAborted();
   }
 }

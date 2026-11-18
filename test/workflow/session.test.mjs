@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { runSession, summarizeSession } from "./session-model.mjs";
 import { pilotAssignments, pilotSummary } from "./pilot.mjs";
 import { WorkflowLane } from "./session-lane.mjs";
 import { makeTask } from "./task.mjs";
+import { compareCampaign } from "./session-metrics.mjs";
+import { campaignAssignments, validateReviewedPilot } from "./campaign-plan.mjs";
+import { renderCampaign } from "./report.mjs";
 
 const model = "claude-test";
 const tools = [{ name: "targets" }];
@@ -23,6 +28,12 @@ test("terminal usage is counted once and absent or duplicate results are unprice
   assert.equal(parsed(init, auxiliary).ok, false);
   assert.equal(parsed(init, auxiliary).costUsd, 0.4);
   assert.equal(parsed(init, auxiliary).usage.cacheReadInputTokens, 400);
+  const wrongAssistantModel = parsed(init, { type: "assistant", message: { model: "claude-other" } }, final);
+  assert.equal(wrongAssistantModel.ok, false);
+  assert.equal(wrongAssistantModel.costUsd, 0.4);
+  const unrecognizedClaim = parsed(init, { ...final, result: "The workflow is finished." });
+  assert.equal(unrecognizedClaim.ok, true);
+  assert.equal(unrecognizedClaim.claim, null);
 });
 
 const childSession = (script, options = {}) => runSession({ binary: process.execPath, prefix: ["-e", script, "--"], env: {},
@@ -58,6 +69,26 @@ setInterval(() => {}, 1000);`;
   }
 });
 
+test("SIGTERM on the campaign stops an active session and preserves unknown cost", async () => {
+  const agentScript = `console.log(JSON.stringify({ ...${JSON.stringify(init)}, workerPid: process.pid })); setInterval(() => {}, 1000);`;
+  const script = `
+import { withCampaignSignals } from ${JSON.stringify(new URL("./pilot.mjs", import.meta.url).href)};
+import { runSession } from ${JSON.stringify(new URL("./session-model.mjs", import.meta.url).href)};
+const summary = await withCampaignSignals(async abortSignal => {
+  const result = await runSession({
+    binary: process.execPath, prefix: ["-e", ${JSON.stringify(agentScript)}, "--"],
+    env: {}, model: "claude-test", tools: [{ name: "targets" }], cwd: process.cwd(), config: {}, prompt: "offline", budgetUsd: 1,
+    turns: 1, timeoutMs: 3000, abortSignal, onReady: () => process.kill(process.pid, "SIGTERM"),
+  });
+  return { stopped: abortSignal.reason, failure: result.failure, cost: result.costUsd, pid: result.records[0].workerPid };
+});
+console.log(JSON.stringify(summary));`;
+  const { stdout } = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", script], { timeout: 6000 });
+  const { pid, ...result } = JSON.parse(stdout);
+  assert.deepEqual(result, { stopped: "SIGTERM", failure: "Campaign interrupted", cost: null });
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
+
 test("pilot includes all assignments and prices failures in dollars per success", () => {
   const grid = pilotAssignments();
   assert.equal(grid.length, 12);
@@ -67,7 +98,49 @@ test("pilot includes all assignments and prices failures in dollars per success"
   const failed = { outcome: "failed", session: { costUsd: 0.25, usage } };
   assert.equal(pilotSummary([completed, failed, { outcome: "budget_stopped" }]).dollarsPerSuccessfulTask, 0.75);
   assert.equal(pilotSummary([completed, { ...failed, session: { ...failed.session, costUsd: null } }]).dollarsPerSuccessfulTask, null);
+  assert.equal(pilotSummary([completed, { outcome: "admitted" }]).dollarsPerSuccessfulTask, null);
+  assert.equal(pilotSummary([completed, { outcome: "interrupted", modelStarted: true }]).dollarsPerSuccessfulTask, null);
   assert.equal(pilotSummary([failed]).dollarsPerSuccessfulTask, null);
+});
+
+test("report keeps separate matched cohorts, missing field evidence and complete denominators", () => {
+  const trials = pilotAssignments().map(assignment => ({ ...assignment, outcome: "budget_stopped" }));
+  trials[0] = { ...trials[0], outcome: "passed", taskMs: 30, grade: { correctFields: 27, requiredFields: 27,
+    wrongTargetAttempts: 0, unnecessaryWrites: 0, targetActivationPreserved: true }, session: { costUsd: 1, numTurns: 5, usage: final.modelUsage[model] } };
+  const summary = pilotSummary(trials);
+  assert.deepEqual(summary.fields, { assigned: 252, assessed: 27, correct: 27, unassessed: 225 });
+  assert.equal(summary.strictSuccessRate, 1 / 12);
+  assert.ok(summary.strictSuccessWilson95.lower < 1 / 12 && summary.strictSuccessWilson95.upper > 1 / 12);
+  const { byCohort, pairs } = compareCampaign(trials);
+  assert.equal(Object.keys(byCohort).length, 12);
+  assert.equal(Object.keys(pairs).length, 4);
+  assert.equal(pairs["invoice/clean/workflow-invoice-1"].legacy.costUsd, 1);
+  assert.equal(pairs["invoice/clean/workflow-invoice-1"].single.outcome, "budget_stopped");
+});
+
+test("main pairs all 180 assignments and requires a finalized priced pilot", () => {
+  const main = campaignAssignments("main");
+  assert.equal(main.length, 180);
+  assert.equal(main.filter(trial => trial.variant === "user-active").length, 60);
+  const { byCohort, pairs } = compareCampaign(main.map(assignment => ({ ...assignment, outcome: "budget_stopped" })));
+  assert.equal(Object.keys(byCohort).length, 18);
+  assert.ok(Object.values(byCohort).every(cohort => cohort.assigned === 10));
+  assert.equal(Object.keys(pairs).length, 60);
+  assert.ok(Object.values(pairs).every(pair => Object.keys(pair).length === 3));
+  const markdown = renderCampaign({ stage: "main", mode: "actual_claude_session_main", finishedAt: "2026-11-18",
+    model, source: { revision: "offline-test" }, trials: main.map(assignment => ({ ...assignment, outcome: "budget_stopped" })) });
+  assert.match(markdown, /180 assigned trials \(180 budget_stopped\)/);
+  assert.match(markdown, /\| invoice \| user-active \| composed \| 0\/10/);
+  assert.match(markdown, /Wilson 95%/);
+  const pilot = { mode: "actual_claude_session_pilot", model, finishedAt: "2026-11-18", trials: campaignAssignments("pilot").map(assignment => ({
+    ...assignment, outcome: "failed", modelStarted: true, session: { costUsd: 1 },
+  })), summary: { model: { reportedCostUsd: 12 } } };
+  assert.doesNotThrow(() => validateReviewedPilot(pilot, model));
+  assert.throws(() => validateReviewedPilot({ ...pilot, mode: "offline_fake_cli" }, model), /reviewed pilot report/);
+  assert.throws(() => validateReviewedPilot(pilot, "claude-other"), /requested model/);
+  assert.throws(() => validateReviewedPilot({ ...pilot, model: null }, model), /requested model/);
+  pilot.trials[0].session = null;
+  assert.throws(() => validateReviewedPilot(pilot, model), /known model cost/);
 });
 
 test("fresh references cannot replay an unknown mutation, while a settled visible validation clear can be corrected once", async () => {
