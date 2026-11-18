@@ -139,6 +139,41 @@ in [evaluation.md](evaluation.md); it has its own budgets, lanes, and evidence.
 Neither runner should run concurrently with another native UI campaign. The legacy
 `baseline:*` commands remain a separate comparison path.
 
+## PER-14 scripted readiness
+
+The workflow mode runs independently of the small fixture. Invoice entry presents
+a source window and a 27-field form with a protected Notes field in each window.
+A valid submission records the invoice, closes the form and opens confirmation.
+Settings has three pages and 15 fields and checkboxes. Eight start incorrect and
+seven start correct. Only the active page exposes settings controls to AX.
+
+The friction variant uses the same task data. Its fault triggers follow field
+actions, so all lanes encounter the same edits. The fixture delays one write,
+recreates a row or field, clears one value and displays a validation message, and
+canonicalizes one decimal field. The scripted driver deliberately sends `12.5`
+to check readback of `12.50`. It records the mismatch receipt and reconciles by
+reading the state. A canonical submission can satisfy the oracle directly.
+
+```sh
+npm run build
+npm run build:runtime
+sh test/fixtures/macos/build.sh
+node --test test/workflow/task.test.mjs
+node test/workflow/scripted.mjs --output .artifacts/workflow-readiness
+```
+
+The runner assigns 12 trials across both tasks, clean and friction, and the three
+lanes. Use `--task invoice|settings`, `--variant clean|friction`, or
+`--lane legacy|single|composed` to select a subset. Each trial starts a new fixture
+and MCP connection, checks public AX readiness and grades the fixture's private
+state and event journal. It retains pending and failed assignments, tool results,
+and foreground monitoring through cleanup in an owner-readable `report.json`.
+Run serially on an unlocked Mac with Accessibility access already available.
+
+The driver uses expected values to exercise a reference action sequence. Its
+results measure scripted readiness. The actual Claude session pilot and the
+controlled user-active variant are separate PER-14 work.
+
 The controlled `pauseAfterApplyMs` fault (0–2000 ms, default zero) emits a
 `write_applied` event with independent native state after changing the value, then
 holds the fixture AX setter before returning. The native crash suite uses that

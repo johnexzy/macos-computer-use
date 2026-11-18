@@ -6,9 +6,9 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 export class Fixture {
-  constructor(trace = () => {}) {
+  constructor(trace = () => {}, args = []) {
     const directory = path.dirname(fileURLToPath(import.meta.url));
-    this.child = spawn(path.join(directory, ".build/CUAFixture.app/Contents/MacOS/CUAFixture"), [], { stdio: ["pipe", "pipe", "pipe"] });
+    this.child = spawn(path.join(directory, ".build/CUAFixture.app/Contents/MacOS/CUAFixture"), args, { stdio: ["pipe", "pipe", "pipe"] });
     this.exited = once(this.child, "exit"); this.pending = new Map(); this.trace = trace;
     this.ready = new Promise((resolve, reject) => { this.resolveReady = resolve; this.rejectReady = reject; });
     this.timer = setTimeout(() => this.rejectReady(new Error("Fixture readiness exceeded 8s")), 8000);
