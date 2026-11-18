@@ -249,6 +249,24 @@
     "priorForegroundObservedAtEnd": 6,
     "modelCalls": 0
   },
+  "deliveryTimedUserActiveSession": {
+    "sourceRevision": "4dacc0e",
+    "mode": "offline_fake_cli",
+    "assigned": 3,
+    "passed": 3,
+    "scheduledOffsetsMs": [750, 2000],
+    "confirmedOffsetsMsRounded": {
+      "legacy": [769, 2017],
+      "single": [773, 2021],
+      "composed": [765, 2020]
+    },
+    "confirmedActorTransitions": 9,
+    "targetActivations": 0,
+    "cleanupCompleted": 3,
+    "priorForegroundObservedAtEnd": 3,
+    "providerCalls": 0,
+    "reportSha256": "e88c6878578394050fa692f6428c1ca4894843ece4c22b796dda33b3f641c544"
+  },
   "acceptedEarlierUserActive": {
     "sourceRevision": "a82e1dd7fcdcbbd1410edf7d47e112622fa71086",
     "assigned": 6,
