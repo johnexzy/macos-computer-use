@@ -177,7 +177,7 @@ public struct SemanticAXObserver: Sendable {
     public init(backend: any AXReading, catalog: any WindowCatalog) { self.backend = backend; self.catalog = catalog }
 
     public func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation {
-        guard !params.includeScreenshot else { throw NativeFailure(.unsupported, "screenshot collection is not implemented") }
+        guard !params.includeScreenshot && !params.includeOcr else { throw NativeFailure(.unsupported, "semantic observer only accepts AX requests") }
         let started = milliseconds()
         let target = try catalog.window(params.target, context: context)
         let axStarted = milliseconds()

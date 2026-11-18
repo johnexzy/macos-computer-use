@@ -11,6 +11,10 @@ public enum Limits {
     public static let observationTTLMS: UInt32 = 60_000
     public static let maxBudgetMS: UInt32 = 60_000
     public static let maxFeedbackBytes = 2 * 1024 * 1024
+    public static let maxOcrMatches = 256
+    public static let maxOcrTextBytes = 1024
+    public static let maxOcrBytes = 256 * 1024
+    public static let maxOcrQueryBytes = 4096
 }
 
 public struct ContractError: Error, Equatable, CustomStringConvertible, Sendable {
@@ -73,6 +77,17 @@ public enum Coverage: String, Codable, Equatable, Sendable {
 public enum MimeType: String, Codable, Equatable, Sendable {
     case png
     case jpeg
+}
+
+public enum CaptureStatus: String, Codable, Equatable, Sendable {
+    case captured
+    case permissionDenied = "permission_denied"
+    case unsupported, unavailable
+    case geometryChanged = "geometry_changed"
+    case failed
+}
+public enum OcrStatus: String, Codable, Equatable, Sendable {
+    case complete, partial, unavailable, failed
 }
 
 public enum CoordinateSpace: String, Codable, Equatable, Sendable {
@@ -593,29 +608,165 @@ public struct Element: Codable, Equatable, Sendable {
     }
 }
 
+public struct VisualFrame: Codable, Equatable, Sendable {
+    public let widthPx: UInt32
+    public let heightPx: UInt32
+    public let captureWindowBounds: Rect
+    public let captureScreenBounds: Rect
+    public let imageToScreen: ImageTransform
+    public let imageToWindow: ImageTransform
+    public init(widthPx: UInt32, heightPx: UInt32, captureWindowBounds: Rect, captureScreenBounds: Rect, imageToScreen: ImageTransform, imageToWindow: ImageTransform) {
+        self.widthPx = widthPx
+        self.heightPx = heightPx
+        self.captureWindowBounds = captureWindowBounds
+        self.captureScreenBounds = captureScreenBounds
+        self.imageToScreen = imageToScreen
+        self.imageToWindow = imageToWindow
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case widthPx, heightPx, captureWindowBounds, captureScreenBounds, imageToScreen, imageToWindow
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        widthPx = try c.decode(UInt32.self, forKey: .widthPx)
+        heightPx = try c.decode(UInt32.self, forKey: .heightPx)
+        captureWindowBounds = try c.decode(Rect.self, forKey: .captureWindowBounds)
+        captureScreenBounds = try c.decode(Rect.self, forKey: .captureScreenBounds)
+        imageToScreen = try c.decode(ImageTransform.self, forKey: .imageToScreen)
+        imageToWindow = try c.decode(ImageTransform.self, forKey: .imageToWindow)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(widthPx, forKey: .widthPx)
+        try c.encode(heightPx, forKey: .heightPx)
+        try c.encode(captureWindowBounds, forKey: .captureWindowBounds)
+        try c.encode(captureScreenBounds, forKey: .captureScreenBounds)
+        try c.encode(imageToScreen, forKey: .imageToScreen)
+        try c.encode(imageToWindow, forKey: .imageToWindow)
+    }
+}
+
+public struct OcrMatch: Codable, Equatable, Sendable {
+    public let text: String
+    public let imageBounds: Rect
+    public init(text: String, imageBounds: Rect) {
+        self.text = text
+        self.imageBounds = imageBounds
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case text, imageBounds
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        text = try c.decode(String.self, forKey: .text)
+        imageBounds = try c.decode(Rect.self, forKey: .imageBounds)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(text, forKey: .text)
+        try c.encode(imageBounds, forKey: .imageBounds)
+    }
+}
+
+public struct OcrEvidence: Codable, Equatable, Sendable {
+    public let status: OcrStatus
+    public let collected: CollectionInterval?
+    public let matches: [OcrMatch]
+    public init(status: OcrStatus, collected: CollectionInterval?, matches: [OcrMatch]) {
+        self.status = status
+        self.collected = collected
+        self.matches = matches
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case status, collected, matches
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        status = try c.decode(OcrStatus.self, forKey: .status)
+        collected = try c.decodeIfPresent(CollectionInterval.self, forKey: .collected)
+        matches = try c.decode([OcrMatch].self, forKey: .matches)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(status, forKey: .status)
+        try c.encode(collected, forKey: .collected)
+        try c.encode(matches, forKey: .matches)
+    }
+}
+
+public struct VisualEvidence: Codable, Equatable, Sendable {
+    public let captureStatus: CaptureStatus
+    public let collected: CollectionInterval
+    public let geometryMatchesAX: Bool?
+    public let frame: VisualFrame?
+    public let ocr: OcrEvidence?
+    public init(captureStatus: CaptureStatus, collected: CollectionInterval, geometryMatchesAX: Bool?, frame: VisualFrame?, ocr: OcrEvidence?) {
+        self.captureStatus = captureStatus
+        self.collected = collected
+        self.geometryMatchesAX = geometryMatchesAX
+        self.frame = frame
+        self.ocr = ocr
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case captureStatus, collected, geometryMatchesAX, frame, ocr
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        captureStatus = try c.decode(CaptureStatus.self, forKey: .captureStatus)
+        collected = try c.decode(CollectionInterval.self, forKey: .collected)
+        geometryMatchesAX = try c.decodeIfPresent(Bool.self, forKey: .geometryMatchesAX)
+        frame = try c.decodeIfPresent(VisualFrame.self, forKey: .frame)
+        ocr = try c.decodeIfPresent(OcrEvidence.self, forKey: .ocr)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(captureStatus, forKey: .captureStatus)
+        try c.encode(collected, forKey: .collected)
+        try c.encode(geometryMatchesAX, forKey: .geometryMatchesAX)
+        try c.encode(frame, forKey: .frame)
+        try c.encode(ocr, forKey: .ocr)
+    }
+}
+
 public struct ObserveRequest: Codable, Equatable, Sendable {
     public let target: TargetKey
     public let includeScreenshot: Bool
     public let includeValues: Bool
-    public init(target: TargetKey, includeScreenshot: Bool, includeValues: Bool) {
+    public let includeOcr: Bool
+    public let ocrQuery: String?
+    public let cropWindow: Rect?
+    public let maxImageDimensionPx: UInt32?
+    public init(target: TargetKey, includeScreenshot: Bool, includeValues: Bool, includeOcr: Bool = false, ocrQuery: String? = nil, cropWindow: Rect? = nil, maxImageDimensionPx: UInt32? = nil) {
         self.target = target
         self.includeScreenshot = includeScreenshot
         self.includeValues = includeValues
+        self.includeOcr = includeOcr
+        self.ocrQuery = ocrQuery
+        self.cropWindow = cropWindow
+        self.maxImageDimensionPx = maxImageDimensionPx
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case target, includeScreenshot, includeValues
+        case target, includeScreenshot, includeValues, includeOcr, ocrQuery, cropWindow, maxImageDimensionPx
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
         target = try c.decode(TargetKey.self, forKey: .target)
         includeScreenshot = try c.decode(Bool.self, forKey: .includeScreenshot)
         includeValues = try c.decode(Bool.self, forKey: .includeValues)
+        includeOcr = c.contains(.includeOcr) ? try c.decode(Bool.self, forKey: .includeOcr) : false
+        ocrQuery = try c.decodeIfPresent(String.self, forKey: .ocrQuery)
+        cropWindow = try c.decodeIfPresent(Rect.self, forKey: .cropWindow)
+        maxImageDimensionPx = try c.decodeIfPresent(UInt32.self, forKey: .maxImageDimensionPx)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(target, forKey: .target)
         try c.encode(includeScreenshot, forKey: .includeScreenshot)
         try c.encode(includeValues, forKey: .includeValues)
+        if includeOcr { try c.encode(true, forKey: .includeOcr) }
+        try c.encodeIfPresent(ocrQuery, forKey: .ocrQuery)
+        try c.encodeIfPresent(cropWindow, forKey: .cropWindow)
+        try c.encodeIfPresent(maxImageDimensionPx, forKey: .maxImageDimensionPx)
     }
 }
 
@@ -628,7 +779,8 @@ public struct Observation: Codable, Equatable, Sendable {
     public let accessibilityCollected: CollectionInterval?
     public let elements: [Element]
     public let screenshot: Screenshot?
-    public init(observationId: String, target: TargetKey, collected: CollectionInterval, windowBounds: Rect, accessibility: Coverage, accessibilityCollected: CollectionInterval?, elements: [Element], screenshot: Screenshot?) {
+    public let visual: VisualEvidence?
+    public init(observationId: String, target: TargetKey, collected: CollectionInterval, windowBounds: Rect, accessibility: Coverage, accessibilityCollected: CollectionInterval?, elements: [Element], screenshot: Screenshot?, visual: VisualEvidence? = nil) {
         self.observationId = observationId
         self.target = target
         self.collected = collected
@@ -637,9 +789,10 @@ public struct Observation: Codable, Equatable, Sendable {
         self.accessibilityCollected = accessibilityCollected
         self.elements = elements
         self.screenshot = screenshot
+        self.visual = visual
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case observationId, target, collected, windowBounds, accessibility, accessibilityCollected, elements, screenshot
+        case observationId, target, collected, windowBounds, accessibility, accessibilityCollected, elements, screenshot, visual
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -651,6 +804,7 @@ public struct Observation: Codable, Equatable, Sendable {
         accessibilityCollected = try c.decodeIfPresent(CollectionInterval.self, forKey: .accessibilityCollected)
         elements = try c.decode([Element].self, forKey: .elements)
         screenshot = try c.decodeIfPresent(Screenshot.self, forKey: .screenshot)
+        visual = try c.decodeIfPresent(VisualEvidence.self, forKey: .visual)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -662,6 +816,7 @@ public struct Observation: Codable, Equatable, Sendable {
         try c.encode(accessibilityCollected, forKey: .accessibilityCollected)
         try c.encode(elements, forKey: .elements)
         try c.encode(screenshot, forKey: .screenshot)
+        try c.encodeIfPresent(visual, forKey: .visual)
     }
 }
 

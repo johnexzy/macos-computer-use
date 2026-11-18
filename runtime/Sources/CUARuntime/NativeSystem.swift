@@ -4,6 +4,8 @@ import CUAProtocol
 import CoreGraphics
 import Darwin
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 public protocol NativeSystem: Sendable {
     func permissions(context: OperationContext) throws -> Permissions
@@ -17,7 +19,7 @@ public protocol NativeSystem: Sendable {
 public extension NativeSystem {
     func supportedActions(permissions: Permissions) -> [ActionKind] { [] }
     func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation {
-        guard !params.includeScreenshot else { throw NativeFailure(.unsupported, "screenshot collection is not implemented") }
+        guard !params.includeScreenshot && !params.includeOcr else { throw NativeFailure(.unsupported, "visual observation is unavailable for this backend") }
         let start = nativeMilliseconds()
         let before = try window(params.target, context: context)
         let handle = try retainApplication(pid: params.target.pid, timeoutSeconds: context.nativeTimeoutSeconds(), context: context)
@@ -33,8 +35,18 @@ public extension NativeSystem {
 public struct MacOSSystem: NativeSystem {
     private let backend: any AXReading
     private let catalog: any WindowCatalog
+    private let visual: any VisualCapturing
+    private let isAXTrusted: @Sendable () -> Bool
+
     public init(backend: any AXReading = MacOSAXBackend(), catalog: any WindowCatalog = MacOSWindowCatalog()) {
-        self.backend = backend; self.catalog = catalog
+        self.init(backend: backend, catalog: catalog, visual: ScreenWindowCapture(), isAXTrusted: { AXIsProcessTrusted() })
+    }
+
+    init(backend: any AXReading, catalog: any WindowCatalog, visual: any VisualCapturing, isAXTrusted: @escaping @Sendable () -> Bool) {
+        self.backend = backend
+        self.catalog = catalog
+        self.visual = visual
+        self.isAXTrusted = isAXTrusted
     }
     public func permissions(context: OperationContext) throws -> Permissions {
         try context.check()
@@ -53,14 +65,96 @@ public struct MacOSSystem: NativeSystem {
         return try backend.application(pid: pid, context: context)
     }
     public func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation {
-        guard !params.includeScreenshot else { throw NativeFailure(.unsupported, "screenshot collection is not implemented") }
+        let wantsVisual = params.includeScreenshot || params.includeOcr
         let started = nativeMilliseconds()
-        let target = try catalog.window(params.target, context: context)
-        guard AXIsProcessTrusted() else {
-            return NativeObservation(observation: unavailableObservation(id: observationId, target: target, started: started), handle: nil)
+        let semantic: NativeObservation
+        if isAXTrusted() {
+            let ax = ObserveRequest(target: params.target, includeScreenshot: false, includeValues: params.includeValues)
+            do {
+                semantic = try SemanticAXObserver(backend: backend, catalog: catalog).observe(params: ax, observationId: observationId, context: context)
+            } catch let failure where wantsVisual && axUnavailable(failure) {
+                let attempted = CollectionInterval(startedUnixMs: started, finishedUnixMs: max(started, nativeMilliseconds()))
+                semantic = try observeWindowOnly(params.target, id: observationId, started: started,
+                                                 accessibilityCollected: attempted, context: context)
+            }
+        } else {
+            semantic = try observeWindowOnly(params.target, id: observationId, started: started, context: context)
         }
-        return try SemanticAXObserver(backend: backend, catalog: catalog).observe(params: params, observationId: observationId, context: context)
+        guard wantsVisual else { return semantic }
+        let (evidence, screenshot) = try collectVisual(params: params, semantic: semantic.observation, context: context)
+        let ax = semantic.observation
+        let observation = Observation(observationId: ax.observationId, target: ax.target,
+            collected: CollectionInterval(
+                startedUnixMs: min(ax.collected.startedUnixMs, evidence.collected.startedUnixMs,
+                                  evidence.ocr?.collected?.startedUnixMs ?? evidence.collected.startedUnixMs),
+                finishedUnixMs: max(ax.collected.finishedUnixMs, evidence.collected.finishedUnixMs,
+                                   evidence.ocr?.collected?.finishedUnixMs ?? evidence.collected.finishedUnixMs)
+            ),
+            windowBounds: ax.windowBounds, accessibility: ax.accessibility, accessibilityCollected: ax.accessibilityCollected,
+            elements: ax.elements, screenshot: screenshot, visual: evidence)
+        try context.check()
+        return NativeObservation(observation: observation, handle: semantic.handle)
     }
+
+    private func observeWindowOnly(_ key: TargetKey, id: String, started: UInt64,
+                                   accessibilityCollected: CollectionInterval? = nil, context: OperationContext) throws -> NativeObservation {
+        let target = try catalog.window(key, context: context)
+        return NativeObservation(observation: unavailableObservation(
+            id: id, target: target, started: started, accessibilityCollected: accessibilityCollected), handle: nil)
+    }
+
+    private func collectVisual(params: ObserveRequest, semantic: Observation, context: OperationContext) throws -> (VisualEvidence, Screenshot?) {
+        let started = nativeMilliseconds()
+        func missing(_ status: CaptureStatus, collected: CollectionInterval? = nil) throws -> (VisualEvidence, Screenshot?) {
+            try context.check()
+            let interval = collected ?? CollectionInterval(startedUnixMs: started, finishedUnixMs: max(started, nativeMilliseconds()))
+            let ocr = params.includeOcr ? OcrEvidence(status: .unavailable, collected: nil, matches: []) : nil
+            return (VisualEvidence(captureStatus: status, collected: interval, geometryMatchesAX: nil, frame: nil, ocr: ocr), nil)
+        }
+
+        let captured: CapturedVisual
+        do {
+            let before = try catalog.window(params.target, context: context)
+            captured = try visual.capture(target: before, crop: params.cropWindow,
+                                          maxDimension: Int(params.maxImageDimensionPx ?? 1600), context: context)
+            let after = try catalog.window(params.target, context: context)
+            guard before.bundleId == after.bundleId, before.bounds == captured.frame.captureWindowBounds,
+                  after.bounds == captured.frame.captureWindowBounds else { return try missing(.geometryChanged) }
+        } catch let failure as VisualCaptureFailure {
+            return try missing(failure.status, collected: failure.collected)
+        } catch let failure as NativeFailure where failure.code == .targetNotFound {
+            return try missing(.unavailable)
+        }
+        let frame = captured.frame
+        let screenshot: Screenshot?
+        if params.includeScreenshot {
+            guard let data = jpegData(captured.image) else { return try missing(.failed) }
+            screenshot = Screenshot(mimeType: .jpeg, widthPx: frame.widthPx, heightPx: frame.heightPx,
+                dataBase64: data.base64EncodedString(), imageToScreen: frame.imageToScreen, collected: captured.collected)
+        } else {
+            screenshot = nil
+        }
+        let ocr = params.includeOcr ? try VisualOCR().recognize(image: captured.image, query: params.ocrQuery, context: context) : nil
+        let matchesAX = semantic.accessibility == .unavailable ? nil : semantic.windowBounds == frame.captureWindowBounds
+        return (VisualEvidence(captureStatus: .captured, collected: captured.collected,
+                               geometryMatchesAX: matchesAX, frame: frame, ocr: ocr), screenshot)
+    }
+}
+
+private func axUnavailable(_ failure: any Error) -> Bool {
+    if failure is AXReadUnavailable { return true }
+    switch (failure as? NativeFailure)?.code {
+    case .ambiguousTarget, .targetNotFound, .staleObservation, .staleElement, .nativeFailed, .permissionDenied: return true
+    default: return false
+    }
+}
+
+private func jpegData(_ image: CGImage) -> Data? {
+    let data = NSMutableData()
+    guard let output = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+    CGImageDestinationAddImage(output, image, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
+    guard CGImageDestinationFinalize(output), data.length <= Limits.maxImageBytes else { return nil }
+    return data as Data
 }
 
 /// A public process-birth/image signature, not a full exec generation (same-image exec is indistinguishable).
@@ -262,8 +356,9 @@ public struct MacOSWindowCatalog: WindowCatalog {
 }
 
 private func nativeMilliseconds() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }
-private func unavailableObservation(id: String, target: Target, started: UInt64) -> Observation {
+private func unavailableObservation(id: String, target: Target, started: UInt64,
+                                    accessibilityCollected: CollectionInterval? = nil) -> Observation {
     Observation(observationId: id, target: target.key,
         collected: CollectionInterval(startedUnixMs: started, finishedUnixMs: max(started, nativeMilliseconds())),
-        windowBounds: target.bounds, accessibility: .unavailable, accessibilityCollected: nil, elements: [], screenshot: nil)
+        windowBounds: target.bounds, accessibility: .unavailable, accessibilityCollected: accessibilityCollected, elements: [], screenshot: nil)
 }

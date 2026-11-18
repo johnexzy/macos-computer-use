@@ -4620,5 +4620,2324 @@
       }
     },
     "valid": true
+  },
+  {
+    "name": "visual-cropped-image-and-ocr",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": true,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 100,
+              "y": 20,
+              "width": 300,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": {
+              "mimeType": "png",
+              "widthPx": 150,
+              "heightPx": 100,
+              "dataBase64": "iVBORw0KGgo=",
+              "imageToScreen": {
+                "scaleX": 2,
+                "scaleY": 2,
+                "offsetX": -700,
+                "offsetY": 120,
+                "validImageBounds": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 150,
+                  "height": 100
+                },
+                "coverage": "complete"
+              },
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              }
+            },
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": true,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -700,
+                  "y": 120,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -700,
+                  "offsetY": 120,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100,
+                  "offsetY": 20,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": {
+                "status": "complete",
+                "collected": {
+                  "startedUnixMs": 1700000000026,
+                  "finishedUnixMs": 1700000000035
+                },
+                "matches": [
+                  {
+                    "text": "Dispatch",
+                    "imageBounds": {
+                      "x": 10,
+                      "y": 10,
+                      "width": 60,
+                      "height": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "visual-ocr-without-inline-image",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": false,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 100,
+              "y": 20,
+              "width": 300,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": null,
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": true,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -700,
+                  "y": 120,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -700,
+                  "offsetY": 120,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100,
+                  "offsetY": 20,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": {
+                "status": "complete",
+                "collected": {
+                  "startedUnixMs": 1700000000026,
+                  "finishedUnixMs": 1700000000035
+                },
+                "matches": [
+                  {
+                    "text": "Dispatch",
+                    "imageBounds": {
+                      "x": 10,
+                      "y": 10,
+                      "width": 60,
+                      "height": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "visual-permission-failure-explicit",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": true,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 100,
+              "y": 20,
+              "width": 300,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": null,
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "permission_denied",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": null,
+              "frame": null,
+              "ocr": {
+                "status": "unavailable",
+                "collected": null,
+                "matches": []
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "visual-geometry-failure-explicit",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": true,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 100,
+              "y": 20,
+              "width": 300,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": null,
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "geometry_changed",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": false,
+              "frame": null,
+              "ocr": {
+                "status": "unavailable",
+                "collected": null,
+                "matches": []
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "visual-empty-ocr-complete",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": false,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 100,
+              "y": 20,
+              "width": 300,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": null,
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": true,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -700,
+                  "y": 120,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -700,
+                  "offsetY": 120,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100,
+                  "offsetY": 20,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": {
+                "status": "complete",
+                "collected": {
+                  "startedUnixMs": 1700000000026,
+                  "finishedUnixMs": 1700000000035
+                },
+                "matches": []
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "requested-ocr-missing",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": false,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 100,
+              "y": 20,
+              "width": 300,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": null,
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": true,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -700,
+                  "y": 120,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -700,
+                  "offsetY": 120,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100,
+                  "offsetY": 20,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": null
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "unrequested-ocr",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": true,
+            "includeValues": false,
+            "includeOcr": false,
+            "ocrQuery": null,
+            "cropWindow": {
+              "x": 100,
+              "y": 20,
+              "width": 300,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": {
+              "mimeType": "png",
+              "widthPx": 150,
+              "heightPx": 100,
+              "dataBase64": "iVBORw0KGgo=",
+              "imageToScreen": {
+                "scaleX": 2,
+                "scaleY": 2,
+                "offsetX": -700,
+                "offsetY": 120,
+                "validImageBounds": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 150,
+                  "height": 100
+                },
+                "coverage": "complete"
+              },
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              }
+            },
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": true,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -700,
+                  "y": 120,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -700,
+                  "offsetY": 120,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100,
+                  "offsetY": 20,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": {
+                "status": "complete",
+                "collected": {
+                  "startedUnixMs": 1700000000026,
+                  "finishedUnixMs": 1700000000035
+                },
+                "matches": [
+                  {
+                    "text": "Dispatch",
+                    "imageBounds": {
+                      "x": 10,
+                      "y": 10,
+                      "width": 60,
+                      "height": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "unrequested-inline-image",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": false,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 100,
+              "y": 20,
+              "width": 300,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": {
+              "mimeType": "png",
+              "widthPx": 150,
+              "heightPx": 100,
+              "dataBase64": "iVBORw0KGgo=",
+              "imageToScreen": {
+                "scaleX": 2,
+                "scaleY": 2,
+                "offsetX": -700,
+                "offsetY": 120,
+                "validImageBounds": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 150,
+                  "height": 100
+                },
+                "coverage": "complete"
+              },
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              }
+            },
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": true,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -700,
+                  "y": 120,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -700,
+                  "offsetY": 120,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100,
+                  "offsetY": 20,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": {
+                "status": "complete",
+                "collected": {
+                  "startedUnixMs": 1700000000026,
+                  "finishedUnixMs": 1700000000035
+                },
+                "matches": [
+                  {
+                    "text": "Dispatch",
+                    "imageBounds": {
+                      "x": 10,
+                      "y": 10,
+                      "width": 60,
+                      "height": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "visual-exceeds-requested-dimensions",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": true,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 100,
+              "y": 20,
+              "width": 300,
+              "height": 200
+            },
+            "maxImageDimensionPx": 100
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": {
+              "mimeType": "png",
+              "widthPx": 150,
+              "heightPx": 100,
+              "dataBase64": "iVBORw0KGgo=",
+              "imageToScreen": {
+                "scaleX": 2,
+                "scaleY": 2,
+                "offsetX": -700,
+                "offsetY": 120,
+                "validImageBounds": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 150,
+                  "height": 100
+                },
+                "coverage": "complete"
+              },
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              }
+            },
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": true,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -700,
+                  "y": 120,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -700,
+                  "offsetY": 120,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100,
+                  "offsetY": 20,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": {
+                "status": "complete",
+                "collected": {
+                  "startedUnixMs": 1700000000026,
+                  "finishedUnixMs": 1700000000035
+                },
+                "matches": [
+                  {
+                    "text": "Dispatch",
+                    "imageBounds": {
+                      "x": 10,
+                      "y": 10,
+                      "width": 60,
+                      "height": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "visual-wrong-requested-crop",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": true,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 110,
+              "y": 20,
+              "width": 300,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": {
+              "mimeType": "png",
+              "widthPx": 150,
+              "heightPx": 100,
+              "dataBase64": "iVBORw0KGgo=",
+              "imageToScreen": {
+                "scaleX": 2,
+                "scaleY": 2,
+                "offsetX": -700,
+                "offsetY": 120,
+                "validImageBounds": {
+                  "x": 0,
+                  "y": 0,
+                  "width": 150,
+                  "height": 100
+                },
+                "coverage": "complete"
+              },
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              }
+            },
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": true,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -700,
+                  "y": 120,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -700,
+                  "offsetY": 120,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100,
+                  "offsetY": 20,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": {
+                "status": "complete",
+                "collected": {
+                  "startedUnixMs": 1700000000026,
+                  "finishedUnixMs": 1700000000035
+                },
+                "matches": [
+                  {
+                    "text": "Dispatch",
+                    "imageBounds": {
+                      "x": 10,
+                      "y": 10,
+                      "width": 60,
+                      "height": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "requested-visual-missing",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": false,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 100,
+              "y": 20,
+              "width": 300,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": null,
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": null
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "fractional-crop-rounds-inward",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": false,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 100.25,
+              "y": 20.25,
+              "width": 300.5,
+              "height": 200.5
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": null,
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": true,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -699.5,
+                  "y": 120.5,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -699.5,
+                  "offsetY": 120.5,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100.5,
+                  "offsetY": 20.5,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": {
+                "status": "complete",
+                "collected": {
+                  "startedUnixMs": 1700000000026,
+                  "finishedUnixMs": 1700000000035
+                },
+                "matches": [
+                  {
+                    "text": "Dispatch",
+                    "imageBounds": {
+                      "x": 10,
+                      "y": 10,
+                      "width": 60,
+                      "height": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "crop-removes-more-than-one-output-pixel",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": false,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 90,
+              "y": 20,
+              "width": 310,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": null,
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": true,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -700,
+                  "y": 120,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -700,
+                  "offsetY": 120,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100,
+                  "offsetY": 20,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": {
+                "status": "complete",
+                "collected": {
+                  "startedUnixMs": 1700000000026,
+                  "finishedUnixMs": 1700000000035
+                },
+                "matches": [
+                  {
+                    "text": "Dispatch",
+                    "imageBounds": {
+                      "x": 10,
+                      "y": 10,
+                      "width": 60,
+                      "height": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "crop-cannot-widen-outside-request",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": false,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 110,
+              "y": 20,
+              "width": 290,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "partial",
+            "elements": [
+              {
+                "reference": "element-1",
+                "role": "AXTextField",
+                "label": "Title",
+                "value": null,
+                "bounds": {
+                  "x": -760,
+                  "y": 140,
+                  "width": 320,
+                  "height": 30
+                },
+                "enabled": true,
+                "actions": [
+                  "setValue",
+                  "typeText",
+                  "key"
+                ]
+              }
+            ],
+            "screenshot": null,
+            "accessibilityCollected": {
+              "startedUnixMs": 1700000000002,
+              "finishedUnixMs": 1700000000012
+            },
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": true,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -700,
+                  "y": 120,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -700,
+                  "offsetY": 120,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100,
+                  "offsetY": 20,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": {
+                "status": "complete",
+                "collected": {
+                  "startedUnixMs": 1700000000026,
+                  "finishedUnixMs": 1700000000035
+                },
+                "matches": [
+                  {
+                    "text": "Dispatch",
+                    "imageBounds": {
+                      "x": 10,
+                      "y": 10,
+                      "width": 60,
+                      "height": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "ocr-does-not-require-accessibility-permission",
+    "valid": true,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": false,
+            "includeValues": false,
+            "includeOcr": true,
+            "ocrQuery": "dispatch",
+            "cropWindow": {
+              "x": 100,
+              "y": 20,
+              "width": 300,
+              "height": 200
+            },
+            "maxImageDimensionPx": 160
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "unavailable",
+            "elements": [],
+            "screenshot": null,
+            "accessibilityCollected": null,
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": null,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -700,
+                  "y": 120,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -700,
+                  "offsetY": 120,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100,
+                  "offsetY": 20,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": {
+                "status": "complete",
+                "collected": {
+                  "startedUnixMs": 1700000000026,
+                  "finishedUnixMs": 1700000000035
+                },
+                "matches": [
+                  {
+                    "text": "Dispatch",
+                    "imageBounds": {
+                      "x": 10,
+                      "y": 10,
+                      "width": 60,
+                      "height": 10
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "unrequested-visual-metadata",
+    "valid": false,
+    "request": {
+      "kind": "request",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "budgetMs": 5000,
+        "body": {
+          "method": "observe",
+          "params": {
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "includeScreenshot": false,
+            "includeValues": false,
+            "includeOcr": false
+          }
+        }
+      }
+    },
+    "reply": {
+      "kind": "response",
+      "message": {
+        "version": 1,
+        "id": "request-1",
+        "epoch": "helper-epoch-1",
+        "body": {
+          "result": "observe",
+          "data": {
+            "observationId": "observation-1",
+            "target": {
+              "pid": 42,
+              "windowId": 7
+            },
+            "collected": {
+              "startedUnixMs": 1700000000000,
+              "finishedUnixMs": 1700000000040
+            },
+            "windowBounds": {
+              "x": -800,
+              "y": 100,
+              "width": 640,
+              "height": 480
+            },
+            "accessibility": "unavailable",
+            "elements": [],
+            "screenshot": null,
+            "accessibilityCollected": null,
+            "visual": {
+              "captureStatus": "captured",
+              "collected": {
+                "startedUnixMs": 1700000000015,
+                "finishedUnixMs": 1700000000025
+              },
+              "geometryMatchesAX": null,
+              "frame": {
+                "widthPx": 150,
+                "heightPx": 100,
+                "captureWindowBounds": {
+                  "x": -800,
+                  "y": 100,
+                  "width": 640,
+                  "height": 480
+                },
+                "captureScreenBounds": {
+                  "x": -700,
+                  "y": 120,
+                  "width": 300,
+                  "height": 200
+                },
+                "imageToScreen": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": -700,
+                  "offsetY": 120,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                },
+                "imageToWindow": {
+                  "scaleX": 2,
+                  "scaleY": 2,
+                  "offsetX": 100,
+                  "offsetY": 20,
+                  "validImageBounds": {
+                    "x": 0,
+                    "y": 0,
+                    "width": 150,
+                    "height": 100
+                  },
+                  "coverage": "complete"
+                }
+              },
+              "ocr": null
+            }
+          }
+        }
+      }
+    }
   }
 ]

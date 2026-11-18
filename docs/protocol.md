@@ -108,12 +108,12 @@ sends no input; mixed sequences preserve the same boundary before later mutation
 | --- | --- |
 | `capabilities` | Read-only permission booleans, installed mode, and actual supported action kinds. It does not request permission. |
 | `targets` | Optionally filter by bundle ID; return exact window/process keys, titles, and logical bounds. `truncated` makes the bound visible. |
-| `observe` | Exact target, explicit screenshot/value inclusion flags; return semantic targets and optional image evidence. |
+| `observe` | Exact target and explicit value, screenshot, and OCR inclusion flags. Visual collection accepts a window-local crop and image dimension limit. |
 | `act` | Installed grant, observation, exact target, and 1–16 ordered steps. No arbitrary scripts or execution-mode override. |
 | `waitFor` | Evaluate a typed condition for the same exact target within the request deadline. It never mutates. |
 
-The current runtime implements `observe` without images and bounded linear `act`
-sequences combining `setValue`, `typeText`, `press`, and a read-only `waitFor`
+The current runtime implements AX and opt-in visual `observe` and bounded linear
+`act` sequences combining `setValue`, `typeText`, `press`, and a read-only `waitFor`
 operation. Every step shares the exact target, original observation/refs, and
 whole-request budget. There are no branches, nested sequences, or target switches.
 Presence checks do not create new action refs inside a sequence.
@@ -158,8 +158,8 @@ not a fictitious atomic snapshot. `accessibilityCollected` records the AX channe
 own interval and each screenshot has its own `collected` interval. These channel
 intervals must fit inside the total interval; they can overlap or occur sequentially.
 Available AX coverage requires its interval. Unavailable AX may have no interval
-when uncollected, or an interval for an attempted collection. An absent screenshot
-has no image interval. No channel silently inherits the total timestamp.
+when uncollected, or an interval for an attempted collection. A capture attempt can
+report an interval even when it returns no bitmap. Each channel reports its own timing.
 Accessibility coverage is complete/partial/unavailable. Partial
 coverage must not be treated as proof that an omitted element is absent. Values
 are excluded unless explicitly requested. The runtime must enforce that privacy
@@ -193,8 +193,8 @@ have negative origins. Returned screenshots have independent pixel dimensions.
 ```text
 screenX = imageX * scaleX + offsetX
 screenY = imageY * scaleY + offsetY
-windowX = screenX - windowBounds.x
-windowY = screenY - windowBounds.y
+windowX = imageX * imageToWindow.scaleX + imageToWindow.offsetX
+windowY = imageY * imageToWindow.scaleY + imageToWindow.offsetY
 ```
 
 No global Retina constant or main-display origin is assumed. `validImageBounds`
@@ -203,8 +203,29 @@ the whole image; partial mapping covers only the declared region. `to_screen` /
 `toScreen` rejects points outside that region. A missing image or mapping cannot
 be reconstructed by guessing. The runtime must reject image-coordinate clicks
 without that observation's valid mapping and invalidate mappings after target
-geometry changes. Positive axis scales describe the initial non-rotated window
-capture contract; rotated/perspective transforms are not represented.
+geometry changes. Positive axis scales describe the non-rotated window capture contract.
+
+An explicit screenshot or OCR request returns `visual`. Successful capture
+includes a `frame` with the actual pixel dimensions, the full logical window
+rect in `captureWindowBounds`, the realized crop in screen points in
+`captureScreenBounds`, and both transforms. The crop is rounded inward to
+native pixel edges before resizing. Output dimensions are independently
+rounded to integral pixels. The two transform scales account for that rounding.
+Visual evidence carries `geometryMatchesAX` when AX geometry is available. A false
+value means the channels witnessed different bounds. A capture that changed
+geometry during collection returns `geometry_changed` without a frame. Other
+unavailable states include `permission_denied`, `unsupported`, `unavailable`
+and `failed`.
+
+OCR queries are nonempty strings of up to 4096 UTF-8 bytes. They need
+`includeOcr: true`; an omitted query returns recognized lines. When requested,
+`visual.ocr` reports `complete`, `partial`, `unavailable`, or `failed`, an
+interval when attempted, and up to 256 text boxes in the actual image pixel space.
+A complete result with zero matches is distinct from unavailable or failed OCR.
+An OCR-only observation carries frame metadata and no encoded screenshot.
+`cropWindow` and `maxImageDimensionPx` apply only to requested visual
+collection. AX-only frames omit the added fields. Visual requests require the
+matched host and runtime build because the codecs reject unknown fields.
 
 Inline screenshot payloads use standard padded base64 and are capped at **4 MiB
 decoded bytes**. Codecs validate base64, dimensions, and transform domains; they

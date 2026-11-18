@@ -24,7 +24,7 @@ fn shared_valid_fixtures_decode_and_round_trip() {
     let paths = fixtures("valid");
     assert_eq!(
         paths.len(),
-        44,
+        57,
         "keep the shared fixture inventory deliberate"
     );
     for path in paths {
@@ -37,9 +37,81 @@ fn shared_valid_fixtures_decode_and_round_trip() {
 }
 
 #[test]
+fn absent_visual_options_keep_the_legacy_ax_wire_shape() {
+    let old = fixture("observe-request");
+    let encoded: serde_json::Value = serde_json::from_slice(&encode_line(&old).unwrap()).unwrap();
+    let params = &encoded["message"]["body"]["params"];
+    for name in [
+        "includeOcr",
+        "ocrQuery",
+        "cropWindow",
+        "maxImageDimensionPx",
+    ] {
+        assert!(params.get(name).is_none(), "unexpected {name}");
+    }
+    let encoded: serde_json::Value =
+        serde_json::from_slice(&encode_line(&fixture("observe-partial-response")).unwrap())
+            .unwrap();
+    assert!(encoded["message"]["body"]["data"].get("visual").is_none());
+}
+
+#[test]
+fn ocr_only_provenance_maps_window_and_screen_without_bitmap_bytes() {
+    let Frame::Response(Response {
+        body: ResponseBody::Observe(observation),
+        ..
+    }) = fixture("observe-ocr-only-response")
+    else {
+        panic!()
+    };
+    assert!(observation.screenshot.is_none());
+    let visual = observation.visual.unwrap();
+    let frame = visual.frame.unwrap();
+    let point = Point { x: 15.0, y: 12.0 };
+    assert_eq!(
+        frame.image_to_screen.to_screen(&point).unwrap(),
+        Point {
+            x: -670.0,
+            y: 144.0
+        }
+    );
+    assert_eq!(
+        frame.image_to_window.to_screen(&point).unwrap(),
+        Point { x: 130.0, y: 44.0 }
+    );
+    assert!(
+        frame
+            .image_to_window
+            .to_screen(&Point { x: 150.0, y: 12.0 })
+            .is_err()
+    );
+    assert!(
+        visual.ocr.unwrap().collected.unwrap().started_unix_ms >= visual.collected.finished_unix_ms
+    );
+}
+
+#[test]
+fn ocr_budget_accounts_for_json_escaping_not_only_text_bytes() {
+    let mut frame = fixture("observe-ocr-only-response");
+    let Frame::Response(Response {
+        body: ResponseBody::Observe(observation),
+        ..
+    }) = &mut frame
+    else {
+        panic!()
+    };
+    let ocr = observation.visual.as_mut().unwrap().ocr.as_mut().unwrap();
+    let mut value = ocr.matches[0].clone();
+    value.text = "\0".repeat(MAX_OCR_TEXT_BYTES);
+    ocr.matches = vec![value; 43];
+    assert!(ocr.matches.len() <= MAX_OCR_MATCHES);
+    assert!(frame.validate().is_err());
+}
+
+#[test]
 fn shared_invalid_fixtures_are_rejected() {
     let paths = fixtures("invalid");
-    assert_eq!(paths.len(), 59);
+    assert_eq!(paths.len(), 84);
     for path in paths {
         assert!(
             decode_line(&fs::read(&path).unwrap()).is_err(),
@@ -265,7 +337,7 @@ fn shared_expectation_correlation_cases_bind_receipts_to_requested_conditions() 
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../protocol/fixtures/correlation.json");
     let cases: Vec<Case> = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
-    assert_eq!(cases.len(), 50);
+    assert_eq!(cases.len(), 66);
     for case in cases {
         case.request.validate().unwrap();
         case.reply.validate().unwrap();

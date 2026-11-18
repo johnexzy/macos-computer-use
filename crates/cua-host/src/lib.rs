@@ -4,13 +4,13 @@ use cua_protocol::*;
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, Implementation, ServerCapabilities, ServerConfig},
+    model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig},
     service::RequestContext,
     tool, tool_handler, tool_router,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::{
     sync::{
         Arc,
@@ -47,6 +47,13 @@ pub struct ObserveArgs {
     pub target: TargetKey,
     #[serde(default)]
     pub include_screenshot: bool,
+    #[serde(default)]
+    pub include_ocr: bool,
+    #[schemars(length(min = 1, max = 4096))]
+    pub ocr_query: Option<String>,
+    pub crop_window: Option<Rect>,
+    #[schemars(range(min = 64, max = 2048))]
+    pub max_image_dimension_px: Option<u32>,
     #[serde(default)]
     pub include_values: bool,
     #[serde(default = "default_budget")]
@@ -119,6 +126,33 @@ fn before_native_error(code: ErrorCode, message: &'static str) -> CallToolResult
     CallToolResult::structured_error(json!({"version":VERSION,"route":"rust_host",
         "delivery":Delivery::NotDispatched,"verification":Verification::Unverified,
         "error":{"code":code,"message":message}}))
+}
+
+fn native_receipt(response: Response, is_error: bool) -> Result<CallToolResult, McpError> {
+    let mut value = serde_json::to_value(response)
+        .map_err(|_| McpError::internal_error("Cannot encode native receipt", None))?;
+    if is_error {
+        return Ok(CallToolResult::structured_error(value));
+    }
+    let image = value
+        .pointer_mut("/body/data/screenshot")
+        .and_then(Value::as_object_mut)
+        .and_then(|screenshot| {
+            let mime_type = match screenshot.get("mimeType")?.as_str()? {
+                "jpeg" => "image/jpeg",
+                "png" => "image/png",
+                _ => return None,
+            };
+            let Value::String(data) = screenshot.remove("dataBase64")? else {
+                return None;
+            };
+            Some(ContentBlock::image(data, mime_type))
+        });
+    let mut result = CallToolResult::structured(value);
+    if let Some(image) = image {
+        result.content.push(image);
+    }
+    Ok(result)
 }
 
 #[tool_router]
@@ -208,13 +242,7 @@ impl Host {
                 }
                 let is_error = matches!(&response.body, ResponseBody::Error(_))
                     || matches!(&response.body, ResponseBody::Act(result) if result.stop_reason != StopReason::Completed);
-                let value = serde_json::to_value(response)
-                    .map_err(|_| McpError::internal_error("Cannot encode native receipt", None))?;
-                Ok(if is_error {
-                    CallToolResult::structured_error(value)
-                } else {
-                    CallToolResult::structured(value)
-                })
+                native_receipt(response, is_error)
             }
             Err(error) => {
                 if trace {
@@ -263,7 +291,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Collect bounded semantic AX controls and opaque live references for one exact target. Values are opt-in; screenshots are unsupported. Partial coverage cannot prove absence."
+        description = "Observe one exact window. AX values, screenshots, and Vision OCR are opt-in. Optional cropWindow uses window-local points. Visual results report independent timing and coordinate transforms. Partial coverage cannot prove absence."
     )]
     async fn observe(
         &self,
@@ -275,6 +303,10 @@ impl Host {
                 target: args.target,
                 include_screenshot: args.include_screenshot,
                 include_values: args.include_values,
+                include_ocr: args.include_ocr,
+                ocr_query: args.ocr_query,
+                crop_window: args.crop_window,
+                max_image_dimension_px: args.max_image_dimension_px,
             }),
             args.budget_ms,
             context,
@@ -355,6 +387,46 @@ mod tests {
     }
 
     #[test]
+    fn screenshot_bytes_appear_only_in_the_mcp_image_block() {
+        let response = serde_json::from_value(json!({
+            "version": 1, "id": "r", "epoch": "e",
+            "body": { "result": "observe", "data": {
+                "observationId": "obs-e-1", "target": { "pid": 1, "windowId": 1 },
+                "collected": { "startedUnixMs": 1, "finishedUnixMs": 2 },
+                "windowBounds": { "x": -5, "y": 0, "width": 2, "height": 3 },
+                "accessibility": "unavailable", "elements": [],
+                "screenshot": {
+                    "mimeType": "png", "widthPx": 2, "heightPx": 3, "dataBase64": "AQID",
+                    "imageToScreen": {
+                        "scaleX": 1, "scaleY": 1, "offsetX": -5, "offsetY": 0,
+                        "validImageBounds": { "x": 0, "y": 0, "width": 2, "height": 3 },
+                        "coverage": "complete"
+                    },
+                    "collected": { "startedUnixMs": 1, "finishedUnixMs": 2 }
+                }
+            }}
+        }))
+        .unwrap();
+
+        let receipt = serde_json::to_value(native_receipt(response, false).unwrap()).unwrap();
+        assert_eq!(
+            receipt["content"][1],
+            json!({"type":"image","mimeType":"image/png","data":"AQID"})
+        );
+        assert_eq!(
+            receipt["structuredContent"]["body"]["data"]["screenshot"]["widthPx"],
+            2
+        );
+        assert!(
+            !receipt["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("AQID")
+        );
+        assert_eq!(receipt.to_string().matches("AQID").count(), 1);
+    }
+
+    #[test]
     fn invalid_public_bounds_never_reach_native_transport() {
         assert!(validate_public(&RequestBody::Capabilities(Empty {}), 0).is_err());
         assert!(validate_public(&RequestBody::Capabilities(Empty {}), 60001).is_err());
@@ -366,7 +438,11 @@ mod tests {
                         window_id: 1
                     },
                     include_screenshot: false,
-                    include_values: false
+                    include_values: false,
+                    include_ocr: false,
+                    ocr_query: None,
+                    crop_window: None,
+                    max_image_dimension_px: None,
                 }),
                 5000
             )

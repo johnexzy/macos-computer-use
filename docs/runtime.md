@@ -3,8 +3,8 @@
 The rebuild has a standalone Rust MCP executable and one persistent Swift child
 per connection. PER-3/PER-4 provide coordination and lifecycle; PER-5/PER-6 add
 retained semantic observations and background actions. PER-8 adds bounded linear
-composition, typed waits, and requested compact feedback. These
-executables use protocol v1 from [protocol.md](protocol.md).
+composition, typed waits, and requested compact feedback. PER-9 adds on-demand
+window capture and Vision OCR. These executables use protocol v1 from [protocol.md](protocol.md).
 
 ## Build and run from the checkout
 
@@ -39,16 +39,51 @@ the private Rust–Swift protocol has its own version and epoch.
 | --- | --- |
 | `capabilities` | Read permission booleans and installed mode without permission prompts; advertise `setValue`, `typeText`, and `press` when the AX mutation backend and Accessibility permission are available. |
 | `targets` | Return at most 256 visible, layer-zero windows with bundle IDs and exact process/window keys. |
-| `observe` | Associate the exact CG target with one AX window; return at most 256 controls with retained opaque references, bounds, actions, labels, and optional identifiers. Values require `includeValues: true`; images are unsupported. |
+| `observe` | Associate the exact CG target with one AX window; return at most 256 controls with retained opaque references, bounds, actions, labels, and optional identifiers. Values, screenshots, and OCR are opt-in. |
 | `act` | Execute 1–16 ordered `setValue`, `typeText`, `press`, or read-only `waitFor` steps against the same target and original observation. Revalidate before every mutation; stop on failure or unknown delivery. |
 | `waitFor` | Poll `elementExists`, `elementAbsent`, `enabled`, `valueEquals`, or `windowAbsent` within the original budget. Element waits return a fresh value-private observation; exact window absence returns its timed witness without a new observation. |
 
-Screenshots, OCR, keys, scrolling, and coordinate input remain unsupported in the
-new runtime. Composition has no branching, nested sequences, or target switching.
+Keys, scrolling, and coordinate input remain unsupported in the new runtime. Composition has no branching, nested sequences, or target switching.
 All mutations use the original retained refs; a presence wait does not issue refs
 for newly discovered controls. The wire format can
 represent more operations than this implementation executes. It does not route
 around missing capabilities through legacy selectors, activation, or global input.
+
+## Screenshot and OCR evidence
+
+On macOS 14+, `observe` can capture a single exact window in the background
+with ScreenCaptureKit. Both `includeScreenshot` and `includeOcr` default to
+`false`. Visual collection checks Screen Recording permission without prompting.
+macOS 13 returns `unsupported` for the visual channel and can still return AX.
+Use the matching installed host and runtime for the new fields.
+
+- `includeScreenshot: true` returns a JPEG as an MCP image block. The text and
+  structured result contain dimensions, timing and mapping without duplicating
+  the image bytes. The private Rust–Swift transport carries the encoded bytes.
+- `includeOcr: true` can return text without exposing the bitmap. With
+  `ocrQuery`, Vision supplies boxes for the matched ranges. Without a query,
+  OCR returns line boxes. OCR reads visible pixels independently of
+  `includeValues`, which controls semantic AX values.
+- `cropWindow` is a rectangle in window-local logical points, with its origin
+  at the top left. `maxImageDimensionPx` bounds the longest image side, defaults
+  to 1600, and accepts 64 through 2048. The result describes the actual pixel
+  dimensions and crop, including pixel-edge rounding.
+- The frame provides both `imageToWindow` and `imageToScreen`. Use those
+  transforms for OCR bounds, including on displays with negative origins.
+  AX, capture, and OCR have separate collection intervals. If capture geometry
+  changed during collection, the visual channel discards the frame. A stable
+  frame can disagree with the earlier AX bounds, indicated by
+  `geometryMatchesAX: false`.
+
+Run the live check against the disposable AppKit fixture with
+`npm run test:visual:live`.
+
+Visual evidence grants no input authority. A future coordinate input path
+must validate the relevant frame and layout at the dispatch boundary. An
+observation reference or TTL alone cannot establish visual freshness.
+
+Apple documentation covers [ScreenCaptureKit window capture](https://developer.apple.com/documentation/screencapturekit/scscreenshotmanager)
+and [Vision text range boxes](https://developer.apple.com/documentation/vision/recognizing-text-in-images).
 
 ## Observation and reference validity
 

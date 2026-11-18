@@ -1,5 +1,6 @@
 import ApplicationServices
 import CUAProtocol
+import CoreGraphics
 @testable import CUARuntime
 import Foundation
 import XCTest
@@ -73,6 +74,7 @@ private final class SemanticBackend: AXReading, @unchecked Sendable {
 
 private final class SemanticCatalog: WindowCatalog, @unchecked Sendable {
     var records: [Target]
+    var didReadWindow: (() -> Void)?
     init(_ records: [Target]) { self.records = records }
     func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult {
         try context.check(); return TargetsResult(targets: records, truncated: false)
@@ -80,6 +82,7 @@ private final class SemanticCatalog: WindowCatalog, @unchecked Sendable {
     func window(_ key: TargetKey, context: OperationContext) throws -> Target {
         try context.check()
         guard let target = records.first(where: { $0.key == key }) else { throw NativeFailure(.targetNotFound, "missing target") }
+        didReadWindow?()
         return target
     }
     func processWindows(pid: UInt32, context: OperationContext) throws -> [Target] {
@@ -113,7 +116,115 @@ private struct SemanticFixture {
     }
 }
 
+private struct TestVisualCapture: VisualCapturing {
+    let run: @Sendable (Target, Rect?, Int, OperationContext) throws -> CapturedVisual
+
+    func capture(target: Target, crop: Rect?, maxDimension: Int, context: OperationContext) throws -> CapturedVisual {
+        try run(target, crop, maxDimension, context)
+    }
+}
+
+private func blankFrame(_ target: Target) throws -> CapturedVisual {
+    let width: UInt32 = 160, height: UInt32 = 80
+    let bitmap = try XCTUnwrap(CGContext(data: nil, width: Int(width), height: Int(height), bitsPerComponent: 8,
+        bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+    let image = try XCTUnwrap(bitmap.makeImage())
+    let bounds = target.bounds
+    let domain = Rect(x: 0, y: 0, width: Double(width), height: Double(height))
+    let screen = ImageTransform(scaleX: bounds.width / Double(width), scaleY: bounds.height / Double(height),
+        offsetX: bounds.x, offsetY: bounds.y, validImageBounds: domain, coverage: .complete)
+    let window = ImageTransform(scaleX: screen.scaleX, scaleY: screen.scaleY,
+        offsetX: 0, offsetY: 0, validImageBounds: domain, coverage: .complete)
+    let now = UInt64(Date().timeIntervalSince1970 * 1000)
+    let frame = VisualFrame(widthPx: width, heightPx: height, captureWindowBounds: bounds,
+        captureScreenBounds: bounds, imageToScreen: screen, imageToWindow: window)
+    return CapturedVisual(image: image, frame: frame, collected: CollectionInterval(startedUnixMs: now, finishedUnixMs: now))
+}
+
 final class SemanticObservationTests: XCTestCase {
+    func testUnrequestedVisualChannelDoesNotEnterCaptureBackend() throws {
+        let fixture = SemanticFixture()
+        let capture = TestVisualCapture { _, _, _, _ in
+            XCTFail("AX-only observation entered visual capture")
+            throw NativeFailure(.nativeFailed, "unexpected visual capture")
+        }
+        let system = MacOSSystem(backend: fixture.backend, catalog: fixture.catalog, visual: capture, isAXTrusted: { true })
+        let result = try system.observe(params: ObserveRequest(target: fixture.target.key, includeScreenshot: false, includeValues: false),
+            observationId: "ax-only", context: OperationContext(budgetMs: 5000))
+        XCTAssertEqual(result.observation.accessibility, .complete)
+        XCTAssertNil(result.observation.visual)
+    }
+
+    func testVisualReceiptKeepsUnavailableAXDistinctFromCapturedFrame() throws {
+        let fixture = SemanticFixture()
+        let capture = TestVisualCapture { target, _, _, _ in try blankFrame(target) }
+        let system = MacOSSystem(backend: fixture.backend, catalog: fixture.catalog, visual: capture, isAXTrusted: { false })
+        let result = try system.observe(params: ObserveRequest(target: fixture.target.key, includeScreenshot: true, includeValues: false),
+            observationId: "image-only", context: OperationContext(budgetMs: 5000))
+        XCTAssertEqual(result.observation.accessibility, .unavailable)
+        XCTAssertNil(result.observation.visual?.geometryMatchesAX)
+        XCTAssertEqual(result.observation.visual?.captureStatus, .captured)
+        XCTAssertNotNil(result.observation.screenshot)
+        XCTAssertNil(result.handle)
+        try Frame.response(Response(version: 1, id: "r", epoch: "epoch", body: .observe(result.observation))).validate()
+    }
+
+    func testFailedAXAssociationReportsAttemptAndReturnsVisualEvidence() throws {
+        let fixture = SemanticFixture()
+        fixture.backend.appWindows = []
+        let capture = TestVisualCapture { target, _, _, _ in try blankFrame(target) }
+        let system = MacOSSystem(backend: fixture.backend, catalog: fixture.catalog, visual: capture, isAXTrusted: { true })
+        let result = try system.observe(params: ObserveRequest(target: fixture.target.key, includeScreenshot: true, includeValues: false),
+            observationId: "ax-unavailable", context: OperationContext(budgetMs: 5000))
+        XCTAssertEqual(result.observation.accessibility, .unavailable)
+        XCTAssertNotNil(result.observation.accessibilityCollected)
+        XCTAssertNil(result.observation.visual?.geometryMatchesAX)
+        XCTAssertNotNil(result.observation.screenshot)
+        XCTAssertNil(result.handle)
+        try Frame.response(Response(version: 1, id: "r", epoch: "epoch", body: .observe(result.observation))).validate()
+    }
+
+    func testStableCaptureAfterWindowMoveDisclosesAXGeometryDisagreement() throws {
+        let fixture = SemanticFixture()
+        let moved = Target(key: fixture.target.key, bundleId: fixture.target.bundleId, title: fixture.target.title,
+            bounds: Rect(x: -410, y: 180, width: 340, height: 540))
+        var reads = 0
+        fixture.catalog.didReadWindow = { [weak catalog = fixture.catalog] in
+            reads += 1
+            if reads == 2 { catalog?.records = [moved] }
+        }
+        let capture = TestVisualCapture { target, _, _, _ in try blankFrame(target) }
+        let system = MacOSSystem(backend: fixture.backend, catalog: fixture.catalog, visual: capture, isAXTrusted: { true })
+        let result = try system.observe(params: ObserveRequest(target: fixture.target.key, includeScreenshot: true, includeValues: false),
+            observationId: "visual-drift", context: OperationContext(budgetMs: 5000))
+        XCTAssertEqual(result.observation.windowBounds, fixture.target.bounds)
+        XCTAssertEqual(result.observation.visual?.frame?.captureWindowBounds, moved.bounds)
+        XCTAssertEqual(result.observation.visual?.geometryMatchesAX, false)
+        let handle = try XCTUnwrap(result.handle as? SemanticObservationHandle)
+        XCTAssertThrowsError(try handle.validateWindow(context: OperationContext(budgetMs: 5000)))
+        try Frame.response(Response(version: 1, id: "r", epoch: "epoch", body: .observe(result.observation))).validate()
+    }
+
+    func testWindowMoveDuringCaptureDiscardsPixelsAndOCR() throws {
+        let fixture = SemanticFixture()
+        let catalog = fixture.catalog
+        let moved = Target(key: fixture.target.key, bundleId: fixture.target.bundleId, title: fixture.target.title,
+            bounds: Rect(x: 500, y: 50, width: 440, height: 230))
+        let capture = TestVisualCapture { target, _, _, _ in
+            let activeFrame = try blankFrame(target)
+            catalog.records = [moved]
+            return activeFrame
+        }
+        let system = MacOSSystem(backend: fixture.backend, catalog: catalog, visual: capture, isAXTrusted: { true })
+        let result = try system.observe(params: ObserveRequest(target: fixture.target.key, includeScreenshot: true, includeValues: false, includeOcr: true),
+            observationId: "capture-drift", context: OperationContext(budgetMs: 5000))
+        XCTAssertEqual(result.observation.accessibility, .complete)
+        XCTAssertEqual(result.observation.visual?.captureStatus, .geometryChanged)
+        XCTAssertEqual(result.observation.visual?.ocr?.status, .unavailable)
+        XCTAssertNil(result.observation.visual?.frame)
+        XCTAssertNil(result.observation.screenshot)
+    }
+
     func testUnavailableReadKeepsReadableSiblingsWithoutProvingAbsence() throws {
         let fixture = SemanticFixture()
         fixture.second.readUnavailable = true

@@ -12,6 +12,10 @@ pub const MAX_RETAINED_OBSERVATIONS: usize = 32;
 pub const OBSERVATION_TTL_MS: u32 = 60_000;
 pub const MAX_BUDGET_MS: u32 = 60_000;
 pub const MAX_FEEDBACK_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_OCR_MATCHES: usize = 256;
+pub const MAX_OCR_TEXT_BYTES: usize = 1024;
+pub const MAX_OCR_BYTES: usize = 256 * 1024;
+pub const MAX_OCR_QUERY_BYTES: usize = 4096;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 macro_rules! record {
@@ -59,6 +63,23 @@ choices!(Coverage {
     Unavailable
 });
 choices!(MimeType { Png, Jpeg });
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureStatus {
+    Captured,
+    PermissionDenied,
+    Unsupported,
+    Unavailable,
+    GeometryChanged,
+    Failed,
+}
+choices!(OcrStatus {
+    Complete,
+    Partial,
+    Unavailable,
+    Failed
+});
 choices!(CoordinateSpace {
     ScreenPoints,
     WindowPoints,
@@ -200,6 +221,30 @@ record!(Screenshot {
     image_to_screen: ImageTransform,
     collected: CollectionInterval
 });
+record!(VisualFrame {
+    width_px: u32,
+    height_px: u32,
+    capture_window_bounds: Rect,
+    capture_screen_bounds: Rect,
+    image_to_screen: ImageTransform,
+    image_to_window: ImageTransform
+});
+record!(OcrMatch {
+    text: String,
+    image_bounds: Rect
+});
+record!(OcrEvidence { status: OcrStatus, collected: Option<CollectionInterval>, matches: Vec<OcrMatch> });
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VisualEvidence {
+    pub capture_status: CaptureStatus,
+    pub collected: CollectionInterval,
+    #[serde(rename = "geometryMatchesAX")]
+    pub geometry_matches_ax: Option<bool>,
+    pub frame: Option<VisualFrame>,
+    pub ocr: Option<OcrEvidence>,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -225,16 +270,40 @@ pub struct Element {
 fn nullable_enabled_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     <Option<bool> as schemars::JsonSchema>::json_schema(generator)
 }
-record!(ObserveRequest {
-    target: TargetKey,
-    include_screenshot: bool,
-    include_values: bool
-});
-record!(Observation {
-    observation_id: String, target: TargetKey, collected: CollectionInterval,
-    window_bounds: Rect, accessibility: Coverage, accessibility_collected: Option<CollectionInterval>, elements: Vec<Element>,
-    screenshot: Option<Screenshot>
-});
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ObserveRequest {
+    pub target: TargetKey,
+    pub include_screenshot: bool,
+    pub include_values: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_ocr: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr_query: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop_window: Option<Rect>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_image_dimension_px: Option<u32>,
+}
+fn is_false(value: &bool) -> bool {
+    !value
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Observation {
+    pub observation_id: String,
+    pub target: TargetKey,
+    pub collected: CollectionInterval,
+    pub window_bounds: Rect,
+    pub accessibility: Coverage,
+    pub accessibility_collected: Option<CollectionInterval>,
+    pub elements: Vec<Element>,
+    pub screenshot: Option<Screenshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visual: Option<Box<VisualEvidence>>,
+}
 record!(Selector { role: String, label: Option<String>, identifier: Option<String> });
 record!(ElementCondition { selector: Selector });
 record!(ValueCondition {
@@ -769,6 +838,133 @@ impl Screenshot {
         )
     }
 }
+fn near(a: f64, b: f64) -> bool {
+    (a - b).abs() <= 0.000_001
+}
+fn same_rect(a: &Rect, b: &Rect) -> bool {
+    near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height)
+}
+fn inside(inner: &Rect, outer: &Rect) -> bool {
+    inner.x >= outer.x - 0.000_001
+        && inner.y >= outer.y - 0.000_001
+        && inner.x + inner.width <= outer.x + outer.width + 0.000_001
+        && inner.y + inner.height <= outer.y + outer.height + 0.000_001
+}
+impl ObserveRequest {
+    fn validate(&self) -> Result<(), String> {
+        target(&self.target)?;
+        if let Some(query) = &self.ocr_query {
+            require(
+                self.include_ocr && !query.is_empty() && query.len() <= MAX_OCR_QUERY_BYTES,
+                "invalid OCR query",
+            )?;
+        }
+        if let Some(crop) = &self.crop_window {
+            rect(crop)?;
+            require(
+                (self.include_screenshot || self.include_ocr) && crop.x >= 0.0 && crop.y >= 0.0,
+                "invalid window crop",
+            )?;
+        }
+        if let Some(size) = self.max_image_dimension_px {
+            require(
+                (self.include_screenshot || self.include_ocr) && (64..=2048).contains(&size),
+                "invalid image dimension limit",
+            )?;
+        }
+        Ok(())
+    }
+}
+impl VisualFrame {
+    fn validate(&self) -> Result<(), String> {
+        rect(&self.capture_window_bounds)?;
+        rect(&self.capture_screen_bounds)?;
+        require(
+            self.width_px > 0
+                && self.height_px > 0
+                && inside(&self.capture_screen_bounds, &self.capture_window_bounds),
+            "invalid visual capture bounds",
+        )?;
+        let domain = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: self.width_px.into(),
+            height: self.height_px.into(),
+        };
+        let screen = &self.image_to_screen;
+        let window = &self.image_to_window;
+        for transform in [screen, window] {
+            require(
+                transform.coverage == Coverage::Complete
+                    && same_rect(&transform.valid_image_bounds, &domain),
+                "visual frame mapping must cover returned image",
+            )?;
+            transform.to_screen(&Point { x: 0.0, y: 0.0 })?;
+        }
+        let mapped = Rect {
+            x: screen.offset_x,
+            y: screen.offset_y,
+            width: domain.width * screen.scale_x,
+            height: domain.height * screen.scale_y,
+        };
+        require(
+            same_rect(&mapped, &self.capture_screen_bounds),
+            "image mapping disagrees with capture bounds",
+        )?;
+        require(
+            near(window.scale_x, screen.scale_x)
+                && near(window.scale_y, screen.scale_y)
+                && near(
+                    window.offset_x,
+                    screen.offset_x - self.capture_window_bounds.x,
+                )
+                && near(
+                    window.offset_y,
+                    screen.offset_y - self.capture_window_bounds.y,
+                ),
+            "window and desktop mappings disagree",
+        )
+    }
+}
+impl OcrEvidence {
+    fn validate(&self) -> Result<(), String> {
+        if let Some(time) = &self.collected {
+            interval(time)?;
+        }
+        require(
+            self.matches.len() <= MAX_OCR_MATCHES,
+            "too many OCR matches",
+        )?;
+        match self.status {
+            OcrStatus::Complete | OcrStatus::Partial => require(
+                self.collected.is_some(),
+                "available OCR requires collection interval",
+            )?,
+            OcrStatus::Failed => require(
+                self.collected.is_some() && self.matches.is_empty(),
+                "failed OCR requires interval and no matches",
+            )?,
+            OcrStatus::Unavailable => require(
+                self.matches.is_empty(),
+                "unavailable OCR cannot include matches",
+            )?,
+        }
+        for value in &self.matches {
+            require(
+                !value.text.is_empty() && value.text.len() <= MAX_OCR_TEXT_BYTES,
+                "invalid OCR text",
+            )?;
+            rect(&value.image_bounds)?;
+        }
+        require(
+            serde_json::to_vec(self)
+                .map_err(|_| "cannot encode OCR")?
+                .len()
+                <= MAX_OCR_BYTES,
+            "OCR exceeds payload limit",
+        )
+    }
+}
 impl Observation {
     fn validate(&self) -> Result<(), String> {
         id(&self.observation_id)?;
@@ -799,6 +995,76 @@ impl Observation {
         if let Some(screenshot) = &self.screenshot {
             screenshot.validate()?;
             channel_interval(&screenshot.collected, &self.collected)?;
+        }
+        if let Some(visual) = &self.visual {
+            channel_interval(&visual.collected, &self.collected)?;
+            let captured = visual.capture_status == CaptureStatus::Captured;
+            require(
+                captured == visual.frame.is_some(),
+                "capture status and visual frame disagree",
+            )?;
+            if let Some(frame) = &visual.frame {
+                frame.validate()?;
+                if self.accessibility != Coverage::Unavailable {
+                    require(
+                        visual.geometry_matches_ax
+                            == Some(same_rect(&frame.capture_window_bounds, &self.window_bounds)),
+                        "missing or inconsistent AX geometry agreement",
+                    )?;
+                } else {
+                    require(
+                        visual.geometry_matches_ax.is_none(),
+                        "unavailable AX cannot establish geometry agreement",
+                    )?;
+                }
+                if let Some(image) = &self.screenshot {
+                    require(
+                        image.width_px == frame.width_px
+                            && image.height_px == frame.height_px
+                            && image.image_to_screen == frame.image_to_screen
+                            && image.collected == visual.collected,
+                        "screenshot and visual provenance disagree",
+                    )?;
+                }
+                if let Some(ocr) = &visual.ocr {
+                    let domain = Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: frame.width_px.into(),
+                        height: frame.height_px.into(),
+                    };
+                    require(
+                        ocr.matches.iter().all(|m| inside(&m.image_bounds, &domain)),
+                        "OCR bounds outside returned image",
+                    )?;
+                }
+            } else {
+                require(
+                    self.screenshot.is_none(),
+                    "failed capture cannot include screenshot",
+                )?;
+                require(
+                    visual.geometry_matches_ax.is_none()
+                        || (visual.capture_status == CaptureStatus::GeometryChanged
+                            && visual.geometry_matches_ax == Some(false)
+                            && self.accessibility != Coverage::Unavailable),
+                    "failed capture has unsupported geometry agreement",
+                )?;
+            }
+            if let Some(ocr) = &visual.ocr {
+                ocr.validate()?;
+                if let Some(time) = &ocr.collected {
+                    channel_interval(time, &self.collected)?;
+                    require(
+                        time.started_unix_ms >= visual.collected.finished_unix_ms,
+                        "OCR precedes capture completion",
+                    )?;
+                }
+                require(
+                    captured || ocr.status == OcrStatus::Unavailable,
+                    "OCR requires a captured frame",
+                )?;
+            }
         }
         Ok(())
     }
@@ -1000,7 +1266,7 @@ impl Frame {
                     id(request.epoch.as_deref().ok_or("epoch required")?)?;
                 }
                 match &request.body {
-                    RequestBody::Observe(v) => target(&v.target)?,
+                    RequestBody::Observe(v) => v.validate()?,
                     RequestBody::Act(v) => v.validate()?,
                     RequestBody::WaitFor(v) => {
                         id(&v.observation_id)?;
@@ -1138,7 +1404,65 @@ impl Response {
                 require(
                     request.include_screenshot || observation.screenshot.is_none(),
                     "observation includes unrequested image",
-                )
+                )?;
+                require(
+                    request.include_screenshot
+                        || request.include_ocr
+                        || observation.visual.is_none(),
+                    "observation includes unrequested visual evidence",
+                )?;
+                require(
+                    !(request.include_ocr
+                        || request.crop_window.is_some()
+                        || request.max_image_dimension_px.is_some())
+                        || observation.visual.is_some(),
+                    "requested visual evidence is missing",
+                )?;
+                if let Some(visual) = &observation.visual {
+                    require(
+                        request.include_ocr == visual.ocr.is_some(),
+                        "OCR inclusion does not match request",
+                    )?;
+                    if let Some(frame) = &visual.frame {
+                        require(
+                            !request.include_screenshot || observation.screenshot.is_some(),
+                            "requested bitmap is missing",
+                        )?;
+                        if let Some(limit) = request.max_image_dimension_px {
+                            require(
+                                frame.width_px.max(frame.height_px) <= limit,
+                                "image exceeds requested dimensions",
+                            )?;
+                        }
+                        let expected = request
+                            .crop_window
+                            .as_ref()
+                            .map(|r| Rect {
+                                x: frame.capture_window_bounds.x + r.x,
+                                y: frame.capture_window_bounds.y + r.y,
+                                width: r.width,
+                                height: r.height,
+                            })
+                            .unwrap_or_else(|| frame.capture_window_bounds.clone());
+                        let actual = &frame.capture_screen_bounds;
+                        let matches = if request.crop_window.is_some() {
+                            inside(actual, &expected)
+                                && (actual.x - expected.x).abs()
+                                    <= frame.image_to_screen.scale_x + 0.000_001
+                                && (actual.y - expected.y).abs()
+                                    <= frame.image_to_screen.scale_y + 0.000_001
+                                && ((actual.x + actual.width) - (expected.x + expected.width)).abs()
+                                    <= frame.image_to_screen.scale_x + 0.000_001
+                                && ((actual.y + actual.height) - (expected.y + expected.height))
+                                    .abs()
+                                    <= frame.image_to_screen.scale_y + 0.000_001
+                        } else {
+                            same_rect(&expected, actual)
+                        };
+                        require(matches, "capture does not match requested window crop")?;
+                    }
+                }
+                Ok(())
             }
             (RequestBody::Act(request), ResponseBody::Act(result)) => {
                 require(

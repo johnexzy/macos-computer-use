@@ -166,6 +166,64 @@ extension Screenshot {
     }
 }
 
+private func near(_ a: Double, _ b: Double) -> Bool { abs(a - b) <= 0.000_001 }
+private func sameRect(_ a: Rect, _ b: Rect) -> Bool {
+    near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height)
+}
+private func inside(_ a: Rect, _ b: Rect) -> Bool {
+    a.x >= b.x - 0.000_001 && a.y >= b.y - 0.000_001 &&
+        a.x + a.width <= b.x + b.width + 0.000_001 && a.y + a.height <= b.y + b.height + 0.000_001
+}
+extension ObserveRequest {
+    func validate() throws {
+        try validTarget(target)
+        if let query = ocrQuery {
+            try require(includeOcr && !query.isEmpty && query.utf8.count <= Limits.maxOcrQueryBytes, "invalid OCR query")
+        }
+        if let crop = cropWindow {
+            try validRect(crop)
+            try require((includeScreenshot || includeOcr) && crop.x >= 0 && crop.y >= 0, "invalid window crop")
+        }
+        if let size = maxImageDimensionPx {
+            try require((includeScreenshot || includeOcr) && (64...2048).contains(size), "invalid image dimension limit")
+        }
+    }
+}
+extension VisualFrame {
+    func validate() throws {
+        try validRect(captureWindowBounds); try validRect(captureScreenBounds)
+        try require(widthPx > 0 && heightPx > 0 && inside(captureScreenBounds, captureWindowBounds), "invalid visual capture bounds")
+        let domain = Rect(x: 0, y: 0, width: Double(widthPx), height: Double(heightPx))
+        for transform in [imageToScreen, imageToWindow] {
+            try require(transform.coverage == .complete && sameRect(transform.validImageBounds, domain), "visual frame mapping must cover returned image")
+            _ = try transform.toScreen(Point(x: 0, y: 0))
+        }
+        let mapped = Rect(x: imageToScreen.offsetX, y: imageToScreen.offsetY,
+                          width: domain.width * imageToScreen.scaleX, height: domain.height * imageToScreen.scaleY)
+        try require(sameRect(mapped, captureScreenBounds), "image mapping disagrees with capture bounds")
+        try require(near(imageToWindow.scaleX, imageToScreen.scaleX) && near(imageToWindow.scaleY, imageToScreen.scaleY) &&
+                    near(imageToWindow.offsetX, imageToScreen.offsetX - captureWindowBounds.x) &&
+                    near(imageToWindow.offsetY, imageToScreen.offsetY - captureWindowBounds.y), "window and desktop mappings disagree")
+    }
+}
+extension OcrEvidence {
+    func validate() throws {
+        if let time = collected { try validInterval(time) }
+        try require(matches.count <= Limits.maxOcrMatches, "too many OCR matches")
+        switch status {
+        case .complete, .partial: try require(collected != nil, "available OCR requires collection interval")
+        case .failed: try require(collected != nil && matches.isEmpty, "failed OCR requires interval and no matches")
+        case .unavailable: try require(matches.isEmpty, "unavailable OCR cannot include matches")
+        }
+        for match in matches {
+            try require(!match.text.isEmpty && match.text.utf8.count <= Limits.maxOcrTextBytes, "invalid OCR text")
+            try validRect(match.imageBounds)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        try require(try encoder.encode(self).count <= Limits.maxOcrBytes, "OCR exceeds payload limit")
+    }
+}
 extension Observation {
     func validate() throws {
         try identifier(observationId)
@@ -185,6 +243,38 @@ extension Observation {
         }
         try screenshot?.validate()
         if let screenshot { try channelInterval(screenshot.collected, within: collected) }
+        if let visual {
+            try channelInterval(visual.collected, within: collected)
+            let captured = visual.captureStatus == .captured
+            try require(captured == (visual.frame != nil), "capture status and visual frame disagree")
+            if let frame = visual.frame {
+                try frame.validate()
+                if accessibility != .unavailable {
+                    try require(visual.geometryMatchesAX == sameRect(frame.captureWindowBounds, windowBounds), "missing or inconsistent AX geometry agreement")
+                } else { try require(visual.geometryMatchesAX == nil, "unavailable AX cannot establish geometry agreement") }
+                if let image = screenshot {
+                    try require(image.widthPx == frame.widthPx && image.heightPx == frame.heightPx &&
+                                image.imageToScreen == frame.imageToScreen && image.collected == visual.collected,
+                                "screenshot and visual provenance disagree")
+                }
+                if let ocr = visual.ocr {
+                    let domain = Rect(x: 0, y: 0, width: Double(frame.widthPx), height: Double(frame.heightPx))
+                    try require(ocr.matches.allSatisfy { inside($0.imageBounds, domain) }, "OCR bounds outside returned image")
+                }
+            } else {
+                try require(screenshot == nil, "failed capture cannot include screenshot")
+                try require(visual.geometryMatchesAX == nil || (visual.captureStatus == .geometryChanged &&
+                            visual.geometryMatchesAX == false && accessibility != .unavailable), "failed capture has unsupported geometry agreement")
+            }
+            if let ocr = visual.ocr {
+                try ocr.validate()
+                if let time = ocr.collected {
+                    try channelInterval(time, within: collected)
+                    try require(time.startedUnixMs >= visual.collected.finishedUnixMs, "OCR precedes capture completion")
+                }
+                try require(captured || ocr.status == .unavailable, "OCR requires a captured frame")
+            }
+        }
     }
 }
 
@@ -303,7 +393,7 @@ extension Frame {
                 try identifier(epoch)
             }
             switch request.body {
-            case .observe(let value): try validTarget(value.target)
+            case .observe(let value): try value.validate()
             case .act(let value): try value.validate()
             case .waitFor(let value):
                 try identifier(value.observationId)
@@ -396,6 +486,33 @@ extension Response {
                         "observation includes unrequested values")
             try require(request.includeScreenshot || observation.screenshot == nil,
                         "observation includes unrequested image")
+            try require(request.includeScreenshot || request.includeOcr || observation.visual == nil, "observation includes unrequested visual evidence")
+            try require(!(request.includeOcr || request.cropWindow != nil || request.maxImageDimensionPx != nil) || observation.visual != nil,
+                        "requested visual evidence is missing")
+            if let visual = observation.visual {
+                try require(request.includeOcr == (visual.ocr != nil), "OCR inclusion does not match request")
+                if let frame = visual.frame {
+                    try require(!request.includeScreenshot || observation.screenshot != nil, "requested bitmap is missing")
+                    if let limit = request.maxImageDimensionPx {
+                        try require(max(frame.widthPx, frame.heightPx) <= limit, "image exceeds requested dimensions")
+                    }
+                    let expected: Rect
+                    if let crop = request.cropWindow {
+                        expected = Rect(x: frame.captureWindowBounds.x + crop.x, y: frame.captureWindowBounds.y + crop.y,
+                                        width: crop.width, height: crop.height)
+                    } else { expected = frame.captureWindowBounds }
+                    let actual = frame.captureScreenBounds
+                    let matches: Bool
+                    if request.cropWindow != nil {
+                        matches = inside(actual, expected) &&
+                            abs(actual.x - expected.x) <= frame.imageToScreen.scaleX + 0.000_001 &&
+                            abs(actual.y - expected.y) <= frame.imageToScreen.scaleY + 0.000_001 &&
+                            abs((actual.x + actual.width) - (expected.x + expected.width)) <= frame.imageToScreen.scaleX + 0.000_001 &&
+                            abs((actual.y + actual.height) - (expected.y + expected.height)) <= frame.imageToScreen.scaleY + 0.000_001
+                    } else { matches = sameRect(expected, actual) }
+                    try require(matches, "capture does not match requested window crop")
+                }
+            }
         case (.act(let request), .act(let result)):
             try require(result.observationId == request.observationId, "act observation provenance mismatch")
             try require(result.steps.count + Int(result.remainingSteps) == request.steps.count,
