@@ -93,7 +93,7 @@ observations and typed receipts reach the recovery policy. The fixture's private
 control/model values, generations, pending writes and attempt counters feed a
 separate oracle, with a 500 ms read budget. A continuous independent foreground
 observer is required through cleanup; known positive fixture activation also
-vetoes success. No global input, app launch or permission request is performed.
+vetoes success. The policy uses semantic input on the disposable fixture and relies on existing permissions.
 
 ## Interpret the result
 
@@ -119,3 +119,22 @@ checks. A stricter policy can reduce damage while completing fewer tasks; report
 that tradeoff instead of claiming recovery universally improves success. Evidence
 for this one route and fixture does not establish routing across arbitrary apps,
 visual accuracy, autonomous recovery, or a model-training benefit.
+
+## Verified fixture results
+
+The native campaign assessed all 54 assignments with 18 matched state triplets.
+The deterministic offline campaign assessed all 72 assignments with 24 matched
+state triplets. Both campaigns recorded zero duplicate actions.
+
+| Policy | Native strict completion | Native trials with additional damage | Offline strict completion |
+| --- | ---: | ---: | ---: |
+| None | 3/18 | 0 | 3/24 |
+| Simple | 9/18 | 3 | 15/24 |
+| Guarded | 6/18 | 0 | 9/24 |
+
+The simple arm's three native damage cases wrote the recreated control. The
+guarded arm rejected that route because the original retained reference was
+invalid. Median native policy time was 29.8 ms for simple and 30.4 ms for
+guarded. Those measurements include the extra checks on this fixture. The
+[verification record](evidence/per-13-recovery-2026-11-18.json) retains the
+source revisions, binary hashes, repair calls and latency distributions.

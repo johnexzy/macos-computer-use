@@ -1,0 +1,306 @@
+{
+  "native": {
+    "source": {
+      "revision": "340291619f9414c5a3ba4332734634585481df37",
+      "dirty": false,
+      "sha256": {
+        "test/recovery/recovery.mjs": "d38726b150ccc527ddaf1d4677c5d0d0a9223d2e7e2f09e7aa009975f6eafa17",
+        "test/recovery/oracle.mjs": "99e52154e86cd8c1c5806c01e99b2e83f6e9096eb3081f12e7906c35a6d4fa13",
+        "test/recovery/offline.mjs": "affd6697b2b701bd191b0c4f84e1c2777efabcc4d2d223c2c77f9b0ee42bfe44",
+        "test/recovery/native.mjs": "0786f8349a420f6134319703e7a7e320e93bb3469b7dd585e01c67e6517668ea",
+        "test/recovery/metrics.mjs": "f50a2dce72737f2eae1c71cc318108ce9ab971763544c64933800a264803d932",
+        "test/recovery/run.mjs": "d39e396b2f1c1aa13e8eb489362ac82a6ec9e6d348ae3ef99794cd61f542e645",
+        "test/recovery/recovery.test.mjs": "bd8d8bbb7380c20119463723294ee56d3a550af65c5616616b2284a788b9fef5"
+      }
+    },
+    "pairedStates": 18,
+    "repairLimits": {
+      "maxCalls": 4,
+      "maxMutations": 1,
+      "timeoutMs": 1500
+    },
+    "summary": {
+      "assigned": 54,
+      "assessed": 54,
+      "setupBlocked": 0,
+      "strictUnassisted": 9,
+      "strictOracleState": 18,
+      "strictEventual": 18,
+      "strictEventualPerAssigned": 0.3333333333333333,
+      "duplicateActions": 0,
+      "additionalDamage": 3,
+      "repairSteps": 63,
+      "repairCalls": 63,
+      "repairMutations": 12,
+      "budgetStopped": 0,
+      "repairTimeMs": {
+        "samples": 54,
+        "p50": 25.166124999999738,
+        "p95": 131.55375000000095
+      },
+      "repeatedConsistency": {
+        "repetitions": 3,
+        "groups": 18,
+        "fullyAssessedGroups": 18,
+        "allStrictSuccessGroups": 6
+      },
+      "model": {
+        "runs": false,
+        "tokens": null,
+        "costUsd": null
+      }
+    },
+    "byPolicy": {
+      "none": {
+        "assigned": 18,
+        "assessed": 18,
+        "setupBlocked": 0,
+        "strictUnassisted": 3,
+        "strictOracleState": 3,
+        "strictEventual": 3,
+        "strictEventualPerAssigned": 0.16666666666666666,
+        "duplicateActions": 0,
+        "additionalDamage": 0,
+        "repairSteps": 0,
+        "repairCalls": 0,
+        "repairMutations": 0,
+        "budgetStopped": 0,
+        "repairTimeMs": {
+          "samples": 18,
+          "p50": 0.0012500000011641532,
+          "p95": 0.009334000000080778
+        },
+        "repeatedConsistency": {
+          "repetitions": 3,
+          "groups": 6,
+          "fullyAssessedGroups": 6,
+          "allStrictSuccessGroups": 1
+        },
+        "model": {
+          "runs": false,
+          "tokens": null,
+          "costUsd": null
+        }
+      },
+      "simple": {
+        "assigned": 18,
+        "assessed": 18,
+        "setupBlocked": 0,
+        "strictUnassisted": 3,
+        "strictOracleState": 9,
+        "strictEventual": 9,
+        "strictEventualPerAssigned": 0.5,
+        "duplicateActions": 0,
+        "additionalDamage": 3,
+        "repairSteps": 27,
+        "repairCalls": 27,
+        "repairMutations": 9,
+        "budgetStopped": 0,
+        "repairTimeMs": {
+          "samples": 18,
+          "p50": 29.782791999999972,
+          "p95": 77.26399999999921
+        },
+        "repeatedConsistency": {
+          "repetitions": 3,
+          "groups": 6,
+          "fullyAssessedGroups": 6,
+          "allStrictSuccessGroups": 3
+        },
+        "model": {
+          "runs": false,
+          "tokens": null,
+          "costUsd": null
+        }
+      },
+      "guarded": {
+        "assigned": 18,
+        "assessed": 18,
+        "setupBlocked": 0,
+        "strictUnassisted": 3,
+        "strictOracleState": 6,
+        "strictEventual": 6,
+        "strictEventualPerAssigned": 0.3333333333333333,
+        "duplicateActions": 0,
+        "additionalDamage": 0,
+        "repairSteps": 36,
+        "repairCalls": 36,
+        "repairMutations": 3,
+        "budgetStopped": 0,
+        "repairTimeMs": {
+          "samples": 18,
+          "p50": 30.364041999997426,
+          "p95": 172.57070900000326
+        },
+        "repeatedConsistency": {
+          "repetitions": 3,
+          "groups": 6,
+          "fullyAssessedGroups": 6,
+          "allStrictSuccessGroups": 2
+        },
+        "model": {
+          "runs": false,
+          "tokens": null,
+          "costUsd": null
+        }
+      }
+    },
+    "nativeSource": {
+      "revision": "340291619f9414c5a3ba4332734634585481df37",
+      "dirty": false,
+      "osVersion": "27.2.1",
+      "sha256": {
+        ".artifacts/runtime-install/cua-host": "e636eac82d9e4a7bea4c86e24b4e31575847e228e7f364624bf26a41e9099f09",
+        ".artifacts/runtime-install/cua-runtime": "508d8f5128593aa891e570b3c97a7414f0c6a736e9d9e2db24dcd5c2a871802e",
+        "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture": "42e32228c3b9cdd664fa0ac49c932c893eb8952c2ab531ec6a23d163b155572e"
+      }
+    }
+  },
+  "offline": {
+    "source": {
+      "revision": "340291619f9414c5a3ba4332734634585481df37",
+      "dirty": false,
+      "sha256": {
+        "test/recovery/recovery.mjs": "d38726b150ccc527ddaf1d4677c5d0d0a9223d2e7e2f09e7aa009975f6eafa17",
+        "test/recovery/oracle.mjs": "99e52154e86cd8c1c5806c01e99b2e83f6e9096eb3081f12e7906c35a6d4fa13",
+        "test/recovery/offline.mjs": "affd6697b2b701bd191b0c4f84e1c2777efabcc4d2d223c2c77f9b0ee42bfe44",
+        "test/recovery/native.mjs": "0786f8349a420f6134319703e7a7e320e93bb3469b7dd585e01c67e6517668ea",
+        "test/recovery/metrics.mjs": "f50a2dce72737f2eae1c71cc318108ce9ab971763544c64933800a264803d932",
+        "test/recovery/run.mjs": "d39e396b2f1c1aa13e8eb489362ac82a6ec9e6d348ae3ef99794cd61f542e645",
+        "test/recovery/recovery.test.mjs": "bd8d8bbb7380c20119463723294ee56d3a550af65c5616616b2284a788b9fef5"
+      }
+    },
+    "pairedStates": 24,
+    "repairLimits": {
+      "maxCalls": 4,
+      "maxMutations": 1,
+      "timeoutMs": 1500
+    },
+    "summary": {
+      "assigned": 72,
+      "assessed": 72,
+      "setupBlocked": 0,
+      "strictUnassisted": 9,
+      "strictOracleState": 27,
+      "strictEventual": 27,
+      "strictEventualPerAssigned": 0.375,
+      "duplicateActions": 0,
+      "additionalDamage": 3,
+      "repairSteps": 87,
+      "repairCalls": 87,
+      "repairMutations": 21,
+      "budgetStopped": 6,
+      "repairTimeMs": {
+        "samples": 72,
+        "p50": 10,
+        "p95": 1501
+      },
+      "repeatedConsistency": {
+        "repetitions": 3,
+        "groups": 24,
+        "fullyAssessedGroups": 24,
+        "allStrictSuccessGroups": 9
+      },
+      "model": {
+        "runs": false,
+        "tokens": null,
+        "costUsd": null
+      }
+    },
+    "byPolicy": {
+      "none": {
+        "assigned": 24,
+        "assessed": 24,
+        "setupBlocked": 0,
+        "strictUnassisted": 3,
+        "strictOracleState": 3,
+        "strictEventual": 3,
+        "strictEventualPerAssigned": 0.125,
+        "duplicateActions": 0,
+        "additionalDamage": 0,
+        "repairSteps": 0,
+        "repairCalls": 0,
+        "repairMutations": 0,
+        "budgetStopped": 0,
+        "repairTimeMs": {
+          "samples": 24,
+          "p50": 0,
+          "p95": 0
+        },
+        "repeatedConsistency": {
+          "repetitions": 3,
+          "groups": 8,
+          "fullyAssessedGroups": 8,
+          "allStrictSuccessGroups": 1
+        },
+        "model": {
+          "runs": false,
+          "tokens": null,
+          "costUsd": null
+        }
+      },
+      "simple": {
+        "assigned": 24,
+        "assessed": 24,
+        "setupBlocked": 0,
+        "strictUnassisted": 3,
+        "strictOracleState": 15,
+        "strictEventual": 15,
+        "strictEventualPerAssigned": 0.625,
+        "duplicateActions": 0,
+        "additionalDamage": 3,
+        "repairSteps": 39,
+        "repairCalls": 39,
+        "repairMutations": 15,
+        "budgetStopped": 3,
+        "repairTimeMs": {
+          "samples": 24,
+          "p50": 20,
+          "p95": 1501
+        },
+        "repeatedConsistency": {
+          "repetitions": 3,
+          "groups": 8,
+          "fullyAssessedGroups": 8,
+          "allStrictSuccessGroups": 5
+        },
+        "model": {
+          "runs": false,
+          "tokens": null,
+          "costUsd": null
+        }
+      },
+      "guarded": {
+        "assigned": 24,
+        "assessed": 24,
+        "setupBlocked": 0,
+        "strictUnassisted": 3,
+        "strictOracleState": 9,
+        "strictEventual": 9,
+        "strictEventualPerAssigned": 0.375,
+        "duplicateActions": 0,
+        "additionalDamage": 0,
+        "repairSteps": 48,
+        "repairCalls": 48,
+        "repairMutations": 6,
+        "budgetStopped": 3,
+        "repairTimeMs": {
+          "samples": 24,
+          "p50": 15,
+          "p95": 1501
+        },
+        "repeatedConsistency": {
+          "repetitions": 3,
+          "groups": 8,
+          "fullyAssessedGroups": 8,
+          "allStrictSuccessGroups": 3
+        },
+        "model": {
+          "runs": false,
+          "tokens": null,
+          "costUsd": null
+        }
+      }
+    }
+  }
+}
