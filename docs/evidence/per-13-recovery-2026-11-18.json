@@ -1,16 +1,16 @@
 {
   "native": {
     "source": {
-      "revision": "340291619f9414c5a3ba4332734634585481df37",
+      "revision": "6f6e7eb3bb78e1ef4d5ab1710c93448112366e85",
       "dirty": false,
       "sha256": {
-        "test/recovery/recovery.mjs": "d38726b150ccc527ddaf1d4677c5d0d0a9223d2e7e2f09e7aa009975f6eafa17",
+        "test/recovery/recovery.mjs": "1665f75f9f3f96dd1002ae1c005390b11eb1a4a3445273b7e96b2aeaaf6746ee",
         "test/recovery/oracle.mjs": "99e52154e86cd8c1c5806c01e99b2e83f6e9096eb3081f12e7906c35a6d4fa13",
         "test/recovery/offline.mjs": "affd6697b2b701bd191b0c4f84e1c2777efabcc4d2d223c2c77f9b0ee42bfe44",
         "test/recovery/native.mjs": "0786f8349a420f6134319703e7a7e320e93bb3469b7dd585e01c67e6517668ea",
         "test/recovery/metrics.mjs": "f50a2dce72737f2eae1c71cc318108ce9ab971763544c64933800a264803d932",
         "test/recovery/run.mjs": "d39e396b2f1c1aa13e8eb489362ac82a6ec9e6d348ae3ef99794cd61f542e645",
-        "test/recovery/recovery.test.mjs": "bd8d8bbb7380c20119463723294ee56d3a550af65c5616616b2284a788b9fef5"
+        "test/recovery/recovery.test.mjs": "53949aab2c4c926fb9527f37c999ea576199707736b07d09dbd7c40e2555f16d"
       }
     },
     "pairedStates": 18,
@@ -35,8 +35,8 @@
       "budgetStopped": 0,
       "repairTimeMs": {
         "samples": 54,
-        "p50": 25.166124999999738,
-        "p95": 131.55375000000095
+        "p50": 24.95220800000061,
+        "p95": 136.95679200000086
       },
       "repeatedConsistency": {
         "repetitions": 3,
@@ -67,8 +67,8 @@
         "budgetStopped": 0,
         "repairTimeMs": {
           "samples": 18,
-          "p50": 0.0012500000011641532,
-          "p95": 0.009334000000080778
+          "p50": 0.001167000002169516,
+          "p95": 0.009625000000141881
         },
         "repeatedConsistency": {
           "repetitions": 3,
@@ -98,8 +98,8 @@
         "budgetStopped": 0,
         "repairTimeMs": {
           "samples": 18,
-          "p50": 29.782791999999972,
-          "p95": 77.26399999999921
+          "p50": 33.266999999999825,
+          "p95": 73.07649999999921
         },
         "repeatedConsistency": {
           "repetitions": 3,
@@ -129,8 +129,8 @@
         "budgetStopped": 0,
         "repairTimeMs": {
           "samples": 18,
-          "p50": 30.364041999997426,
-          "p95": 172.57070900000326
+          "p50": 37.437125000004016,
+          "p95": 156.666666000001
         },
         "repeatedConsistency": {
           "repetitions": 3,
@@ -146,7 +146,7 @@
       }
     },
     "nativeSource": {
-      "revision": "340291619f9414c5a3ba4332734634585481df37",
+      "revision": "6f6e7eb3bb78e1ef4d5ab1710c93448112366e85",
       "dirty": false,
       "osVersion": "27.2.1",
       "sha256": {
@@ -158,16 +158,16 @@
   },
   "offline": {
     "source": {
-      "revision": "340291619f9414c5a3ba4332734634585481df37",
+      "revision": "6f6e7eb3bb78e1ef4d5ab1710c93448112366e85",
       "dirty": false,
       "sha256": {
-        "test/recovery/recovery.mjs": "d38726b150ccc527ddaf1d4677c5d0d0a9223d2e7e2f09e7aa009975f6eafa17",
+        "test/recovery/recovery.mjs": "1665f75f9f3f96dd1002ae1c005390b11eb1a4a3445273b7e96b2aeaaf6746ee",
         "test/recovery/oracle.mjs": "99e52154e86cd8c1c5806c01e99b2e83f6e9096eb3081f12e7906c35a6d4fa13",
         "test/recovery/offline.mjs": "affd6697b2b701bd191b0c4f84e1c2777efabcc4d2d223c2c77f9b0ee42bfe44",
         "test/recovery/native.mjs": "0786f8349a420f6134319703e7a7e320e93bb3469b7dd585e01c67e6517668ea",
         "test/recovery/metrics.mjs": "f50a2dce72737f2eae1c71cc318108ce9ab971763544c64933800a264803d932",
         "test/recovery/run.mjs": "d39e396b2f1c1aa13e8eb489362ac82a6ec9e6d348ae3ef99794cd61f542e645",
-        "test/recovery/recovery.test.mjs": "bd8d8bbb7380c20119463723294ee56d3a550af65c5616616b2284a788b9fef5"
+        "test/recovery/recovery.test.mjs": "53949aab2c4c926fb9527f37c999ea576199707736b07d09dbd7c40e2555f16d"
       }
     },
     "pairedStates": 24,
@@ -294,6 +294,76 @@
           "groups": 8,
           "fullyAssessedGroups": 8,
           "allStrictSuccessGroups": 3
+        },
+        "model": {
+          "runs": false,
+          "tokens": null,
+          "costUsd": null
+        }
+      }
+    }
+  },
+  "initialCampaigns": {
+    "native": {
+      "sourceRevision": "340291619f9414c5a3ba4332734634585481df37",
+      "summary": {
+        "assigned": 54,
+        "assessed": 54,
+        "setupBlocked": 0,
+        "strictUnassisted": 9,
+        "strictOracleState": 18,
+        "strictEventual": 18,
+        "strictEventualPerAssigned": 0.3333333333333333,
+        "duplicateActions": 0,
+        "additionalDamage": 3,
+        "repairSteps": 63,
+        "repairCalls": 63,
+        "repairMutations": 12,
+        "budgetStopped": 0,
+        "repairTimeMs": {
+          "samples": 54,
+          "p50": 25.166124999999738,
+          "p95": 131.55375000000095
+        },
+        "repeatedConsistency": {
+          "repetitions": 3,
+          "groups": 18,
+          "fullyAssessedGroups": 18,
+          "allStrictSuccessGroups": 6
+        },
+        "model": {
+          "runs": false,
+          "tokens": null,
+          "costUsd": null
+        }
+      }
+    },
+    "offline": {
+      "sourceRevision": "340291619f9414c5a3ba4332734634585481df37",
+      "summary": {
+        "assigned": 72,
+        "assessed": 72,
+        "setupBlocked": 0,
+        "strictUnassisted": 9,
+        "strictOracleState": 27,
+        "strictEventual": 27,
+        "strictEventualPerAssigned": 0.375,
+        "duplicateActions": 0,
+        "additionalDamage": 3,
+        "repairSteps": 87,
+        "repairCalls": 87,
+        "repairMutations": 21,
+        "budgetStopped": 6,
+        "repairTimeMs": {
+          "samples": 72,
+          "p50": 10,
+          "p95": 1501
+        },
+        "repeatedConsistency": {
+          "repetitions": 3,
+          "groups": 24,
+          "fullyAssessedGroups": 24,
+          "allStrictSuccessGroups": 9
         },
         "model": {
           "runs": false,

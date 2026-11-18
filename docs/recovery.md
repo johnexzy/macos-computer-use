@@ -134,7 +134,7 @@ state triplets. Both campaigns recorded zero duplicate actions.
 
 The simple arm's three native damage cases wrote the recreated control. The
 guarded arm rejected that route because the original retained reference was
-invalid. Median native policy time was 29.8 ms for simple and 30.4 ms for
+invalid. Median native policy time was 33.3 ms for simple and 37.4 ms for
 guarded. Those measurements include the extra checks on this fixture. The
 [verification record](evidence/per-13-recovery-2026-11-18.json) retains the
 source revisions, binary hashes, repair calls and latency distributions.
