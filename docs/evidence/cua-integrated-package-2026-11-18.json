@@ -1,0 +1,198 @@
+{
+  "buildRevision": "f624059d6ead0f60d93626ffd4e6aac9123ca8c9",
+  "testedHost": {
+    "architecture": "arm64",
+    "macOS": "27.2.1",
+    "x86_64Launch": "Rosetta"
+  },
+  "package": {
+    "filename": "cua-native-0.1.0-macos-universal.tar.gz",
+    "sha256": "fe3b30e399d5be884d84e97c5f59fb62a349f7c664cfccc85f9f4a97657ea8f3",
+    "installedSmoke": {
+      "arm64": {
+        "version": "cua-host 0.1.0",
+        "architecture": "arm64",
+        "sourceRevision": "f624059d6ead0f60d93626ffd4e6aac9123ca8c9",
+        "runtimeDirectPreflight": true,
+        "checks": [
+          {
+            "termination": "EOF",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "termination": "SIGINT",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "termination": "SIGTERM",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "symlinkLaunch": true,
+            "termination": "EOF",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          }
+        ],
+        "missingHelperRejected": true,
+        "minimalPath": true,
+        "pathsWithSpaces": true,
+        "mutations": 0,
+        "captures": 0,
+        "permissionRequests": 0
+      },
+      "x86_64": {
+        "version": "cua-host 0.1.0",
+        "architecture": "x86_64",
+        "sourceRevision": "f624059d6ead0f60d93626ffd4e6aac9123ca8c9",
+        "runtimeDirectPreflight": true,
+        "checks": [
+          {
+            "termination": "EOF",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "termination": "SIGINT",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "termination": "SIGTERM",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "symlinkLaunch": true,
+            "termination": "EOF",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          }
+        ],
+        "missingHelperRejected": true,
+        "minimalPath": true,
+        "pathsWithSpaces": true,
+        "mutations": 0,
+        "captures": 0,
+        "permissionRequests": 0
+      }
+    }
+  },
+  "automatedPassed": {
+    "rust": 45,
+    "swiftRuntime": 157,
+    "swiftProtocol": 16,
+    "mcpProcess": 13,
+    "evaluationHarness": 73
+  },
+  "foregroundFixture": {
+    "sourceRevision": "320eb90",
+    "runs": [
+      {
+        "authorityRefused": true,
+        "clickVerified": true,
+        "exactPriorFocusRestored": true,
+        "staleLayoutRefused": true,
+        "switchedAppStoppedSuffix": true,
+        "keyDeliveryObserved": true,
+        "wrongTargetInputs": 0
+      },
+      {
+        "authorityRefused": true,
+        "clickVerified": true,
+        "exactPriorFocusRestored": true,
+        "staleLayoutRefused": true,
+        "switchedAppStoppedSuffix": true,
+        "keyDeliveryObserved": true,
+        "wrongTargetInputs": 0
+      },
+      {
+        "authorityRefused": true,
+        "clickVerified": true,
+        "exactPriorFocusRestored": true,
+        "staleLayoutRefused": true,
+        "switchedAppStoppedSuffix": true,
+        "keyDeliveryObserved": true,
+        "wrongTargetInputs": 0
+      }
+    ]
+  },
+  "visualFixture": {
+    "result": {
+      "captureStatus": "captured",
+      "full": [
+        880,
+        460
+      ],
+      "cropped": [
+        512,
+        246
+      ],
+      "portrait": [
+        281,
+        360
+      ],
+      "substringMappedInsideFixtureField": true,
+      "coordinateClicksRefused": 2,
+      "fixtureActivations": 0
+    }
+  },
+  "selectiveSetupAttempt": {
+    "sourceRevision": "460e8778cf48584cfba59c8b5b932b2a2349287c",
+    "lockedSessionObserved": true,
+    "assigned": 9,
+    "setupBlocked": 9
+  },
+  "paidModelCalls": 0
+}
