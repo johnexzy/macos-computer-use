@@ -117,6 +117,9 @@ for (const episode of report.episodes) {
     target = { pid: state.pid, windowId: state.windowId };
     assert.notEqual(state.foregroundPID, state.pid); assert.equal(state.activationCount, 0);
     monitor = new ForegroundMonitor(monitorBinary); watches.push(await monitor.begin(state.pid));
+    assert.equal(watches[0]?.available, true, "Independent foreground monitoring unavailable");
+    assert.equal(watches[0]?.targetPID, state.pid); assert.equal(watches[0]?.truncated, false);
+    assert.notEqual(watches[0]?.startedForegroundPID, state.pid, "Fixture became foreground before monitoring began");
     const setupStarted = performance.now(); let initial;
     while (performance.now() - setupStarted < 5000) {
       const response = await call("observe", { target, budgetMs: 1000 });

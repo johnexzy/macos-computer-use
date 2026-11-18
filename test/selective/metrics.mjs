@@ -10,7 +10,7 @@ export function laneOrder(repeat) {
   return [...lanes.slice(offset), ...lanes.slice(0, offset)];
 }
 export function foregroundProof(watches, state, pid) {
-  if (state?.activationCount > 0 || watches.some((w) => w?.targetActivations > 0 ||
+  if (state?.activationCount > 0 || watches.some((w) => w?.startedForegroundPID === pid || w?.targetActivations > 0 ||
     (w?.startedForegroundPID !== pid && w?.finishedForegroundPID === pid))) return false;
   return watches.length >= 2 && watches.every((w) => w?.available === true && w.targetPID === pid && w.truncated === false) ? true : null;
 }

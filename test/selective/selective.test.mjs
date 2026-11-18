@@ -33,6 +33,7 @@ test("known late activation vetoes, missing watcher cannot pass, unrelated switc
   assert.equal(foregroundProof([watch, null], { activationCount: 0 }, 42), null);
   assert.equal(foregroundProof([watch, { ...watch, targetActivations: 1 }], { activationCount: 0 }, 42), false);
   assert.equal(foregroundProof([watch, watch], { activationCount: 1 }, 42), false);
+  assert.equal(foregroundProof([{ ...watch, startedForegroundPID: 42 }, watch], { activationCount: 0 }, 42), false);
 });
 test("report keeps failed and unknown assigned trials and never fabricates token cost", () => {
   const report = summarize([{ lane: "full", strictCompletion: true }, { lane: "full", strictCompletion: false }, { lane: "full" }]);
