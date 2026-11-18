@@ -43,8 +43,9 @@ export function renderCampaign(report) {
       cohort.safety.preHandoffRefusals,
       `${cohort.safety.falseCompletionClaims}/${cohort.safety.unknownCompletionClaims}`, `${cohort.safety.targetActivationTrials}/${cohort.safety.unknownForegroundTrials}`,
       cohort.safety.observedUnrelatedSwitches || (cohort.safety.unknownForegroundTrials === cohort.assigned ? "—" : 0)]));
-  const usage = table(["Task", "Variant", "Lane", "p50 / p90 ms (n)", "Turns", "MCP calls", "Field mutations / navigation and submit presses / waits requested", "Input / output", "Cache writes / reads", "USD / assigned", "USD / success"],
-    cohorts.map(([key, cohort]) => [...label(key), `${value(cohort.taskMs.p50)}/${value(cohort.taskMs.p90)} (${cohort.taskMs.samples})`, value(cohort.model.cliReportedTurns),
+  const usage = table(["Task", "Variant", "Lane", "p50 / p90 ms (n)", "CLI turns / assistant responses", "MCP calls", "Field mutations / navigation and submit presses / waits requested", "Input / output", "Cache writes / reads", "USD / assigned", "USD / success"],
+    cohorts.map(([key, cohort]) => [...label(key), `${value(cohort.taskMs.p50)}/${value(cohort.taskMs.p90)} (${cohort.taskMs.samples})`,
+      `${value(cohort.model.cliReportedTurns)}/${value(cohort.model.observedAssistantResponses)}`,
       cohort.toolCalls, `${cohort.actions.fieldMutationAttempts}/${cohort.actions.navigationPresses + cohort.actions.submitAttempts}/${cohort.actions.waitRequests + cohort.actions.waitStepsSubmitted}`,
       `${value(cohort.model.inputTokens)}/${value(cohort.model.outputTokens)}`, `${value(cohort.model.cacheCreationInputTokens)}/${value(cohort.model.cacheReadInputTokens)}`,
       dollars(cohort.dollarsPerAssignedTask), dollars(cohort.dollarsPerSuccessfulTask)]));
@@ -55,7 +56,7 @@ export function renderCampaign(report) {
       trial.backgroundToolNames?.join(", ") ?? "—"]) : [[lane, "—", "—"]];
   }));
   const notes = `
-All assigned trials remain in the success denominator. Field accuracy covers observed fields only. Latency includes started outcomes, with sample counts shown. Wait counts include requests handed to the backend, including wait steps in a batch that stopped early. Dollar amounts use terminal CLI estimates, including failed sessions. A dash indicates missing evidence or a ratio without a finite denominator. These intervals describe the cohorts individually. The source JSON retains paired trials and tool schema hashes.
+All assigned trials remain in the success denominator. Field accuracy covers observed fields only. Latency includes started outcomes, with sample counts shown. Observed assistant responses count distinct message IDs in the stream. The CLI turn counter can count multiple tool results for one response. Wait counts include requests handed to the backend, including wait steps in a batch that stopped early. Dollar amounts use terminal CLI estimates, including failed sessions. A dash indicates missing evidence or a ratio without a finite denominator. These intervals describe the cohorts individually. The source JSON retains paired trials and tool schema hashes.
 
 Background-eligible tool names are still subject to the owned window and action checks. The single lane permits one action per request, and the composed lane permits up to 16.
 `;

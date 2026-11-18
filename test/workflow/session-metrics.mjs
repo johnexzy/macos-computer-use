@@ -70,7 +70,10 @@ export function pilotSummary(trials) {
       waitRequests: handedOff.filter(call => ["waitFor", "wait_for_accessibility", "wait_for_text"].includes(call.name)).length,
       waitStepsSubmitted: sum(handedOff.filter(call => call.name === "act"), call => call.args.steps.filter(step => step.operation.kind === "waitFor").length),
     },
-    model: { ...model, reportedCostUsd, missingCost, knownSessionCostUsd: sum(sessions, session => finite(session.costUsd) ? session.costUsd : 0) },
+    model: { ...model, reportedCostUsd, missingCost,
+      observedAssistantResponses: sessions.length && sessions.every(session => finite(session.observedAssistantResponses))
+        ? sum(sessions, session => session.observedAssistantResponses) : null,
+      knownSessionCostUsd: sum(sessions, session => finite(session.costUsd) ? session.costUsd : 0) },
     dollarsPerAssignedTask: !pending && trials.length && reportedCostUsd !== null ? reportedCostUsd / trials.length : null,
     dollarsPerSuccessfulTask: !pending && successes && reportedCostUsd !== null ? reportedCostUsd / successes : null,
   };

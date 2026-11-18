@@ -58,6 +58,8 @@ export function summarizeSession(records, { model, tools, exitCode, failure }) {
   const inventoryOk = matchesInit(init, tools, model);
   const ordered = init && result && records.indexOf(init) < records.indexOf(result);
   const observedAssistantModels = [...new Set(records.map(assistantModel).filter(Boolean))];
+  const assistantIds = records.filter(record => record.type === "assistant").map(record => record.message?.id);
+  const observedAssistantResponses = assistantIds.every(id => typeof id === "string" && id) ? new Set(assistantIds).size : null;
   const modelOk = models.length === 1 && models[0] === model && observedAssistantModels.every(value => value === model);
   const sameSession = Boolean(sessionId && result?.session_id === sessionId && records.every(r => !r.session_id || r.session_id === sessionId));
   const finalLine = typeof result?.result === "string" ? result.result.trim().split("\n").at(-1)?.trim() : null;
@@ -66,7 +68,7 @@ export function summarizeSession(records, { model, tools, exitCode, failure }) {
     result?.subtype === "error_max_budget_usd" ? "cost" : null;
   return { ok: Boolean(!failure && exitCode === 0 && ordered && result.subtype === "success" && result.is_error !== true && inventoryOk && modelOk && sameSession),
     sessionId, sameSession, inventoryOk, modelOk, models, observedAssistantModels, usage, costUsd: valid(result?.total_cost_usd), costSource: "cli_reported_estimate",
-    numTurns: valid(result?.num_turns), apiMs: valid(result?.duration_api_ms), subtype: result?.subtype ?? null, claim,
+    numTurns: valid(result?.num_turns), observedAssistantResponses, apiMs: valid(result?.duration_api_ms), subtype: result?.subtype ?? null, claim,
     terminalResults: results.length, initEvents: inits.length, exitCode, failure, limit };
 }
 

@@ -34,6 +34,11 @@ test("terminal usage is counted once and absent or duplicate results are unprice
   const wrongAssistantModel = parsed(init, { type: "assistant", message: { model: "claude-other" } }, final);
   assert.equal(wrongAssistantModel.ok, false);
   assert.equal(wrongAssistantModel.costUsd, 0.4);
+  assert.equal(wrongAssistantModel.observedAssistantResponses, null);
+  const message = id => ({ type: "assistant", message: { id, model } });
+  const responseRounds = parsed(init, message("response-1"), message("response-1"), message("response-2"), { ...final, num_turns: 4 });
+  assert.equal(responseRounds.observedAssistantResponses, 2);
+  assert.equal(responseRounds.numTurns, 4);
   const unrecognizedClaim = parsed(init, { ...final, result: "The workflow is finished." });
   assert.equal(unrecognizedClaim.ok, true);
   assert.equal(unrecognizedClaim.claim, null);
