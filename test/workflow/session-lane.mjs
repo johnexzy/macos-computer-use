@@ -59,7 +59,8 @@ export class WorkflowLane {
     this.tools = exposedToolSchemas(tools, lane);
     this.readFixture = readFixture;
     this.before = before;
-    this.fields = new Map(plan.fields.map(f => [f.id, { kind: f.kind, label: f.label }]));
+    this.fields = new Map(plan.fields.map(f => [f.id, { kind: f.kind, label: f.label, window: "work" }]));
+    for (const id of Object.keys(plan.protectedValues)) this.fields.set(id, { kind: "text", label: "Notes", window: id.split(".")[0] });
     this.fault = plan.config.friction;
     this.calls = [];
     this.observations = new Map();
@@ -200,12 +201,12 @@ export class WorkflowLane {
 
   admit(mutations, state, windowId) {
     if (new Set(mutations.map(m => m.id)).size !== mutations.length) throw new Error("Use each control at most once in a request");
-    const work = state.windows.find(w => w.key === "work" && w.visible);
     for (const mutation of mutations) {
       const { id, kind, control, observed } = mutation;
       const navigation = /^settings\.tab\.[012]$/.test(id);
       const action = this.fields.get(id);
-      if (work?.windowId !== windowId || (!action && !(navigation || id === "invoice.submit")) ||
+      const window = state.windows.find(w => w.key === (action?.window ?? "work") && w.visible);
+      if (window?.windowId !== windowId || (!action && !(navigation || id === "invoice.submit")) ||
           ((kind === "press") !== (action?.kind === "checkbox" || navigation || id === "invoice.submit"))) {
         throw new Error("Input must match an owned workflow field, page button or Submit");
       }

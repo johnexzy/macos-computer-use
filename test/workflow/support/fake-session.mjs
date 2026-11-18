@@ -48,13 +48,13 @@ const observe = async (target) => {
 const element = (observed, id) => observed.elements.find(e => e.identifier === id);
 const spec = element(await observe(source), "source.instructions").value;
 const pages = spec.split("\n\n").slice(0, 3).map(page => page.split("\n").slice(1).map(line => line.slice(line.indexOf(": ") + 2)));
-const mutate = async (observed, changes) => {
+const mutate = async (observed, changes, target = work) => {
   if (legacy) {
     const [{ control, value }] = changes;
-    return value === undefined ? call("perform_accessibility_action", { windowId: work.windowId, selector: { identifier: control.identifier }, action: "press" })
-      : call("set_accessibility_value", { windowId: work.windowId, selector: { identifier: control.identifier }, value });
+    return value === undefined ? call("perform_accessibility_action", { windowId: target.windowId, selector: { identifier: control.identifier }, action: "press" })
+      : call("set_accessibility_value", { windowId: target.windowId, selector: { identifier: control.identifier }, value });
   }
-  return call("act", { target: work, observationId: observed.observationId, budgetMs: 3000, steps: changes.map(({ control, value }) => ({
+  return call("act", { target, observationId: observed.observationId, budgetMs: 3000, steps: changes.map(({ control, value }) => ({
     actionId: control.identifier,
     operation: value === undefined ? { kind: "press", params: { elementRef: control.reference } }
       : { kind: "setValue", params: { elementRef: control.reference, value } },
@@ -81,11 +81,16 @@ try {
       if (legacy) assert.ok(!payload(result).foreground.before && !payload(result).foreground.after);
       else assert.equal(data(result).stopReason, "completed");
     }
-    if (process.env.FAKE_WORKFLOW_INCOMPLETE === "1") break;
+    if (process.env.FAKE_WORKFLOW_CASE === "incomplete") break;
     const final = await observe(work);
     const firstText = changes.find(({ value }) => value !== undefined);
     const replay = await mutate(final, [{ ...firstText, control: element(final, firstText.control.identifier) }]);
     assert.equal(payload(replay).delivery, "not_dispatched");
+  }
+  if (process.env.FAKE_WORKFLOW_CASE === "decoy") {
+    const snapshot = await observe(source);
+    const edited = await mutate(snapshot, [{ control: element(snapshot, "source.notes"), value: "Edited the wrong fixture control" }], source);
+    assert.equal(data(edited).stopReason, "completed");
   }
 } finally { await client.close(); }
 
