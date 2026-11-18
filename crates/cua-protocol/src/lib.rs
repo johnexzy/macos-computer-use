@@ -16,6 +16,11 @@ pub const MAX_OCR_MATCHES: usize = 256;
 pub const MAX_OCR_TEXT_BYTES: usize = 1024;
 pub const MAX_OCR_BYTES: usize = 256 * 1024;
 pub const MAX_OCR_QUERY_BYTES: usize = 4096;
+pub const MAX_AX_SELECTORS: usize = 16;
+pub const MAX_TARGET_EVENTS: usize = 64;
+pub const MAX_TARGET_EVENT_BYTES: usize = 64 * 1024;
+pub const MAX_EVENT_CONTROLS: usize = 16;
+pub const MAX_EVENT_VALUE_BYTES: usize = 4096;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 macro_rules! record {
@@ -287,6 +292,10 @@ pub struct ObserveRequest {
     pub crop_window: Option<Rect>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_image_dimension_px: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ax_selectors: Option<Vec<Selector>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_history: Option<EventHistoryRequest>,
 }
 fn is_false(value: &bool) -> bool {
     !value
@@ -305,8 +314,29 @@ pub struct Observation {
     pub screenshot: Option<Screenshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visual: Option<Box<VisualEvidence>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ax_selection: Option<Box<AxSelectionEvidence>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub events: Option<Box<EventHistory>>,
 }
 record!(Selector { role: String, label: Option<String>, identifier: Option<String> });
+record!(AxSelectionEvidence { selectors: Vec<Selector>, coverage: Coverage, ambiguous: bool, visited_nodes: u32 });
+record!(EventCursor {
+    generation: String,
+    sequence: u64
+});
+record!(EventHistoryRequest { cursor: Option<EventCursor> });
+record!(EventControl { role: String, identifier: Option<String>, label: Option<String>, value: Option<String>, enabled: Option<bool>, bounds: Rect, subrole: Option<String> });
+choices!(EventSource { Notification, Poll });
+choices!(EventMode {
+    NotificationsAndPolling,
+    Polling,
+    Unavailable
+});
+record!(TargetEvent { sequence: u64, source: EventSource, notification: Option<String>, observed_unix_ms: u64,
+                     collected: CollectionInterval, coverage: Coverage, controls: Vec<EventControl> });
+record!(EventHistory { cursor: EventCursor, oldest_sequence: Option<u64>, started_unix_ms: u64, collected: CollectionInterval,
+                      stale: bool, overrun: bool, mode: EventMode, coalesced_wakes: u64, sample_count: u64, events: Vec<TargetEvent> });
 record!(ElementCondition { selector: Selector });
 record!(ValueCondition {
     element_ref: String,
@@ -913,6 +943,22 @@ fn inside(inner: &Rect, outer: &Rect) -> bool {
 impl ObserveRequest {
     fn validate(&self) -> Result<(), String> {
         target(&self.target)?;
+        if let Some(selectors) = &self.ax_selectors {
+            validate_selectors(selectors)?;
+        }
+        if let Some(history) = &self.event_history {
+            require(
+                self.ax_selectors.is_some(),
+                "event history requires explicit AX selectors",
+            )?;
+            if let Some(cursor) = &history.cursor {
+                id(&cursor.generation)?;
+                require(
+                    cursor.sequence <= MAX_SAFE_INTEGER,
+                    "event cursor exceeds safe integer range",
+                )?;
+            }
+        }
         if let Some(query) = &self.ocr_query {
             require(
                 self.include_ocr && !query.is_empty() && query.len() <= MAX_OCR_QUERY_BYTES,
@@ -933,6 +979,123 @@ impl ObserveRequest {
             )?;
         }
         Ok(())
+    }
+}
+fn validate_selectors(selectors: &[Selector]) -> Result<(), String> {
+    require(
+        !selectors.is_empty() && selectors.len() <= MAX_AX_SELECTORS,
+        "invalid AX selector count",
+    )?;
+    for (index, selector) in selectors.iter().enumerate() {
+        id(&selector.role)?;
+        require(
+            selector.label.as_ref().is_none_or(|s| s.len() <= 1024)
+                && selector.identifier.as_ref().is_none_or(|s| s.len() <= 1024),
+            "AX selector exceeds string limit",
+        )?;
+        require(
+            !selectors[..index].contains(selector),
+            "duplicate AX selector",
+        )?;
+    }
+    Ok(())
+}
+fn selector_matches(element: &Element, selector: &Selector) -> bool {
+    element.role == selector.role
+        && selector
+            .label
+            .as_ref()
+            .is_none_or(|s| Some(s) == element.label.as_ref())
+        && selector
+            .identifier
+            .as_ref()
+            .is_none_or(|s| Some(s) == element.identifier.as_ref())
+}
+fn historical_matches(control: &EventControl, selector: &Selector) -> bool {
+    control.role == selector.role
+        && selector
+            .label
+            .as_ref()
+            .is_none_or(|s| Some(s) == control.label.as_ref())
+        && selector
+            .identifier
+            .as_ref()
+            .is_none_or(|s| Some(s) == control.identifier.as_ref())
+}
+impl EventHistory {
+    fn validate(&self) -> Result<(), String> {
+        id(&self.cursor.generation)?;
+        require(
+            self.cursor.sequence <= MAX_SAFE_INTEGER
+                && self.coalesced_wakes <= MAX_SAFE_INTEGER
+                && self.sample_count <= MAX_SAFE_INTEGER,
+            "event counters exceed safe integer range",
+        )?;
+        interval(&self.collected)?;
+        require(
+            self.started_unix_ms <= self.collected.finished_unix_ms,
+            "event history starts after collection",
+        )?;
+        require(
+            self.events.len() <= MAX_TARGET_EVENTS,
+            "too many target events",
+        )?;
+        if let Some(oldest) = self.oldest_sequence {
+            require(
+                oldest > 0 && oldest <= self.cursor.sequence,
+                "invalid oldest event sequence",
+            )?;
+        }
+        let mut previous = 0;
+        for event in &self.events {
+            require(
+                event.sequence > previous && event.sequence <= self.cursor.sequence,
+                "unordered target events",
+            )?;
+            previous = event.sequence;
+            interval(&event.collected)?;
+            require(
+                event.observed_unix_ms <= event.collected.finished_unix_ms
+                    && event.collected.finished_unix_ms <= self.collected.finished_unix_ms,
+                "invalid historical event interval",
+            )?;
+            require(
+                (event.source == EventSource::Notification) == event.notification.is_some(),
+                "event source lacks notification provenance",
+            )?;
+            if let Some(notification) = &event.notification {
+                id(notification)?;
+            }
+            require(
+                event.controls.len() <= MAX_EVENT_CONTROLS,
+                "too many historical controls",
+            )?;
+            require(
+                event.coverage != Coverage::Unavailable || event.controls.is_empty(),
+                "unavailable historical event has controls",
+            )?;
+            for control in &event.controls {
+                id(&control.role)?;
+                rect(&control.bounds)?;
+                require(
+                    control.identifier.as_ref().is_none_or(|s| s.len() <= 1024)
+                        && control.label.as_ref().is_none_or(|s| s.len() <= 1024)
+                        && control.subrole.as_ref().is_none_or(|s| s.len() <= 1024)
+                        && control
+                            .value
+                            .as_ref()
+                            .is_none_or(|s| s.len() <= MAX_EVENT_VALUE_BYTES),
+                    "historical control exceeds string limit",
+                )?;
+            }
+        }
+        require(
+            serde_json::to_vec(self)
+                .map_err(|_| "cannot encode event history")?
+                .len()
+                <= MAX_TARGET_EVENT_BYTES,
+            "event history exceeds payload limit",
+        )
     }
 }
 impl VisualFrame {
@@ -1050,6 +1213,53 @@ impl Observation {
             require(
                 element.subrole.as_ref().is_none_or(|s| s.len() <= 1024),
                 "element subrole exceeds string limit",
+            )?;
+        }
+        if let Some(selection) = &self.ax_selection {
+            validate_selectors(&selection.selectors)?;
+            require(
+                self.accessibility != Coverage::Complete && selection.visited_nodes <= 1024,
+                "selected AX scope cannot imply a complete window",
+            )?;
+            require(
+                self.elements.iter().all(|element| {
+                    selection
+                        .selectors
+                        .iter()
+                        .any(|selector| selector_matches(element, selector))
+                }),
+                "selected AX result is outside its query",
+            )?;
+            let duplicates = selection.selectors.iter().any(|selector| {
+                self.elements
+                    .iter()
+                    .filter(|e| selector_matches(e, selector))
+                    .count()
+                    > 1
+            });
+            require(
+                !duplicates || selection.ambiguous,
+                "selected AX result hides ambiguity",
+            )?;
+            if selection.coverage == Coverage::Complete {
+                require(
+                    selection.ambiguous == duplicates,
+                    "inconsistent selected AX ambiguity",
+                )?;
+            }
+            if selection.coverage == Coverage::Unavailable {
+                require(
+                    self.elements.is_empty() && !selection.ambiguous,
+                    "unavailable AX selection has results",
+                )?;
+            }
+        }
+        if let Some(events) = &self.events {
+            events.validate()?;
+            channel_interval(&events.collected, &self.collected)?;
+            require(
+                self.ax_selection.is_some(),
+                "event history lacks query provenance",
             )?;
         }
         if let Some(screenshot) = &self.screenshot {
@@ -1476,6 +1686,60 @@ impl Response {
                         || observation.elements.iter().all(|e| e.value.is_none()),
                     "observation includes unrequested values",
                 )?;
+                require(
+                    request.ax_selectors.as_ref()
+                        == observation.ax_selection.as_ref().map(|s| &s.selectors),
+                    "AX selection does not match request",
+                )?;
+                require(
+                    request.event_history.is_some() == observation.events.is_some(),
+                    "event history inclusion does not match request",
+                )?;
+                if let Some(history) = &observation.events {
+                    require(
+                        request.include_values
+                            || history
+                                .events
+                                .iter()
+                                .all(|e| e.controls.iter().all(|c| c.value.is_none())),
+                        "event history includes unrequested values",
+                    )?;
+                    require(
+                        history.events.iter().all(|event| {
+                            event.controls.iter().all(|control| {
+                                request.ax_selectors.as_ref().is_some_and(|selectors| {
+                                    selectors
+                                        .iter()
+                                        .any(|selector| historical_matches(control, selector))
+                                })
+                            })
+                        }),
+                        "event history contains controls outside the query",
+                    )?;
+                    if let Some(cursor) = request
+                        .event_history
+                        .as_ref()
+                        .and_then(|h| h.cursor.as_ref())
+                    {
+                        if cursor.generation != history.cursor.generation {
+                            require(
+                                history.stale,
+                                "history generation changed without a stale marker",
+                            )?;
+                        } else {
+                            require(
+                                history.cursor.sequence >= cursor.sequence
+                                    && history.events.iter().all(|e| e.sequence > cursor.sequence),
+                                "event cursor replay or regression",
+                            )?;
+                            if let Some(oldest) = history.oldest_sequence
+                                && cursor.sequence < oldest - 1
+                            {
+                                require(history.overrun, "history hides an event-buffer overrun")?;
+                            }
+                        }
+                    }
+                }
                 require(
                     request.include_screenshot || observation.screenshot.is_none(),
                     "observation includes unrequested image",

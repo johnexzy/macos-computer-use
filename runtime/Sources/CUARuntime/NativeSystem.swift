@@ -14,11 +14,16 @@ public protocol NativeSystem: Sendable {
     func window(_ key: TargetKey, context: OperationContext) throws -> Target
     func retainApplication(pid: UInt32, timeoutSeconds: Float, context: OperationContext) throws -> (any RetainedNativeHandle)?
     func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation
+    func configureObservationWorker(_ queue: DispatchQueue)
+    func shutdownObservations()
 }
 
 public extension NativeSystem {
     func supportedActions(permissions: Permissions) -> [ActionKind] { [] }
+    func configureObservationWorker(_ queue: DispatchQueue) {}
+    func shutdownObservations() {}
     func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation {
+        guard params.eventHistory == nil else { throw NativeFailure(.unsupported, "event retention is unavailable for this backend") }
         guard !params.includeScreenshot && !params.includeOcr else { throw NativeFailure(.unsupported, "visual observation is unavailable for this backend") }
         let start = nativeMilliseconds()
         let before = try window(params.target, context: context)
@@ -28,7 +33,7 @@ public extension NativeSystem {
             throw NativeFailure(.staleObservation, "window changed during lifecycle collection")
         }
         try context.check()
-        return NativeObservation(observation: unavailableObservation(id: observationId, target: after, started: start), handle: handle)
+        return NativeObservation(observation: unavailableObservation(id: observationId, target: after, started: start, selectors: params.axSelectors), handle: handle)
     }
 }
 
@@ -37,6 +42,7 @@ public struct MacOSSystem: NativeSystem {
     private let catalog: any WindowCatalog
     private let visual: any VisualCapturing
     private let isAXTrusted: @Sendable () -> Bool
+    private let eventRegistry = TargetEventRegistry()
 
     public init(backend: any AXReading = MacOSAXBackend(), catalog: any WindowCatalog = MacOSWindowCatalog()) {
         self.init(backend: backend, catalog: catalog, visual: ScreenWindowCapture(), isAXTrusted: { AXIsProcessTrusted() })
@@ -58,6 +64,8 @@ public struct MacOSSystem: NativeSystem {
     public func supportedActions(permissions: Permissions) -> [ActionKind] {
         permissions.accessibility && backend is any AXMutating ? [.setValue, .press, .typeText] : []
     }
+    public func shutdownObservations() { eventRegistry.shutdown() }
+    public func configureObservationWorker(_ queue: DispatchQueue) { eventRegistry.configure(worker: queue) }
     public func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult { try catalog.targets(bundleId: bundleId, context: context) }
     public func window(_ key: TargetKey, context: OperationContext) throws -> Target { try catalog.window(key, context: context) }
     public func retainApplication(pid: UInt32, timeoutSeconds: Float, context: OperationContext) throws -> (any RetainedNativeHandle)? {
@@ -69,20 +77,21 @@ public struct MacOSSystem: NativeSystem {
         let started = nativeMilliseconds()
         let semantic: NativeObservation
         if isAXTrusted() {
-            let ax = ObserveRequest(target: params.target, includeScreenshot: false, includeValues: params.includeValues)
+            let ax = ObserveRequest(target: params.target, includeScreenshot: false, includeValues: params.includeValues, axSelectors: params.axSelectors)
             do {
                 semantic = try SemanticAXObserver(backend: backend, catalog: catalog).observe(params: ax, observationId: observationId, context: context)
             } catch let failure where wantsVisual && axUnavailable(failure) {
                 let attempted = CollectionInterval(startedUnixMs: started, finishedUnixMs: max(started, nativeMilliseconds()))
                 semantic = try observeWindowOnly(params.target, id: observationId, started: started,
-                                                 accessibilityCollected: attempted, context: context)
+                                                 accessibilityCollected: attempted, selectors: params.axSelectors, context: context)
             }
         } else {
-            semantic = try observeWindowOnly(params.target, id: observationId, started: started, context: context)
+            semantic = try observeWindowOnly(params.target, id: observationId, started: started, selectors: params.axSelectors, context: context)
         }
-        guard wantsVisual else { return semantic }
-        let (evidence, screenshot) = try collectVisual(params: params, semantic: semantic.observation, context: context)
-        let ax = semantic.observation
+        let observed = try retainingEvents(params: params, native: semantic, context: context)
+        guard wantsVisual else { return observed }
+        let (evidence, screenshot) = try collectVisual(params: params, semantic: observed.observation, context: context)
+        let ax = observed.observation
         let observation = Observation(observationId: ax.observationId, target: ax.target,
             collected: CollectionInterval(
                 startedUnixMs: min(ax.collected.startedUnixMs, evidence.collected.startedUnixMs,
@@ -91,16 +100,40 @@ public struct MacOSSystem: NativeSystem {
                                    evidence.ocr?.collected?.finishedUnixMs ?? evidence.collected.finishedUnixMs)
             ),
             windowBounds: ax.windowBounds, accessibility: ax.accessibility, accessibilityCollected: ax.accessibilityCollected,
-            elements: ax.elements, screenshot: screenshot, visual: evidence)
+            elements: ax.elements, screenshot: screenshot, visual: evidence, axSelection: ax.axSelection, events: ax.events)
         try context.check()
-        return NativeObservation(observation: observation, handle: semantic.handle)
+        return NativeObservation(observation: observation, handle: observed.handle)
+    }
+
+    private func retainingEvents(params: ObserveRequest, native: NativeObservation, context: OperationContext) throws -> NativeObservation {
+        guard let request = params.eventHistory else { return native }
+        guard let selectors = params.axSelectors else { throw NativeFailure(.invalidRequest, "event retention requires AX selectors") }
+        let history: EventHistory
+        if let handle = native.handle as? SemanticObservationHandle {
+            let tracker = try eventRegistry.track(handle: handle, observation: native.observation, selectors: selectors, context: context)
+            handle.eventTracker = tracker
+            history = try tracker.history(after: request.cursor, includeValues: params.includeValues, context: context)
+        } else {
+            let now = nativeMilliseconds()
+            history = EventHistory(cursor: EventCursor(generation: UUID().uuidString, sequence: 0), oldestSequence: nil,
+                startedUnixMs: now, collected: CollectionInterval(startedUnixMs: now, finishedUnixMs: now),
+                stale: request.cursor != nil, overrun: false, mode: .unavailable, coalescedWakes: 0, events: [])
+        }
+        let old = native.observation
+        let observation = Observation(observationId: old.observationId, target: old.target,
+            collected: CollectionInterval(startedUnixMs: old.collected.startedUnixMs,
+                finishedUnixMs: max(old.collected.finishedUnixMs, history.collected.finishedUnixMs)),
+            windowBounds: old.windowBounds, accessibility: old.accessibility, accessibilityCollected: old.accessibilityCollected,
+            elements: old.elements, screenshot: old.screenshot, visual: old.visual, axSelection: old.axSelection, events: history)
+        try context.check()
+        return NativeObservation(observation: observation, handle: native.handle)
     }
 
     private func observeWindowOnly(_ key: TargetKey, id: String, started: UInt64,
-                                   accessibilityCollected: CollectionInterval? = nil, context: OperationContext) throws -> NativeObservation {
+                                   accessibilityCollected: CollectionInterval? = nil, selectors: [CUAProtocol.Selector]? = nil, context: OperationContext) throws -> NativeObservation {
         let target = try catalog.window(key, context: context)
         return NativeObservation(observation: unavailableObservation(
-            id: id, target: target, started: started, accessibilityCollected: accessibilityCollected), handle: nil)
+            id: id, target: target, started: started, accessibilityCollected: accessibilityCollected, selectors: selectors), handle: nil)
     }
 
     private func collectVisual(params: ObserveRequest, semantic: Observation, context: OperationContext) throws -> (VisualEvidence, Screenshot?) {
@@ -357,8 +390,9 @@ public struct MacOSWindowCatalog: WindowCatalog {
 
 private func nativeMilliseconds() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }
 private func unavailableObservation(id: String, target: Target, started: UInt64,
-                                    accessibilityCollected: CollectionInterval? = nil) -> Observation {
+                                    accessibilityCollected: CollectionInterval? = nil, selectors: [CUAProtocol.Selector]? = nil) -> Observation {
     Observation(observationId: id, target: target.key,
         collected: CollectionInterval(startedUnixMs: started, finishedUnixMs: max(started, nativeMilliseconds())),
-        windowBounds: target.bounds, accessibility: .unavailable, accessibilityCollected: accessibilityCollected, elements: [], screenshot: nil)
+        windowBounds: target.bounds, accessibility: .unavailable, accessibilityCollected: accessibilityCollected, elements: [], screenshot: nil,
+        axSelection: selectors.map { AxSelectionEvidence(selectors: $0, coverage: .unavailable, ambiguous: false, visitedNodes: 0) })
 }

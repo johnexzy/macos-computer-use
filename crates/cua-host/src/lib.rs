@@ -54,6 +54,9 @@ pub struct ObserveArgs {
     pub crop_window: Option<Rect>,
     #[schemars(range(min = 64, max = 2048))]
     pub max_image_dimension_px: Option<u32>,
+    #[schemars(length(min = 1, max = 16))]
+    pub ax_selectors: Option<Vec<Selector>>,
+    pub event_history: Option<EventHistoryRequest>,
     #[serde(default)]
     pub include_values: bool,
     #[serde(default = "default_budget")]
@@ -301,7 +304,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Observe one exact window. AX values, screenshots, and Vision OCR are opt-in. Optional cropWindow uses window-local points. Visual results report independent timing and coordinate transforms. Partial coverage cannot prove absence."
+        description = "Observe one exact window. Optional axSelectors reads matching AX controls and reports query coverage separately from window coverage. Optional eventHistory retains bounded selected-state changes between observations; historical controls have no actionable refs. Values, screenshots, and Vision OCR are opt-in. cropWindow uses window-local points. Partial coverage cannot prove absence; history can be stale or overrun."
     )]
     async fn observe(
         &self,
@@ -317,6 +320,8 @@ impl Host {
                 ocr_query: args.ocr_query,
                 crop_window: args.crop_window,
                 max_image_dimension_px: args.max_image_dimension_px,
+                ax_selectors: args.ax_selectors,
+                event_history: args.event_history,
             }),
             args.budget_ms,
             context,
@@ -454,6 +459,8 @@ mod tests {
                     ocr_query: None,
                     crop_window: None,
                     max_image_dimension_px: None,
+                    ax_selectors: None,
+                    event_history: None,
                 }),
                 5000
             )

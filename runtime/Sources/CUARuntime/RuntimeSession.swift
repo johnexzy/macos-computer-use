@@ -56,6 +56,7 @@ public final class RuntimeSession: @unchecked Sendable {
         self.actions = actions
         self.emit = emit; self.emitProgress = emitProgress; self.didShutdown = didShutdown
         observations = ObservationRegistry(epoch: epoch)
+        system.configureObservationWorker(worker)
         maintenance = DispatchSource.makeTimerSource(queue: control)
         maintenance.schedule(deadline: .now() + 1, repeating: 1)
         maintenance.setEventHandler { [weak self] in self?.observations.prune() }
@@ -77,6 +78,7 @@ public final class RuntimeSession: @unchecked Sendable {
         closed = true
         maintenance.cancel()
         for entry in Array(pending.values) { interrupt(entry, reason: .cancelled) }
+        system.shutdownObservations()
         observations.invalidate()
         session = nil
         seen.removeAll()

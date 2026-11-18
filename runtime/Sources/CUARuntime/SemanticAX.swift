@@ -96,7 +96,10 @@ public struct ResolvedAXElement: Sendable {
 public struct AXTreeSnapshot: Sendable {
     public let nodes: [ResolvedAXElement]
     public let complete: Bool
-    public init(nodes: [ResolvedAXElement], complete: Bool) { self.nodes = nodes; self.complete = complete }
+    public let visitedNodes: UInt32
+    public init(nodes: [ResolvedAXElement], complete: Bool, visitedNodes: UInt32 = 0) {
+        self.nodes = nodes; self.complete = complete; self.visitedNodes = visitedNodes
+    }
 }
 
 private let maxTreeNodes = 1024
@@ -120,6 +123,9 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
     private let application: any AXObject
     private let catalog: any WindowCatalog
     private let references: [String: RetainedAXElement]
+    var eventTracker: TargetWindowEvents?
+
+    public func didPublishObservation() { eventTracker?.publish() }
 
     init(backend: any AXReading, catalog: any WindowCatalog, application: any AXObject,
          target: Target, window: any AXObject, observationId: String, includeValues: Bool,
@@ -169,6 +175,19 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
         try validateWindow(context: context)
         return scan
     }
+
+    public func scan(selectors: [CUAProtocol.Selector], includeValues: Bool, context: OperationContext) throws -> AXTreeSnapshot {
+        try validateWindow(context: context)
+        let scan = try collectTree(window: retainedWindow, pid: target.key.pid, backend: backend,
+                                  includeValues: includeValues, selectors: selectors, context: context)
+        try validateWindow(context: context)
+        return scan
+    }
+    func eventReadSource() -> SemanticObservationHandle {
+        SemanticObservationHandle(backend: backend, catalog: catalog, application: application, target: target,
+            window: retainedWindow, observationId: observationId, includeValues: includeValues, references: references)
+    }
+    func notificationObjects() -> [any AXObject] { [retainedWindow] + references.values.prefix(Limits.maxEventControls).map(\.object) }
 }
 
 public struct SemanticAXObserver: Sendable {
@@ -184,13 +203,13 @@ public struct SemanticAXObserver: Sendable {
         let application = try backend.application(pid: target.key.pid, context: context)
         let window = try associatedWindow(target: target, application: application, backend: backend, catalog: catalog, context: context)
         let scan = try collectTree(window: window, pid: target.key.pid, backend: backend,
-                                   includeValues: params.includeValues, context: context)
+                                   includeValues: params.includeValues, selectors: params.axSelectors, context: context)
         var references: [String: RetainedAXElement] = [:]
         var elements: [Element] = []
         var complete = scan.complete
         var encodedBytes = 0
         let encoder = JSONEncoder()
-        for node in scan.nodes where node.snapshot.role != "AXWindow" && node.snapshot.role != "AXGroup" {
+        for node in scan.nodes where params.axSelectors != nil || (node.snapshot.role != "AXWindow" && node.snapshot.role != "AXGroup") {
             if elements.count == Limits.maxElements { complete = false; break }
             let reference = "element-\(UUID().uuidString)"
             let s = node.snapshot
@@ -223,11 +242,16 @@ public struct SemanticAXObserver: Sendable {
             includeValues: params.includeValues, references: references)
         try handle.validateWindow(context: context)
         let axFinished = max(axStarted, milliseconds())
+        let selection = params.axSelectors.map { selectors in
+            AxSelectionEvidence(selectors: selectors, coverage: scan.complete && elements.count == scan.nodes.count ? .complete : .partial,
+                ambiguous: selectors.contains { selector in scan.nodes.filter { matches($0.snapshot, selector: selector) }.count > 1 },
+                visitedNodes: scan.visitedNodes)
+        }
         let observation = Observation(observationId: observationId, target: target.key,
             collected: CollectionInterval(startedUnixMs: started, finishedUnixMs: max(axFinished, milliseconds())),
-            windowBounds: target.bounds, accessibility: complete ? .complete : .partial,
+            windowBounds: target.bounds, accessibility: params.axSelectors == nil && complete ? .complete : .partial,
             accessibilityCollected: CollectionInterval(startedUnixMs: axStarted, finishedUnixMs: axFinished),
-            elements: elements, screenshot: nil)
+            elements: elements, screenshot: nil, axSelection: selection)
         try context.check()
         return NativeObservation(observation: observation, handle: handle)
     }
@@ -287,7 +311,7 @@ private func requireOwningWindow(_ object: any AXObject, window: any AXObject, p
 }
 
 private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReading,
-                         includeValues: Bool, context: OperationContext) throws -> AXTreeSnapshot {
+                         includeValues: Bool, selectors: [CUAProtocol.Selector]? = nil, context: OperationContext) throws -> AXTreeSnapshot {
     var pending: [(any AXObject, Int)] = [(window, 0)]
     var seen: [any AXObject] = []
     var nodes: [ResolvedAXElement] = []
@@ -299,7 +323,35 @@ private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReadi
         seen.append(object)
         do {
             try requireOwningWindow(object, window: window, pid: pid, backend: backend, context: context)
-            if let snapshot = try backend.snapshot(of: object, includeValue: includeValues, context: context) {
+            if let selectors {
+                guard let identity = try backend.identity(of: object, context: context) else {
+                    complete = false
+                    let children = try backend.children(of: object, limit: max(0, maxTreeNodes - seen.count - pending.count), context: context)
+                    if !children.complete || (depth >= maxTreeDepth && !children.elements.isEmpty) { complete = false }
+                    if depth < maxTreeDepth { for child in children.elements.reversed() { pending.append((child, depth + 1)) } }
+                    continue
+                }
+                let candidates = selectors.filter { $0.role == identity.role && ($0.identifier == nil || $0.identifier == identity.identifier) }
+                if !candidates.isEmpty {
+                    if var snapshot = try backend.snapshot(of: object, includeValue: false, context: context) {
+                        if snapshot.identity != identity { complete = false }
+                        else {
+                            if snapshot.label == nil && !snapshot.complete && candidates.contains(where: { $0.label != nil }) { complete = false }
+                            if candidates.contains(where: { matches(snapshot, selector: $0) }) {
+                                if includeValues {
+                                    guard let withValue = try backend.snapshot(of: object, includeValue: true, context: context) else {
+                                        complete = false; continue
+                                    }
+                                    snapshot = withValue
+                                }
+                                if snapshot.identity == identity && candidates.contains(where: { matches(snapshot, selector: $0) }) {
+                                    nodes.append(ResolvedAXElement(object: object, snapshot: snapshot))
+                                } else { complete = false }
+                            }
+                        }
+                    } else { complete = false }
+                }
+            } else if let snapshot = try backend.snapshot(of: object, includeValue: includeValues, context: context) {
                 nodes.append(ResolvedAXElement(object: object, snapshot: snapshot))
                 if !snapshot.complete { complete = false }
             } else { complete = false }
@@ -317,7 +369,12 @@ private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReadi
             complete = false
         }
     }
-    return AXTreeSnapshot(nodes: nodes, complete: complete)
+    return AXTreeSnapshot(nodes: nodes, complete: complete, visitedNodes: UInt32(seen.count))
+}
+
+func matches(_ snapshot: AXNodeSnapshot, selector: CUAProtocol.Selector) -> Bool {
+    snapshot.role == selector.role && (selector.identifier == nil || selector.identifier == snapshot.identifier)
+        && (selector.label == nil || selector.label == snapshot.label)
 }
 
 /// Membership needs current identities/children, not a second full attribute read of every sibling.

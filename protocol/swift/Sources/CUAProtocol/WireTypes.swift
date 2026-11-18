@@ -11,6 +11,11 @@ public enum Limits {
     public static let observationTTLMS: UInt32 = 60_000
     public static let maxBudgetMS: UInt32 = 60_000
     public static let maxFeedbackBytes = 2 * 1024 * 1024
+    public static let maxAxSelectors = 16
+    public static let maxTargetEvents = 64
+    public static let maxTargetEventBytes = 64 * 1024
+    public static let maxEventControls = 16
+    public static let maxEventValueBytes = 4096
     public static let maxOcrMatches = 256
     public static let maxOcrTextBytes = 1024
     public static let maxOcrBytes = 256 * 1024
@@ -728,6 +733,205 @@ public struct VisualEvidence: Codable, Equatable, Sendable {
     }
 }
 
+public enum EventSource: String, Codable, Equatable, Sendable { case notification, poll }
+public enum EventMode: String, Codable, Equatable, Sendable { case notificationsAndPolling, polling, unavailable }
+
+public struct AxSelectionEvidence: Codable, Equatable, Sendable {
+    public let selectors: [Selector]
+    public let coverage: Coverage
+    public let ambiguous: Bool
+    public let visitedNodes: UInt32
+    public init(selectors: [Selector], coverage: Coverage, ambiguous: Bool, visitedNodes: UInt32) {
+        self.selectors = selectors
+        self.coverage = coverage
+        self.ambiguous = ambiguous
+        self.visitedNodes = visitedNodes
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case selectors, coverage, ambiguous, visitedNodes }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        selectors = try c.decode([Selector].self, forKey: .selectors)
+        coverage = try c.decode(Coverage.self, forKey: .coverage)
+        ambiguous = try c.decode(Bool.self, forKey: .ambiguous)
+        visitedNodes = try c.decode(UInt32.self, forKey: .visitedNodes)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(selectors, forKey: .selectors)
+        try c.encode(coverage, forKey: .coverage)
+        try c.encode(ambiguous, forKey: .ambiguous)
+        try c.encode(visitedNodes, forKey: .visitedNodes)
+    }
+}
+
+public struct EventCursor: Codable, Equatable, Sendable {
+    public let generation: String
+    public let sequence: UInt64
+    public init(generation: String, sequence: UInt64) {
+        self.generation = generation
+        self.sequence = sequence
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case generation, sequence }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        generation = try c.decode(String.self, forKey: .generation)
+        sequence = try c.decode(UInt64.self, forKey: .sequence)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(generation, forKey: .generation)
+        try c.encode(sequence, forKey: .sequence)
+    }
+}
+
+public struct EventHistoryRequest: Codable, Equatable, Sendable {
+    public let cursor: EventCursor?
+    public init(cursor: EventCursor? = nil) {
+        self.cursor = cursor
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case cursor }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        cursor = try c.decodeIfPresent(EventCursor.self, forKey: .cursor)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(cursor, forKey: .cursor)
+    }
+}
+
+public struct EventControl: Codable, Equatable, Sendable {
+    public let role: String
+    public let identifier: String?
+    public let label: String?
+    public let value: String?
+    public let enabled: Bool?
+    public let bounds: Rect
+    public let subrole: String?
+    public init(role: String, identifier: String?, label: String?, value: String?, enabled: Bool?, bounds: Rect, subrole: String? = nil) {
+        self.role = role
+        self.identifier = identifier
+        self.label = label
+        self.value = value
+        self.enabled = enabled
+        self.bounds = bounds
+        self.subrole = subrole
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case role, identifier, label, value, enabled, bounds, subrole }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        role = try c.decode(String.self, forKey: .role)
+        identifier = try c.decodeIfPresent(String.self, forKey: .identifier)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
+        value = try c.decodeIfPresent(String.self, forKey: .value)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled)
+        bounds = try c.decode(Rect.self, forKey: .bounds)
+        subrole = try c.decodeIfPresent(String.self, forKey: .subrole)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(role, forKey: .role)
+        try c.encode(identifier, forKey: .identifier)
+        try c.encode(label, forKey: .label)
+        try c.encode(value, forKey: .value)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encode(bounds, forKey: .bounds)
+        try c.encodeIfPresent(subrole, forKey: .subrole)
+    }
+}
+
+public struct TargetEvent: Codable, Equatable, Sendable {
+    public let sequence: UInt64
+    public let source: EventSource
+    public let notification: String?
+    public let observedUnixMs: UInt64
+    public let collected: CollectionInterval
+    public let coverage: Coverage
+    public let controls: [EventControl]
+    public init(sequence: UInt64, source: EventSource, notification: String?, observedUnixMs: UInt64, collected: CollectionInterval, coverage: Coverage, controls: [EventControl]) {
+        self.sequence = sequence
+        self.source = source
+        self.notification = notification
+        self.observedUnixMs = observedUnixMs
+        self.collected = collected
+        self.coverage = coverage
+        self.controls = controls
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case sequence, source, notification, observedUnixMs, collected, coverage, controls }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        sequence = try c.decode(UInt64.self, forKey: .sequence)
+        source = try c.decode(EventSource.self, forKey: .source)
+        notification = try c.decodeIfPresent(String.self, forKey: .notification)
+        observedUnixMs = try c.decode(UInt64.self, forKey: .observedUnixMs)
+        collected = try c.decode(CollectionInterval.self, forKey: .collected)
+        coverage = try c.decode(Coverage.self, forKey: .coverage)
+        controls = try c.decode([EventControl].self, forKey: .controls)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(sequence, forKey: .sequence)
+        try c.encode(source, forKey: .source)
+        try c.encode(notification, forKey: .notification)
+        try c.encode(observedUnixMs, forKey: .observedUnixMs)
+        try c.encode(collected, forKey: .collected)
+        try c.encode(coverage, forKey: .coverage)
+        try c.encode(controls, forKey: .controls)
+    }
+}
+
+public struct EventHistory: Codable, Equatable, Sendable {
+    public let cursor: EventCursor
+    public let oldestSequence: UInt64?
+    public let startedUnixMs: UInt64
+    public let collected: CollectionInterval
+    public let stale: Bool
+    public let overrun: Bool
+    public let mode: EventMode
+    public let coalescedWakes: UInt64
+    public let sampleCount: UInt64
+    public let events: [TargetEvent]
+    public init(cursor: EventCursor, oldestSequence: UInt64?, startedUnixMs: UInt64, collected: CollectionInterval, stale: Bool, overrun: Bool, mode: EventMode, coalescedWakes: UInt64, sampleCount: UInt64 = 0, events: [TargetEvent]) {
+        self.cursor = cursor
+        self.oldestSequence = oldestSequence
+        self.startedUnixMs = startedUnixMs
+        self.collected = collected
+        self.stale = stale
+        self.overrun = overrun
+        self.mode = mode
+        self.coalescedWakes = coalescedWakes
+        self.sampleCount = sampleCount
+        self.events = events
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case cursor, oldestSequence, startedUnixMs, collected, stale, overrun, mode, coalescedWakes, sampleCount, events }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        cursor = try c.decode(EventCursor.self, forKey: .cursor)
+        oldestSequence = try c.decodeIfPresent(UInt64.self, forKey: .oldestSequence)
+        startedUnixMs = try c.decode(UInt64.self, forKey: .startedUnixMs)
+        collected = try c.decode(CollectionInterval.self, forKey: .collected)
+        stale = try c.decode(Bool.self, forKey: .stale)
+        overrun = try c.decode(Bool.self, forKey: .overrun)
+        mode = try c.decode(EventMode.self, forKey: .mode)
+        coalescedWakes = try c.decode(UInt64.self, forKey: .coalescedWakes)
+        sampleCount = try c.decode(UInt64.self, forKey: .sampleCount)
+        events = try c.decode([TargetEvent].self, forKey: .events)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(cursor, forKey: .cursor)
+        try c.encode(oldestSequence, forKey: .oldestSequence)
+        try c.encode(startedUnixMs, forKey: .startedUnixMs)
+        try c.encode(collected, forKey: .collected)
+        try c.encode(stale, forKey: .stale)
+        try c.encode(overrun, forKey: .overrun)
+        try c.encode(mode, forKey: .mode)
+        try c.encode(coalescedWakes, forKey: .coalescedWakes)
+        try c.encode(sampleCount, forKey: .sampleCount)
+        try c.encode(events, forKey: .events)
+    }
+}
+
 public struct ObserveRequest: Codable, Equatable, Sendable {
     public let target: TargetKey
     public let includeScreenshot: Bool
@@ -736,7 +940,9 @@ public struct ObserveRequest: Codable, Equatable, Sendable {
     public let ocrQuery: String?
     public let cropWindow: Rect?
     public let maxImageDimensionPx: UInt32?
-    public init(target: TargetKey, includeScreenshot: Bool, includeValues: Bool, includeOcr: Bool = false, ocrQuery: String? = nil, cropWindow: Rect? = nil, maxImageDimensionPx: UInt32? = nil) {
+    public let axSelectors: [Selector]?
+    public let eventHistory: EventHistoryRequest?
+    public init(target: TargetKey, includeScreenshot: Bool, includeValues: Bool, includeOcr: Bool = false, ocrQuery: String? = nil, cropWindow: Rect? = nil, maxImageDimensionPx: UInt32? = nil, axSelectors: [Selector]? = nil, eventHistory: EventHistoryRequest? = nil) {
         self.target = target
         self.includeScreenshot = includeScreenshot
         self.includeValues = includeValues
@@ -744,9 +950,11 @@ public struct ObserveRequest: Codable, Equatable, Sendable {
         self.ocrQuery = ocrQuery
         self.cropWindow = cropWindow
         self.maxImageDimensionPx = maxImageDimensionPx
+        self.axSelectors = axSelectors
+        self.eventHistory = eventHistory
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case target, includeScreenshot, includeValues, includeOcr, ocrQuery, cropWindow, maxImageDimensionPx
+        case target, includeScreenshot, includeValues, includeOcr, ocrQuery, cropWindow, maxImageDimensionPx, axSelectors, eventHistory
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -757,6 +965,8 @@ public struct ObserveRequest: Codable, Equatable, Sendable {
         ocrQuery = try c.decodeIfPresent(String.self, forKey: .ocrQuery)
         cropWindow = try c.decodeIfPresent(Rect.self, forKey: .cropWindow)
         maxImageDimensionPx = try c.decodeIfPresent(UInt32.self, forKey: .maxImageDimensionPx)
+        axSelectors = try c.decodeIfPresent([Selector].self, forKey: .axSelectors)
+        eventHistory = try c.decodeIfPresent(EventHistoryRequest.self, forKey: .eventHistory)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -767,6 +977,8 @@ public struct ObserveRequest: Codable, Equatable, Sendable {
         try c.encodeIfPresent(ocrQuery, forKey: .ocrQuery)
         try c.encodeIfPresent(cropWindow, forKey: .cropWindow)
         try c.encodeIfPresent(maxImageDimensionPx, forKey: .maxImageDimensionPx)
+        try c.encodeIfPresent(axSelectors, forKey: .axSelectors)
+        try c.encodeIfPresent(eventHistory, forKey: .eventHistory)
     }
 }
 
@@ -780,7 +992,9 @@ public struct Observation: Codable, Equatable, Sendable {
     public let elements: [Element]
     public let screenshot: Screenshot?
     public let visual: VisualEvidence?
-    public init(observationId: String, target: TargetKey, collected: CollectionInterval, windowBounds: Rect, accessibility: Coverage, accessibilityCollected: CollectionInterval?, elements: [Element], screenshot: Screenshot?, visual: VisualEvidence? = nil) {
+    public let axSelection: AxSelectionEvidence?
+    public let events: EventHistory?
+    public init(observationId: String, target: TargetKey, collected: CollectionInterval, windowBounds: Rect, accessibility: Coverage, accessibilityCollected: CollectionInterval?, elements: [Element], screenshot: Screenshot?, visual: VisualEvidence? = nil, axSelection: AxSelectionEvidence? = nil, events: EventHistory? = nil) {
         self.observationId = observationId
         self.target = target
         self.collected = collected
@@ -790,9 +1004,11 @@ public struct Observation: Codable, Equatable, Sendable {
         self.elements = elements
         self.screenshot = screenshot
         self.visual = visual
+        self.axSelection = axSelection
+        self.events = events
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case observationId, target, collected, windowBounds, accessibility, accessibilityCollected, elements, screenshot, visual
+        case observationId, target, collected, windowBounds, accessibility, accessibilityCollected, elements, screenshot, visual, axSelection, events
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -805,6 +1021,8 @@ public struct Observation: Codable, Equatable, Sendable {
         elements = try c.decode([Element].self, forKey: .elements)
         screenshot = try c.decodeIfPresent(Screenshot.self, forKey: .screenshot)
         visual = try c.decodeIfPresent(VisualEvidence.self, forKey: .visual)
+        axSelection = try c.decodeIfPresent(AxSelectionEvidence.self, forKey: .axSelection)
+        events = try c.decodeIfPresent(EventHistory.self, forKey: .events)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -817,6 +1035,8 @@ public struct Observation: Codable, Equatable, Sendable {
         try c.encode(elements, forKey: .elements)
         try c.encode(screenshot, forKey: .screenshot)
         try c.encodeIfPresent(visual, forKey: .visual)
+        try c.encodeIfPresent(axSelection, forKey: .axSelection)
+        try c.encodeIfPresent(events, forKey: .events)
     }
 }
 

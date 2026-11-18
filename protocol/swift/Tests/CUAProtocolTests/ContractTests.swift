@@ -16,7 +16,7 @@ final class ContractTests: XCTestCase {
     }
     func testSharedValidFixturesDecodeAndRoundTrip() throws {
         let paths = try fixtures("valid")
-        XCTAssertEqual(paths.count, 57)
+        XCTAssertEqual(paths.count, 61)
         for path in paths {
             let frame = try Frame.decodeLine(Data(contentsOf: path))
             let encoded = try frame.encodeLine()
@@ -30,13 +30,15 @@ final class ContractTests: XCTestCase {
         let message = try XCTUnwrap(object["message"] as? [String: Any])
         let body = try XCTUnwrap(message["body"] as? [String: Any])
         let params = try XCTUnwrap(body["params"] as? [String: Any])
-        for name in ["includeOcr", "ocrQuery", "cropWindow", "maxImageDimensionPx"] { XCTAssertNil(params[name], name) }
+        for name in ["includeOcr", "ocrQuery", "cropWindow", "maxImageDimensionPx", "axSelectors", "eventHistory"] { XCTAssertNil(params[name], name) }
         let old = try fixture("observe-partial-response")
         let response = try XCTUnwrap(JSONSerialization.jsonObject(with: old.encodeLine()) as? [String: Any])
         let responseMessage = try XCTUnwrap(response["message"] as? [String: Any])
         let responseBody = try XCTUnwrap(responseMessage["body"] as? [String: Any])
         let data = try XCTUnwrap(responseBody["data"] as? [String: Any])
         XCTAssertNil(data["visual"])
+        XCTAssertNil(data["axSelection"])
+        XCTAssertNil(data["events"])
     }
     func testOCROnlyProvenanceMapsWindowAndScreenWithoutBitmapBytes() throws {
         guard case .response(let response) = try fixture("observe-ocr-only-response"),
@@ -60,7 +62,7 @@ final class ContractTests: XCTestCase {
     }
     func testSharedInvalidFixturesAreRejected() throws {
         let paths = try fixtures("invalid")
-        XCTAssertEqual(paths.count, 84)
+        XCTAssertEqual(paths.count, 90)
         for path in paths {
             XCTAssertThrowsError(try Frame.decodeLine(Data(contentsOf: path)), path.lastPathComponent)
         }
@@ -222,7 +224,7 @@ final class ContractTests: XCTestCase {
     func testSharedExpectationCorrelationCases() throws {
         struct Case: Decodable { let name: String; let valid: Bool; let request: Frame; let reply: Frame }
         let cases = try JSONDecoder().decode([Case].self, from: Data(contentsOf: fixtureRoot.appendingPathComponent("correlation.json")))
-        XCTAssertEqual(cases.count, 66)
+        XCTAssertEqual(cases.count, 74)
         for item in cases {
             try item.request.validate()
             try item.reply.validate()

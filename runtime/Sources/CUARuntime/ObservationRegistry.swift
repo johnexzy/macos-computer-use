@@ -1,7 +1,10 @@
 import CUAProtocol
 import Foundation
 
-public protocol RetainedNativeHandle: AnyObject, Sendable {}
+public protocol RetainedNativeHandle: AnyObject, Sendable {
+    func didPublishObservation()
+}
+public extension RetainedNativeHandle { func didPublishObservation() {} }
 
 public struct RetainedObservation: Sendable {
     public let observation: Observation
@@ -31,6 +34,7 @@ public final class ObservationRegistry: @unchecked Sendable {
         }
         entries[observation.observationId] = RetainedObservation(observation: observation, handle: handle, createdAt: now())
         order.append(observation.observationId)
+        handle?.didPublishObservation()
     }
     public func lookup(_ id: String, epoch: String, target: TargetKey) throws -> RetainedObservation {
         lock.lock(); defer { lock.unlock() }

@@ -24,7 +24,7 @@ fn shared_valid_fixtures_decode_and_round_trip() {
     let paths = fixtures("valid");
     assert_eq!(
         paths.len(),
-        57,
+        61,
         "keep the shared fixture inventory deliberate"
     );
     for path in paths {
@@ -46,6 +46,8 @@ fn absent_visual_options_keep_the_legacy_ax_wire_shape() {
         "ocrQuery",
         "cropWindow",
         "maxImageDimensionPx",
+        "axSelectors",
+        "eventHistory",
     ] {
         assert!(params.get(name).is_none(), "unexpected {name}");
     }
@@ -53,6 +55,12 @@ fn absent_visual_options_keep_the_legacy_ax_wire_shape() {
         serde_json::from_slice(&encode_line(&fixture("observe-partial-response")).unwrap())
             .unwrap();
     assert!(encoded["message"]["body"]["data"].get("visual").is_none());
+    assert!(
+        encoded["message"]["body"]["data"]
+            .get("axSelection")
+            .is_none()
+    );
+    assert!(encoded["message"]["body"]["data"].get("events").is_none());
 }
 
 #[test]
@@ -111,7 +119,7 @@ fn ocr_budget_accounts_for_json_escaping_not_only_text_bytes() {
 #[test]
 fn shared_invalid_fixtures_are_rejected() {
     let paths = fixtures("invalid");
-    assert_eq!(paths.len(), 84);
+    assert_eq!(paths.len(), 90);
     for path in paths {
         assert!(
             decode_line(&fs::read(&path).unwrap()).is_err(),
@@ -393,7 +401,7 @@ fn shared_expectation_correlation_cases_bind_receipts_to_requested_conditions() 
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../protocol/fixtures/correlation.json");
     let cases: Vec<Case> = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
-    assert_eq!(cases.len(), 66);
+    assert_eq!(cases.len(), 74);
     for case in cases {
         case.request.validate().unwrap();
         case.reply.validate().unwrap();

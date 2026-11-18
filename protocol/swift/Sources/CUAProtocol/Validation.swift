@@ -180,6 +180,14 @@ private func inside(_ a: Rect, _ b: Rect) -> Bool {
 extension ObserveRequest {
     func validate() throws {
         try validTarget(target)
+        if let selectors = axSelectors { try validateSelectors(selectors) }
+        if let history = eventHistory {
+            try require(axSelectors != nil, "event history requires explicit AX selectors")
+            if let cursor = history.cursor {
+                try identifier(cursor.generation)
+                try require(cursor.sequence <= 9_007_199_254_740_991, "event cursor exceeds safe integer range")
+            }
+        }
         if let query = ocrQuery {
             try require(includeOcr && !query.isEmpty && query.utf8.count <= Limits.maxOcrQueryBytes, "invalid OCR query")
         }
@@ -190,6 +198,54 @@ extension ObserveRequest {
         if let size = maxImageDimensionPx {
             try require((includeScreenshot || includeOcr) && (64...2048).contains(size), "invalid image dimension limit")
         }
+    }
+}
+private func validateSelectors(_ selectors: [Selector]) throws {
+    try require(!selectors.isEmpty && selectors.count <= Limits.maxAxSelectors, "invalid AX selector count")
+    for (index, selector) in selectors.enumerated() {
+        try identifier(selector.role)
+        try require((selector.label?.utf8.count ?? 0) <= 1024 && (selector.identifier?.utf8.count ?? 0) <= 1024,
+                    "AX selector exceeds string limit")
+        try require(!selectors.prefix(index).contains(selector), "duplicate AX selector")
+    }
+}
+private func selectorMatches(_ element: Element, _ selector: Selector) -> Bool {
+    element.role == selector.role && (selector.label == nil || selector.label == element.label) &&
+        (selector.identifier == nil || selector.identifier == element.identifier)
+}
+private func historicalMatches(_ control: EventControl, _ selector: Selector) -> Bool {
+    control.role == selector.role && (selector.label == nil || selector.label == control.label) &&
+        (selector.identifier == nil || selector.identifier == control.identifier)
+}
+extension EventHistory {
+    func validate() throws {
+        try identifier(cursor.generation)
+        try require(cursor.sequence <= 9_007_199_254_740_991 && coalescedWakes <= 9_007_199_254_740_991 && sampleCount <= 9_007_199_254_740_991,
+                    "event counters exceed safe integer range")
+        try validInterval(collected)
+        try require(startedUnixMs <= collected.finishedUnixMs, "event history starts after collection")
+        try require(events.count <= Limits.maxTargetEvents, "too many target events")
+        if let oldestSequence { try require(oldestSequence > 0 && oldestSequence <= cursor.sequence, "invalid oldest event sequence") }
+        var previous: UInt64 = 0
+        for event in events {
+            try require(event.sequence > previous && event.sequence <= cursor.sequence, "unordered target events")
+            previous = event.sequence
+            try validInterval(event.collected)
+            try require(event.observedUnixMs <= event.collected.finishedUnixMs && event.collected.finishedUnixMs <= collected.finishedUnixMs,
+                        "invalid historical event interval")
+            try require((event.source == .notification) == (event.notification != nil), "event source lacks notification provenance")
+            if let notification = event.notification { try identifier(notification) }
+            try require(event.controls.count <= Limits.maxEventControls, "too many historical controls")
+            try require(event.coverage != .unavailable || event.controls.isEmpty, "unavailable historical event has controls")
+            for control in event.controls {
+                try identifier(control.role); try validRect(control.bounds)
+                try require((control.identifier?.utf8.count ?? 0) <= 1024 && (control.label?.utf8.count ?? 0) <= 1024 &&
+                            (control.subrole?.utf8.count ?? 0) <= 1024 &&
+                            (control.value?.utf8.count ?? 0) <= Limits.maxEventValueBytes, "historical control exceeds string limit")
+            }
+        }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.withoutEscapingSlashes]
+        try require(try encoder.encode(self).count <= Limits.maxTargetEventBytes, "event history exceeds payload limit")
     }
 }
 extension VisualFrame {
@@ -243,6 +299,20 @@ extension Observation {
             try identifier(element.role)
             try validRect(element.bounds)
             try require((element.subrole?.utf8.count ?? 0) <= 1024, "element subrole exceeds string limit")
+        }
+        if let selection = axSelection {
+            try validateSelectors(selection.selectors)
+            try require(accessibility != .complete && selection.visitedNodes <= 1024, "selected AX scope cannot imply a complete window")
+            try require(elements.allSatisfy { element in selection.selectors.contains { selectorMatches(element, $0) } }, "selected AX result is outside its query")
+            let duplicates = selection.selectors.contains { selector in elements.filter { selectorMatches($0, selector) }.count > 1 }
+            try require(!duplicates || selection.ambiguous, "selected AX result hides ambiguity")
+            if selection.coverage == .complete { try require(selection.ambiguous == duplicates, "inconsistent selected AX ambiguity") }
+            if selection.coverage == .unavailable { try require(elements.isEmpty && !selection.ambiguous, "unavailable AX selection has results") }
+        }
+        if let events {
+            try events.validate()
+            try channelInterval(events.collected, within: collected)
+            try require(axSelection != nil, "event history lacks query provenance")
         }
         try screenshot?.validate()
         if let screenshot { try channelInterval(screenshot.collected, within: collected) }
@@ -494,6 +564,21 @@ extension Response {
             try require(request.target == observation.target, "observation target mismatch")
             try require(request.includeValues || observation.elements.allSatisfy { $0.value == nil },
                         "observation includes unrequested values")
+            try require(request.axSelectors == observation.axSelection?.selectors, "AX selection does not match request")
+            try require((request.eventHistory != nil) == (observation.events != nil), "event history inclusion does not match request")
+            if let history = observation.events {
+                try require(request.includeValues || history.events.allSatisfy { $0.controls.allSatisfy { $0.value == nil } }, "event history includes unrequested values")
+                try require(history.events.allSatisfy { event in event.controls.allSatisfy { control in
+                    request.axSelectors?.contains { historicalMatches(control, $0) } == true
+                } }, "event history contains controls outside the query")
+                if let cursor = request.eventHistory?.cursor {
+                    if cursor.generation != history.cursor.generation { try require(history.stale, "history generation changed without a stale marker") }
+                    else {
+                        try require(history.cursor.sequence >= cursor.sequence && history.events.allSatisfy { $0.sequence > cursor.sequence }, "event cursor replay or regression")
+                        if let oldest = history.oldestSequence, cursor.sequence < oldest - 1 { try require(history.overrun, "history hides an event-buffer overrun") }
+                    }
+                }
+            }
             try require(request.includeScreenshot || observation.screenshot == nil,
                         "observation includes unrequested image")
             try require(request.includeScreenshot || request.includeOcr || observation.visual == nil, "observation includes unrequested visual evidence")

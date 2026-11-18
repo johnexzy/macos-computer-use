@@ -109,9 +109,9 @@ private struct SemanticFixture {
         window.children = [first, second]
         backend.appWindows = [window]
     }
-    func observe(values: Bool = false, id: String = "obs-epoch-1") throws -> NativeObservation {
+    func observe(values: Bool = false, id: String = "obs-epoch-1", selectors: [CUAProtocol.Selector]? = nil) throws -> NativeObservation {
         try SemanticAXObserver(backend: backend, catalog: catalog).observe(
-            params: ObserveRequest(target: target.key, includeScreenshot: false, includeValues: values), observationId: id,
+            params: ObserveRequest(target: target.key, includeScreenshot: false, includeValues: values, axSelectors: selectors), observationId: id,
             context: OperationContext(budgetMs: 5000))
     }
 }
@@ -146,6 +146,71 @@ private func blankFrame(_ target: Target, white: Bool = false) throws -> Capture
 }
 
 final class SemanticObservationTests: XCTestCase {
+    func testCombinedProductionAXBudgetMaximumBitmapAndBoundedHistoryFitOneFrame() throws {
+        let fixture = SemanticFixture()
+        fixture.window.children = (0..<256).map { index in
+            let node = SemanticNode("field-\(index)", role: "AXTextField", title: "Value", bounds: fixture.first.bounds)
+            node.identifier = "field-\(index)"; node.parent = fixture.window; node.owner = fixture.window
+            node.value = String(repeating: "\u{0000}", count: 65_536)
+            return node
+        }
+        let native = try fixture.observe(values: true, selectors: [CUAProtocol.Selector(role: "AXTextField", label: nil, identifier: nil)])
+        let base = native.observation, captured = try blankFrame(fixture.target)
+        let interval = base.collected
+        let visualInterval = CollectionInterval(startedUnixMs: interval.finishedUnixMs, finishedUnixMs: interval.finishedUnixMs)
+        let screenshot = Screenshot(mimeType: .png, widthPx: captured.frame.widthPx, heightPx: captured.frame.heightPx,
+            dataBase64: Data(repeating: 255, count: Limits.maxImageBytes).base64EncodedString(),
+            imageToScreen: captured.frame.imageToScreen, collected: visualInterval)
+        let bounds = Rect(x: 1, y: 1, width: 1, height: 1)
+        let ocr = OcrEvidence(status: .partial, collected: visualInterval,
+            matches: (0..<230).map { _ in OcrMatch(text: String(repeating: "x", count: 1024), imageBounds: bounds) })
+        let history = EventHistory(cursor: EventCursor(generation: "bounded-events", sequence: 48), oldestSequence: 1,
+            startedUnixMs: interval.startedUnixMs, collected: interval, stale: false, overrun: false, mode: .polling,
+            coalescedWakes: 0, sampleCount: 48, events: (1...48).map { index in
+                TargetEvent(sequence: UInt64(index), source: .poll, notification: nil, observedUnixMs: interval.startedUnixMs,
+                    collected: interval, coverage: .complete, controls: [EventControl(role: "AXTextField", identifier: "field-0",
+                        label: "Value", value: String(repeating: "v", count: 850), enabled: true, bounds: fixture.first.bounds)])
+            })
+        let observation = Observation(observationId: base.observationId, target: base.target, collected: interval,
+            windowBounds: base.windowBounds, accessibility: base.accessibility, accessibilityCollected: base.accessibilityCollected,
+            elements: base.elements, screenshot: screenshot,
+            visual: VisualEvidence(captureStatus: .captured, collected: visualInterval, geometryMatchesAX: true, frame: captured.frame, ocr: ocr),
+            axSelection: base.axSelection, events: history)
+        let encoded = try Frame.response(Response(version: 1, id: "combined", epoch: "epoch", body: .observe(observation))).encodeLine()
+        XCTAssertLessThan(encoded.count, Limits.maxFrameBytes)
+        XCTAssertGreaterThan(encoded.count, 7_000_000)
+    }
+    func testSelectedReadFetchesValuesOnlyForRequestedControlAndDisclosesScope() throws {
+        let fixture = SemanticFixture()
+        let selectors = [CUAProtocol.Selector(role: "AXTextField", label: nil, identifier: "first")]
+        let native = try fixture.observe(values: true, selectors: selectors)
+        XCTAssertEqual(native.observation.elements.compactMap(\.identifier), ["first"])
+        XCTAssertEqual(fixture.backend.valueReads, ["first"])
+        XCTAssertEqual(native.observation.accessibility, .partial)
+        XCTAssertEqual(native.observation.axSelection?.coverage, .complete)
+        XCTAssertEqual(native.observation.axSelection?.selectors, selectors)
+        XCTAssertEqual(native.observation.axSelection?.visitedNodes, 3)
+        XCTAssertEqual(native.observation.axSelection?.ambiguous, false)
+        let request = Request(version: 1, id: "selected", epoch: "epoch", budgetMs: 5000,
+            body: .observe(ObserveRequest(target: fixture.target.key, includeScreenshot: false, includeValues: true, axSelectors: selectors)))
+        try Response(version: 1, id: "selected", epoch: "epoch", body: .observe(native.observation)).validateFor(request, expectedEpoch: "epoch")
+        let handle = try XCTUnwrap(native.handle as? SemanticObservationHandle)
+        XCTAssertEqual(try handle.resolve(native.observation.elements[0].reference, context: OperationContext(budgetMs: 1000)).snapshot.identifier, "first")
+    }
+    func testSelectedDuplicateLabelsExposeAmbiguityInsteadOfChoosingAnOccurrence() throws {
+        let fixture = SemanticFixture()
+        let native = try fixture.observe(selectors: [CUAProtocol.Selector(role: "AXTextField", label: "Value", identifier: nil)])
+        XCTAssertEqual(native.observation.elements.count, 2)
+        XCTAssertEqual(native.observation.axSelection?.ambiguous, true)
+        XCTAssertEqual(native.observation.axSelection?.coverage, .complete)
+        XCTAssertTrue(fixture.backend.valueReads.isEmpty)
+    }
+    func testUnreadableIdentityCannotMakeASelectedNegativeReadComplete() throws {
+        let fixture = SemanticFixture(); fixture.second.readUnavailable = true
+        let native = try fixture.observe(selectors: [CUAProtocol.Selector(role: "AXTextField", label: nil, identifier: "missing")])
+        XCTAssertTrue(native.observation.elements.isEmpty)
+        XCTAssertEqual(native.observation.axSelection?.coverage, .partial)
+    }
     func testUnrequestedVisualChannelDoesNotEnterCaptureBackend() throws {
         let fixture = SemanticFixture()
         let capture = TestVisualCapture { _, _, _, _ in
