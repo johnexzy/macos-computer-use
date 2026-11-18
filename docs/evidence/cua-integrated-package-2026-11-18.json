@@ -233,6 +233,22 @@
     },
     "setupEvidence": "System notification app foreground with unavailable launch identity. Actor setup refused before any task action."
   },
+  "deliveryUserActiveFollowup": {
+    "sourceRevision": "5e2aab1f8b71f7c7142b97734f732502baf53c62",
+    "cleanCheckout": true,
+    "mode": "oracle_informed_scripted_readiness",
+    "assigned": 6,
+    "outcomes": {
+      "passed": 6
+    },
+    "confirmedActorTransitions": 18,
+    "wrongTargetAttempts": 0,
+    "unnecessaryWrites": 0,
+    "targetActivations": 0,
+    "cleanupCompleted": 6,
+    "priorForegroundObservedAtEnd": 6,
+    "modelCalls": 0
+  },
   "acceptedEarlierUserActive": {
     "sourceRevision": "a82e1dd7fcdcbbd1410edf7d47e112622fa71086",
     "assigned": 6,
