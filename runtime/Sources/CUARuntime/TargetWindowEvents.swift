@@ -80,6 +80,11 @@ final class TargetWindowEvents: @unchecked Sendable {
     }
 
     private func sample(source cause: EventSource, notification: String?, observed: UInt64) {
+        lock.lock()
+        if !closed && now() - createdAt >= UInt64(Limits.observationTTLMS) * 1_000_000 { closeLocked() }
+        guard !closed else { pending = false; lock.unlock(); return }
+        samples += 1
+        lock.unlock()
         let start = eventMilliseconds()
         var coverage: Coverage = .unavailable
         var controls: [EventControl] = []
@@ -93,9 +98,9 @@ final class TargetWindowEvents: @unchecked Sendable {
         } catch {}
         lock.lock(); defer { lock.unlock() }
         pending = false
+        if !closed && now() - createdAt >= UInt64(Limits.observationTTLMS) * 1_000_000 { closeLocked() }
         guard !closed else { return }
-        samples += 1
-        if invalidated { stale = true; closed = true; mode = .unavailable; poll?.cancel(); notificationSource?.close(); return }
+        if invalidated { closeLocked(); return }
         guard controls != previous || coverage != previousCoverage else { return }
         previous = controls; previousCoverage = coverage; sequence += 1
         let event = TargetEvent(sequence: sequence, source: cause, notification: notification, observedUnixMs: observed,
@@ -115,6 +120,7 @@ final class TargetWindowEvents: @unchecked Sendable {
         try context.check()
         let started = eventMilliseconds()
         lock.lock(); defer { lock.unlock() }
+        if !closed && now() - createdAt >= UInt64(Limits.observationTTLMS) * 1_000_000 { closeLocked() }
         let changed = cursor != nil && cursor?.generation != generation
         if let cursor, !changed, cursor.sequence > sequence { throw NativeFailure(.invalidRequest, "event cursor is ahead of retained history") }
         let first = stored.first?.0.sequence
@@ -130,11 +136,14 @@ final class TargetWindowEvents: @unchecked Sendable {
         }
         return EventHistory(cursor: EventCursor(generation: generation, sequence: sequence), oldestSequence: first,
             startedUnixMs: startedUnixMs, collected: CollectionInterval(startedUnixMs: started, finishedUnixMs: max(started, eventMilliseconds())),
-            stale: stale || changed || now() - createdAt >= UInt64(Limits.observationTTLMS) * 1_000_000,
+            stale: stale || changed,
             overrun: overrun, mode: mode, coalescedWakes: coalesced, sampleCount: samples, events: events)
     }
     func stop() {
-        lock.lock(); closed = true; stale = true; mode = .unavailable; lock.unlock()
+        lock.lock(); closeLocked(); lock.unlock()
+    }
+    private func closeLocked() {
+        closed = true; stale = true; mode = .unavailable
         poll?.cancel(); notificationSource?.close()
     }
     deinit { poll?.cancel(); notificationSource?.close() }
@@ -142,6 +151,7 @@ final class TargetWindowEvents: @unchecked Sendable {
     private static func project(_ snapshots: [AXNodeSnapshot], coverage: Coverage) -> (controls: [EventControl], coverage: Coverage) {
         var complete = coverage
         let controls = snapshots.prefix(Limits.maxEventControls).map { snapshot in
+            if !snapshot.complete || !snapshot.enabledKnown { complete = .partial }
             func bounded(_ value: String?, limit: Int) -> String? {
                 guard let value else { return nil }
                 if value.utf8.count > limit { complete = .partial; return nil }

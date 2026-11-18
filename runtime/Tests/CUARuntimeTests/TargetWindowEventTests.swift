@@ -68,6 +68,21 @@ private final class EventClock: @unchecked Sendable {
 }
 
 final class TargetWindowEventTests: XCTestCase {
+    func testQueuedReadsDoNotStartAfterStopOrAbsoluteExpiry() throws {
+        for expire in [false, true] {
+            let fixture = EventFixture(), worker = DispatchQueue(label: "test.native"), clock = EventClock()
+            let tracker = try tracker(fixture, worker: worker, clock: clock)
+            let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+            worker.async { entered.signal(); release.wait() }
+            XCTAssertEqual(entered.wait(timeout: .now() + 1), .success)
+            let before = fixture.snapshotReads
+            tracker.wake(source: .poll, notification: nil, observed: UInt64(Date().timeIntervalSince1970 * 1000))
+            if expire { clock.advance() } else { tracker.stop() }
+            release.signal(); worker.sync {}
+            XCTAssertEqual(fixture.snapshotReads, before); XCTAssertEqual(try history(tracker).sampleCount, 0)
+            XCTAssertTrue(try history(tracker).stale); XCTAssertEqual(try history(tracker).mode, .unavailable)
+        }
+    }
     func testOnlyFourPublishedWindowsRemainActive() throws {
         let events = TargetEventRegistry(), registry = ObservationRegistry(epoch: "epoch")
         events.configure(worker: DispatchQueue(label: "test.native"))
