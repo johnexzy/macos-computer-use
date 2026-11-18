@@ -194,5 +194,65 @@
     "assigned": 9,
     "setupBlocked": 9
   },
-  "paidModelCalls": 0
+  "paidModelCalls": 0,
+  "selectiveLive": {
+    "sourceRevision": "5e970d5ad499018aa2c8a1f0870bf27ce209ae95",
+    "assigned": 9,
+    "workflowCompleted": 9,
+    "retainedToastsCaught": 3,
+    "retainedResponseBytes": 147255,
+    "fullResponseBytes": 419411
+  },
+  "deliveryComposition": {
+    "sourceRevision": "d1f1960d5845930cc5ff6ff446040638f8610714",
+    "assigned": 12,
+    "passed": 12,
+    "failed": 0,
+    "setupBlocked": 0,
+    "cleanupErrors": 0,
+    "unrelatedForegroundChanges": 0,
+    "targetActivationFailures": 0,
+    "latencyMs": {
+      "samples": 12,
+      "p50": 182.72208299999966,
+      "p95": 1161.0430840000008
+    }
+  },
+  "deliveryCleanFriction": {
+    "sourceRevision": "d1f1960d5845930cc5ff6ff446040638f8610714",
+    "assigned": 12,
+    "outcomes": {
+      "passed": 12
+    }
+  },
+  "deliveryUserActiveRepeat": {
+    "sourceRevision": "d1f1960d5845930cc5ff6ff446040638f8610714",
+    "assigned": 6,
+    "outcomes": {
+      "setup_blocked": 6
+    },
+    "setupEvidence": "System notification app foreground with unavailable launch identity. Actor setup refused before any task action."
+  },
+  "acceptedEarlierUserActive": {
+    "sourceRevision": "a82e1dd7fcdcbbd1410edf7d47e112622fa71086",
+    "assigned": 6,
+    "byLane": {
+      "legacy": {
+        "passed": 2,
+        "assigned": 2,
+        "medianScriptedTaskMs": 7687.31
+      },
+      "single": {
+        "passed": 2,
+        "assigned": 2,
+        "medianScriptedTaskMs": 1390.56
+      },
+      "composed": {
+        "passed": 2,
+        "assigned": 2,
+        "medianScriptedTaskMs": 1007.11
+      }
+    },
+    "observedActorTransitions": 18
+  }
 }
