@@ -96,7 +96,7 @@ points still start v3; installing an archive does not migrate them automatically
 | `get_capabilities` | `capabilities`; permission preflight and supported actions. |
 | `list_windows` | `targets`; retain the returned PID/window ID and logical bounds. |
 | `get_active_app` | No equivalent public tool. Background preservation is enforced by native dispatch and verification. |
-| `inspect_accessibility` | `observe` with explicit `includeValues`; opaque refs belong to that observation/target. |
+| `inspect_accessibility` | Use `observe` with explicit `includeValues` and optional `axSelectors`. Each actionable ref belongs to its live observation and target. |
 | `wait_for_accessibility` | `waitFor` with typed element existence/absence, enabled, exact value or window absence. Selectors are not arbitrary substring queries. |
 | `screenshot` | `observe(includeScreenshot:true)` on an exact target; MCP image plus explicit transform metadata. No full-desktop capture. |
 | `find_text` | `observe(includeOcr:true,ocrQuery:...)` returns Vision substring geometry in image pixels. Include a screenshot to prepare a foreground click. |
@@ -109,6 +109,10 @@ points still start v3; installing an archive does not migrate them automatically
 | `scroll` | Unsupported. |
 | `launch_app`, `open_url`, `run_applescript` | Unsupported; use separate explicitly authorized setup when required. |
 | Cursor overlay | No native overlay/daemon is installed. |
+
+For transient selected state, opt in to `eventHistory` on `observe`.
+History includes a cursor and coverage evidence. Use refs from the current
+observation to act.
 
 An act request has at most 16 typed steps, one exact target and one whole-operation
 budget. Reference retention is bounded; re-observe after layout/identity changes.
