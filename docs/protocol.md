@@ -129,10 +129,14 @@ space. It does not authorize global pointer input: background delivery still nee
 an exact semantic target; unsupported targeting must fail without silent fallback.
 Background keys are initially return/tab/escape/backspace/arrows. Scroll amounts
 are signed nonzero units in `[-1000,1000]`; runtime determines support and delivery.
-None of these three paths is currently implemented in the new runtime.
+The `key` and `click` paths are explicitly selected via `act.foreground: true`.
+The host and helper enforce the installed foreground grant. The opt-in sequence
+must contain at least one key or click and may include predicate waits. Semantic
+scroll remains unavailable. Background action requests omit the foreground flag.
 Overall `ActionKind` discovery is separate from each element's `ElementAction`
-affordances. Coordinate click can be supported without claiming every element has
-a semantic click action.
+affordances. Coordinate click capability requires an operator-authorized session and the
+necessary permissions. A click also needs fresh relevant mapped image evidence
+and exact focused-window validation.
 
 Existence selectors require a role and may constrain label
 or identifier. They are conditions, not action locators. Actions use retained refs
@@ -163,7 +167,7 @@ report an interval even when it returns no bitmap. Each channel reports its own 
 Accessibility coverage is complete/partial/unavailable. Partial
 coverage must not be treated as proof that an omitted element is absent. Values
 are excluded unless explicitly requested. The runtime must enforce that privacy
-choice and revalidate target identity/state before input; this package models the
+choice and revalidate target identity/state before input. This package models the
 boundary and does not query a Mac.
 
 The current runtime associates AX windows using unique PID, exact logical bounds,

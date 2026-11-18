@@ -55,7 +55,9 @@ choices!(Verification {
 choices!(DeliveryRoute {
     AxSetValue,
     AxSelectedText,
-    AxPress
+    AxPress,
+    ForegroundKey,
+    ForegroundClick
 });
 choices!(Coverage {
     Complete,
@@ -388,9 +390,18 @@ record!(ObservationFeedback {
 record!(ActionStep {
     action_id: String, operation: Operation, precondition: Option<Condition>, expect: Option<Condition>
 });
-record!(ActRequest {
-    grant_id: String, observation_id: String, target: TargetKey, steps: Vec<ActionStep>, feedback: Option<FeedbackRequest>
-});
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActRequest {
+    pub grant_id: String,
+    pub observation_id: String,
+    pub target: TargetKey,
+    pub steps: Vec<ActionStep>,
+    pub feedback: Option<FeedbackRequest>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub foreground: bool,
+}
 record!(CheckEvidence {
     observation_id: String,
     condition: Condition,
@@ -400,10 +411,40 @@ record!(StepReceipt {
     action_id: String, delivery: Delivery, verification: Verification,
     reason: Option<ReceiptReason>, evidence: Vec<CheckEvidence>, route: Option<DeliveryRoute>
 });
-record!(ActResult {
-    observation_id: String, steps: Vec<StepReceipt>, remaining_steps: u16, stop_reason: StopReason,
-    feedback: Option<ObservationFeedback>
+choices!(ForegroundInterruption {
+    InputActivity,
+    FocusChanged,
+    WindowChanged,
+    FrameChanged,
+    PermissionUnavailable,
+    ActivationFailed,
+    Cancelled,
+    DeadlineExceeded
 });
+choices!(FocusRestoration {
+    NotNeeded,
+    Pending,
+    Restored,
+    Skipped,
+    Failed
+});
+record!(ForegroundEvidence {
+    initial_pid: Option<u32>, last_pid: Option<u32>, activation_requested: bool,
+    input_activity: bool, external_activation: bool, interruption: Option<ForegroundInterruption>,
+    restoration: FocusRestoration
+});
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActResult {
+    pub observation_id: String,
+    pub steps: Vec<StepReceipt>,
+    pub remaining_steps: u16,
+    pub stop_reason: StopReason,
+    pub feedback: Option<ObservationFeedback>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foreground: Option<ForegroundEvidence>,
+}
 record!(WaitRequest {
     observation_id: String,
     target: TargetKey,
@@ -500,6 +541,10 @@ impl SessionContext {
                 act.grant_id == self.authority.grant_id,
                 "unknown host authority grant",
             )?;
+            require(
+                !act.foreground || self.authority.mode == ExecutionMode::ForegroundAllowed,
+                "operator foreground authority is required",
+            )?;
         }
         Ok(())
     }
@@ -550,7 +595,12 @@ fn channel_interval(
         "channel interval outside observation",
     )
 }
-fn expectation(step: &ActionStep, receipt: &StepReceipt, settled: bool) -> Result<(), String> {
+fn expectation(
+    step: &ActionStep,
+    receipt: &StepReceipt,
+    settled: bool,
+    foreground: bool,
+) -> Result<(), String> {
     if let Some(route) = receipt.route {
         require(
             matches!(
@@ -558,8 +608,18 @@ fn expectation(step: &ActionStep, receipt: &StepReceipt, settled: bool) -> Resul
                 (Operation::SetValue(_), DeliveryRoute::AxSetValue)
                     | (Operation::TypeText(_), DeliveryRoute::AxSelectedText)
                     | (Operation::Press(_), DeliveryRoute::AxPress)
+                    | (Operation::Key(_), DeliveryRoute::ForegroundKey)
+                    | (Operation::Click(_), DeliveryRoute::ForegroundClick)
             ),
             "receipt route does not match operation",
+        )?;
+        require(
+            foreground
+                == matches!(
+                    route,
+                    DeliveryRoute::ForegroundKey | DeliveryRoute::ForegroundClick
+                ),
+            "receipt route does not match requested foreground mode",
         )?;
     }
     let mut required = Vec::new();
@@ -1079,6 +1139,20 @@ impl ActRequest {
             "invalid action count",
         )?;
         unique(self.steps.iter().map(|v| v.action_id.as_str()))?;
+        if self.foreground {
+            require(
+                self.steps.iter().all(|step| {
+                    matches!(
+                        step.operation,
+                        Operation::Key(_) | Operation::Click(_) | Operation::WaitFor(_)
+                    )
+                }) && self
+                    .steps
+                    .iter()
+                    .any(|step| matches!(step.operation, Operation::Key(_) | Operation::Click(_))),
+                "foreground sequences require a key or click and may include waits",
+            )?;
+        }
         for step in &self.steps {
             match &step.operation {
                 Operation::Press(v) => id(&v.element_ref)?,
@@ -1240,6 +1314,7 @@ impl Frame {
                 id(&progress.epoch)?;
                 ActResult {
                     feedback: None,
+                    foreground: None,
                     observation_id: progress.observation_id.clone(),
                     steps: progress.steps.clone(),
                     remaining_steps: 0,
@@ -1364,7 +1439,7 @@ impl Progress {
             "progress does not match requested action prefix",
         )?;
         for (receipt, step) in self.steps.iter().zip(&act.steps) {
-            expectation(step, receipt, true)?;
+            expectation(step, receipt, true, act.foreground)?;
         }
         Ok(())
     }
@@ -1485,8 +1560,12 @@ impl Response {
                 {
                     let settled = result.stop_reason == StopReason::Completed
                         || index + 1 < result.steps.len();
-                    expectation(step, receipt, settled)?;
+                    expectation(step, receipt, settled, request.foreground)?;
                 }
+                require(
+                    request.foreground || result.foreground.is_none(),
+                    "unrequested foreground evidence",
+                )?;
                 correlate_feedback(request, result)
             }
             (RequestBody::WaitFor(request), ResponseBody::WaitFor(result)) => {

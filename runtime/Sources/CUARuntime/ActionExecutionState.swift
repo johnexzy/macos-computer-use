@@ -27,6 +27,7 @@ public final class ActionExecutionState: @unchecked Sendable {
     private var interrupted = false
     private var feedback: ObservationFeedback?
     private var finalReason: ReceiptReason?
+    private var foreground: ForegroundEvidence?
 
     public init(act: ActRequest) { self.act = act }
 
@@ -37,6 +38,14 @@ public final class ActionExecutionState: @unchecked Sendable {
             reason = interruption == .cancelled ? .cancelled : .deadlineExceeded
             stop = interruption == .cancelled ? .cancelled : .deadlineExceeded
             sealed = true
+            if act.foreground {
+                let observed = foreground
+                foreground = ForegroundEvidence(initialPid: observed?.initialPid, lastPid: observed?.lastPid,
+                    activationRequested: observed?.activationRequested ?? false, inputActivity: observed?.inputActivity ?? false,
+                    externalActivation: observed?.externalActivation ?? false,
+                    interruption: interruption == .cancelled ? .cancelled : .deadlineExceeded,
+                    restoration: observed?.restoration ?? .notNeeded)
+            }
         }
         return resultLocked()
     }
@@ -118,6 +127,11 @@ public final class ActionExecutionState: @unchecked Sendable {
         if !interrupted { feedback = value }
     }
 
+    func recordForeground(_ value: ForegroundEvidence) {
+        lock.lock(); defer { lock.unlock() }
+        if !interrupted { foreground = value }
+    }
+
     var hasEnteredDispatch: Bool {
         lock.lock(); defer { lock.unlock() }; return delivery != .notDispatched
     }
@@ -141,6 +155,6 @@ public final class ActionExecutionState: @unchecked Sendable {
             steps.append(receiptLocked(reason: currentReason))
         }
         return ActResult(observationId: act.observationId, steps: steps,
-            remainingSteps: UInt16(act.steps.count - steps.count), stopReason: stop, feedback: feedback)
+            remainingSteps: UInt16(act.steps.count - steps.count), stopReason: stop, feedback: feedback, foreground: foreground)
     }
 }

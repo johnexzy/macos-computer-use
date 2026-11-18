@@ -1,0 +1,42 @@
+{
+  "verifiedOn": {
+    "macOS": "27.2.1",
+    "architecture": "arm64"
+  },
+  "automatedPassed": {
+    "rust": 45,
+    "swiftRuntime": 144,
+    "swiftProtocol": 16,
+    "mcpProcess": 13
+  },
+  "installedForegroundFixture": {
+    "authorityRefused": true,
+    "clickVerified": true,
+    "exactPriorFocusRestored": true,
+    "staleLayoutRefused": true,
+    "switchedAppStoppedSuffix": true,
+    "keyDeliveryObserved": true,
+    "wrongTargetInputs": 0
+  },
+  "installedVisualRegression": {
+    "captureStatus": "captured",
+    "full": [
+      880,
+      460
+    ],
+    "cropped": [
+      512,
+      246
+    ],
+    "portrait": [
+      281,
+      360
+    ],
+    "substringMappedInsideFixtureField": true,
+    "coordinateClicksRefused": 2,
+    "fixtureActivations": 0
+  },
+  "hardwareInterruptionCoverage": "injected HID observations before dispatch and after a confirmed post",
+  "liveInterferenceCoverage": "two disposable AppKit processes with an observed cooperative activation switch",
+  "paidModelCalls": 0
+}

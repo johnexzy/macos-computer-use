@@ -114,6 +114,28 @@ final class ContractTests: XCTestCase {
         guard case .request(let hello) = try fixture("hello-request") else { return XCTFail() }
         XCTAssertThrowsError(try session.authorize(hello))
     }
+    func testExplicitForegroundSelectionRequiresAnOperatorGrant() throws {
+        guard case .request(let request) = try fixture("act-request"), case .act(let act) = request.body,
+              let epoch = request.epoch else { return XCTFail() }
+        let step = ActionStep(actionId: "click", operation: .click(ClickOperation(point: Point(x: 24, y: 16), space: .imagePixels)),
+                              precondition: nil, expect: nil)
+        func actRequest(foreground: Bool) -> Request {
+            Request(version: request.version, id: request.id, epoch: epoch, budgetMs: request.budgetMs,
+                body: .act(ActRequest(grantId: act.grantId, observationId: act.observationId, target: act.target,
+                    steps: [step], foreground: foreground)))
+        }
+        let background = SessionContext(epoch: epoch, authority: Authority(grantId: act.grantId, mode: .backgroundRequired))
+        let authorized = SessionContext(epoch: epoch, authority: Authority(grantId: act.grantId, mode: .foregroundAllowed))
+        XCTAssertThrowsError(try background.authorize(actRequest(foreground: true)))
+        try authorized.authorize(actRequest(foreground: true))
+        let receipt = StepReceipt(actionId: "click", delivery: .dispatched, verification: .unverified, reason: nil,
+                                  evidence: [], route: .foregroundClick)
+        let result = Response(version: request.version, id: request.id, epoch: epoch,
+            body: .act(ActResult(observationId: act.observationId, steps: [receipt], remainingSteps: 0, stopReason: .completed)))
+        try result.validateFor(actRequest(foreground: true), expectedEpoch: epoch)
+        XCTAssertThrowsError(try result.validateFor(actRequest(foreground: false), expectedEpoch: epoch))
+    }
+
     func testPartialMutationAndUncertainDispatchDoNotBecomeRejections() throws {
         func result(_ name: String) throws -> ActResult {
             guard case .response(let response) = try fixture(name), case .act(let result) = response.body else {

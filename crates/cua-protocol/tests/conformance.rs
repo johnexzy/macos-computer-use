@@ -205,6 +205,62 @@ fn authority_and_epoch_are_installed_by_host_not_act_arguments() {
 }
 
 #[test]
+fn foreground_selection_requires_authority_and_correlates_dispatch() {
+    let Frame::Request(mut request) = fixture("act-request") else {
+        panic!()
+    };
+    let RequestBody::Act(act) = &mut request.body else {
+        panic!()
+    };
+    act.foreground = true;
+    act.steps = vec![ActionStep {
+        action_id: "click".into(),
+        operation: Operation::Click(ClickOperation {
+            point: Point { x: 24.0, y: 16.0 },
+            space: CoordinateSpace::ImagePixels,
+        }),
+        precondition: None,
+        expect: None,
+    }];
+    let result = Response {
+        version: VERSION,
+        id: request.id.clone(),
+        epoch: request.epoch.clone().unwrap(),
+        body: ResponseBody::Act(ActResult {
+            observation_id: act.observation_id.clone(),
+            steps: vec![StepReceipt {
+                action_id: "click".into(),
+                delivery: Delivery::Dispatched,
+                verification: Verification::Unverified,
+                reason: None,
+                evidence: vec![],
+                route: Some(DeliveryRoute::ForegroundClick),
+            }],
+            remaining_steps: 0,
+            stop_reason: StopReason::Completed,
+            feedback: None,
+            foreground: None,
+        }),
+    };
+    let mut session = SessionContext {
+        epoch: result.epoch.clone(),
+        authority: Authority {
+            grant_id: act.grant_id.clone(),
+            mode: ExecutionMode::BackgroundRequired,
+        },
+    };
+    assert!(session.authorize(&request).is_err());
+    session.authority.mode = ExecutionMode::ForegroundAllowed;
+    session.authorize(&request).unwrap();
+    result.validate_for(&request, &session.epoch).unwrap();
+    let RequestBody::Act(act) = &mut request.body else {
+        panic!()
+    };
+    act.foreground = false;
+    assert!(result.validate_for(&request, &session.epoch).is_err());
+}
+
+#[test]
 fn partial_mutation_timeout_and_already_satisfied_are_distinct() {
     let result = |name| match fixture(name) {
         Frame::Response(Response {

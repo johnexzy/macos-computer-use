@@ -4,7 +4,7 @@ The rebuild has a standalone Rust MCP executable and one persistent Swift child
 per connection. PER-3/PER-4 provide coordination and lifecycle; PER-5/PER-6 add
 retained semantic observations and background actions. PER-8 adds bounded linear
 composition, typed waits, and requested compact feedback. PER-9 adds on-demand
-window capture and Vision OCR. These executables use protocol v1 from [protocol.md](protocol.md).
+window capture and Vision OCR. PER-10 adds explicitly scoped foreground input. These executables use protocol v1 from [protocol.md](protocol.md).
 
 ## Build and run from the checkout
 
@@ -37,13 +37,13 @@ the private Rust–Swift protocol has its own version and epoch.
 
 | MCP tool | Current native behavior |
 | --- | --- |
-| `capabilities` | Read permission booleans and installed mode without permission prompts; advertise `setValue`, `typeText`, and `press` when the AX mutation backend and Accessibility permission are available. |
+| `capabilities` | Read permission booleans and installed mode without permission prompts; advertise semantic AX actions when available. An operator-authorized connection can advertise foreground keys and clicks after permission preflight. |
 | `targets` | Return at most 256 visible, layer-zero windows with bundle IDs and exact process/window keys. |
 | `observe` | Associate the exact CG target with one AX window; return at most 256 controls with retained opaque references, bounds, actions, labels, and optional identifiers. Values, screenshots, and OCR are opt-in. |
-| `act` | Execute 1–16 ordered `setValue`, `typeText`, `press`, or read-only `waitFor` steps against the same target and original observation. Revalidate before every mutation; stop on failure or unknown delivery. |
+| `act` | Execute 1–16 ordered `setValue`, `typeText`, `press`, or read-only `waitFor` steps against the same target and original observation. Revalidate before every mutation and stop on failure or unknown delivery. Foreground key and click sequences require an explicit selector and operator authority. |
 | `waitFor` | Poll `elementExists`, `elementAbsent`, `enabled`, `valueEquals`, or `windowAbsent` within the original budget. Element waits return a fresh value-private observation; exact window absence returns its timed witness without a new observation. |
 
-Keys, scrolling, and coordinate input remain unsupported in the new runtime. Composition has no branching, nested sequences, or target switching.
+Scrolling remains unsupported. Composition has no branching, nested sequences, or target switching.
 All mutations use the original retained refs; a presence wait does not issue refs
 for newly discovered controls. The wire format can
 represent more operations than this implementation executes. It does not route
@@ -78,12 +78,44 @@ Use the matching installed host and runtime for the new fields.
 Run the live check against the disposable AppKit fixture with
 `npm run test:visual:live`.
 
-Visual evidence grants no input authority. A future coordinate input path
-must validate the relevant frame and layout at the dispatch boundary. An
-observation reference or TTL alone cannot establish visual freshness.
+Visual evidence grants no input authority. The foreground click route checks a
+fresh capture of the relevant image region at dispatch, alongside the live window
+and focus checks.
 
 Apple documentation covers [ScreenCaptureKit window capture](https://developer.apple.com/documentation/screencapturekit/scscreenshotmanager)
 and [Vision text range boxes](https://developer.apple.com/documentation/vision/recognizing-text-in-images).
+
+## Foreground input
+
+Start the host with `--allow-foreground` when the operator wants to permit
+temporary foreground control. Set `foreground: true` on the individual `act`
+request. This selects the route for that exact target and sequence. Other
+requests continue to use the background path.
+
+A foreground sequence contains keys or clicks and may include predicate waits.
+Keys require the named AX control to be the exact focused element. A click needs
+a screenshot-backed observation that agreed with AX geometry. The runtime
+recaptures the same crop and verifies the layout around the click point, then
+checks the exact focused window and screen hit. It aborts on unsafe focus,
+geometry disagreement, hardware activity, or failed permission preflight.
+
+The receipt records the route, observed app activation and HID activity,
+interruption, and focus restoration. App activation notifications retain observed
+app switches between samples. HID counters represent available evidence of
+keyboard and pointer activity. Moving the pointer or switching apps interrupts
+remaining input. Clients can also cancel the MCP call. Prior focus restoration
+requires the last checked target context and unchanged available HID signals.
+A timeout or disconnect can leave restoration pending.
+
+macOS provides separate APIs for checking focus, reading input state, and
+posting events. Focus, layout, or hardware activity can change in the interval
+between the final checks and a posted event pair. A successful post establishes
+dispatch. Use a predicate or independent UI readback to confirm the effect.
+
+Run the disposable live fixture check with `npm run test:foreground:live`.
+
+Apple documents the [HID event counters](https://developer.apple.com/documentation/coregraphics/cgeventsource/counterforeventtype(_:eventtype:))
+and [AXRaise semantics](https://developer.apple.com/documentation/applicationservices/carbon_accessibility/actions).
 
 ## Observation and reference validity
 

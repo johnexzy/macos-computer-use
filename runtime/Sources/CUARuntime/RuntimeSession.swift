@@ -201,7 +201,12 @@ public final class RuntimeSession: @unchecked Sendable {
         switch request.body {
         case .capabilities:
             let permissions = try system.permissions(context: context)
-            return NativeResult(.capabilities(Capabilities(permissions: permissions, mode: mode, actions: system.supportedActions(permissions: permissions))))
+            var supported = system.supportedActions(permissions: permissions)
+            if mode == .foregroundAllowed && permissions.accessibility && permissions.inputPosting {
+                supported.append(.key)
+                if #available(macOS 14.0, *), permissions.screenRecording { supported.append(.click) }
+            }
+            return NativeResult(.capabilities(Capabilities(permissions: permissions, mode: mode, actions: supported)))
         case .targets(let params):
             return NativeResult(.targets(try system.targets(bundleId: params.bundleId, context: context)))
         case .observe(let params):

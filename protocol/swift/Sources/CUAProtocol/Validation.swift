@@ -30,12 +30,15 @@ private func channelInterval(_ channel: CollectionInterval, within total: Collec
     try require(channel.startedUnixMs >= total.startedUnixMs && channel.finishedUnixMs <= total.finishedUnixMs,
                 "channel interval outside observation")
 }
-private func expectation(_ step: ActionStep, _ receipt: StepReceipt, settled: Bool) throws {
+private func expectation(_ step: ActionStep, _ receipt: StepReceipt, settled: Bool, foreground: Bool) throws {
     if let route = receipt.route {
         switch (step.operation, route) {
-        case (.setValue, .axSetValue), (.typeText, .axSelectedText), (.press, .axPress): break
+        case (.setValue, .axSetValue), (.typeText, .axSelectedText), (.press, .axPress),
+             (.key, .foregroundKey), (.click, .foregroundClick): break
         default: throw ContractError("receipt route does not match operation")
         }
+        try require(foreground == (route == .foregroundKey || route == .foregroundClick),
+                    "receipt route does not match requested foreground mode")
     }
     var required: [Condition] = []
     if case .waitFor(let wait) = step.operation {
@@ -285,6 +288,13 @@ extension ActRequest {
         try validTarget(target)
         try require(!steps.isEmpty && steps.count <= Limits.maxSteps, "invalid action count")
         try unique(steps.map(\.actionId))
+        if foreground {
+            try require(steps.allSatisfy {
+                switch $0.operation { case .key, .click, .waitFor: true; default: false }
+            } && steps.contains {
+                switch $0.operation { case .key, .click: true; default: false }
+            }, "foreground sequences require a key or click and may include waits")
+        }
         for step in steps {
             switch step.operation {
             case .press(let value): try identifier(value.elementRef)
@@ -465,7 +475,7 @@ extension Progress {
         try require(observationId == act.observationId, "progress observation provenance mismatch")
         try require(steps.count <= act.steps.count && zip(steps, act.steps).allSatisfy { $0.actionId == $1.actionId },
                     "progress does not match requested action prefix")
-        for (receipt, step) in zip(steps, act.steps) { try expectation(step, receipt, settled: true) }
+        for (receipt, step) in zip(steps, act.steps) { try expectation(step, receipt, settled: true, foreground: act.foreground) }
     }
 }
 
@@ -520,8 +530,9 @@ extension Response {
             try require(zip(result.steps, request.steps).allSatisfy { $0.actionId == $1.actionId },
                         "receipt does not match requested action prefix")
             for (index, pair) in zip(result.steps, request.steps).enumerated() {
-                try expectation(pair.1, pair.0, settled: result.stopReason == .completed || index + 1 < result.steps.count)
+                try expectation(pair.1, pair.0, settled: result.stopReason == .completed || index + 1 < result.steps.count, foreground: request.foreground)
             }
+            try require(request.foreground || result.foreground == nil, "unrequested foreground evidence")
             try correlateFeedback(request, result)
         case (.waitFor(let request), .waitFor(let result)):
             if let evidence = result.evidence {
@@ -558,6 +569,7 @@ public struct SessionContext: Sendable {
         try require(request.epoch == epoch, "stale helper epoch")
         if case .act(let act) = request.body {
             try require(act.grantId == authority.grantId, "unknown host authority grant")
+            try require(!act.foreground || authority.mode == .foregroundAllowed, "operator foreground authority is required")
         }
     }
 }

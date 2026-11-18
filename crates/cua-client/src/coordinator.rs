@@ -525,6 +525,7 @@ pub(crate) fn interrupted(
             remaining_steps,
             stop_reason,
             feedback: None,
+            foreground: None,
         }),
     })
 }

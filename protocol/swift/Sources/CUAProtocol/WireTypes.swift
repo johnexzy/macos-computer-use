@@ -65,7 +65,7 @@ public enum Verification: String, Codable, Equatable, Sendable {
 }
 
 public enum DeliveryRoute: String, Codable, Equatable, Sendable {
-    case axSetValue, axSelectedText, axPress
+    case axSetValue, axSelectedText, axPress, foregroundKey, foregroundClick
 }
 
 public enum Coverage: String, Codable, Equatable, Sendable {
@@ -1180,16 +1180,18 @@ public struct ActRequest: Codable, Equatable, Sendable {
     public let target: TargetKey
     public let steps: [ActionStep]
     public let feedback: FeedbackRequest?
-    public init(grantId: String, observationId: String, target: TargetKey, steps: [ActionStep], feedback: FeedbackRequest? = nil) {
+    public let foreground: Bool
+    public init(grantId: String, observationId: String, target: TargetKey, steps: [ActionStep], feedback: FeedbackRequest? = nil, foreground: Bool = false) {
         self.grantId = grantId
         self.observationId = observationId
         self.target = target
         self.steps = steps
         self.feedback = feedback
+        self.foreground = foreground
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case grantId, observationId, target, steps
-        case feedback
+        case feedback, foreground
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -1198,6 +1200,7 @@ public struct ActRequest: Codable, Equatable, Sendable {
         target = try c.decode(TargetKey.self, forKey: .target)
         steps = try c.decode([ActionStep].self, forKey: .steps)
         feedback = try c.decodeIfPresent(FeedbackRequest.self, forKey: .feedback)
+        foreground = c.contains(.foreground) ? try c.decode(Bool.self, forKey: .foreground) : false
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -1206,6 +1209,7 @@ public struct ActRequest: Codable, Equatable, Sendable {
         try c.encode(target, forKey: .target)
         try c.encode(steps, forKey: .steps)
         try c.encode(feedback, forKey: .feedback)
+        if foreground { try c.encode(foreground, forKey: .foreground) }
     }
 }
 
@@ -1278,22 +1282,68 @@ public struct StepReceipt: Codable, Equatable, Sendable {
     }
 }
 
+public enum ForegroundInterruption: String, Codable, Equatable, Sendable {
+    case inputActivity, focusChanged, windowChanged, frameChanged, permissionUnavailable
+    case activationFailed, cancelled, deadlineExceeded
+}
+
+public enum FocusRestoration: String, Codable, Equatable, Sendable {
+    case notNeeded, pending, restored, skipped, failed
+}
+
+public struct ForegroundEvidence: Codable, Equatable, Sendable {
+    public let initialPid: UInt32?
+    public let lastPid: UInt32?
+    public let activationRequested: Bool
+    public let inputActivity: Bool
+    public let externalActivation: Bool
+    public let interruption: ForegroundInterruption?
+    public let restoration: FocusRestoration
+
+    public init(initialPid: UInt32?, lastPid: UInt32?, activationRequested: Bool, inputActivity: Bool,
+                externalActivation: Bool, interruption: ForegroundInterruption?, restoration: FocusRestoration) {
+        self.initialPid = initialPid
+        self.lastPid = lastPid
+        self.activationRequested = activationRequested
+        self.inputActivity = inputActivity
+        self.externalActivation = externalActivation
+        self.interruption = interruption
+        self.restoration = restoration
+    }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case initialPid, lastPid, activationRequested, inputActivity, externalActivation, interruption, restoration
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        initialPid = try c.decodeIfPresent(UInt32.self, forKey: .initialPid)
+        lastPid = try c.decodeIfPresent(UInt32.self, forKey: .lastPid)
+        activationRequested = try c.decode(Bool.self, forKey: .activationRequested)
+        inputActivity = try c.decode(Bool.self, forKey: .inputActivity)
+        externalActivation = try c.decode(Bool.self, forKey: .externalActivation)
+        interruption = try c.decodeIfPresent(ForegroundInterruption.self, forKey: .interruption)
+        restoration = try c.decode(FocusRestoration.self, forKey: .restoration)
+    }
+}
+
 public struct ActResult: Codable, Equatable, Sendable {
     public let observationId: String
     public let steps: [StepReceipt]
     public let remainingSteps: UInt16
     public let stopReason: StopReason
     public let feedback: ObservationFeedback?
-    public init(observationId: String, steps: [StepReceipt], remainingSteps: UInt16, stopReason: StopReason, feedback: ObservationFeedback? = nil) {
+    public let foreground: ForegroundEvidence?
+    public init(observationId: String, steps: [StepReceipt], remainingSteps: UInt16, stopReason: StopReason, feedback: ObservationFeedback? = nil, foreground: ForegroundEvidence? = nil) {
         self.observationId = observationId
         self.steps = steps
         self.remainingSteps = remainingSteps
         self.stopReason = stopReason
         self.feedback = feedback
+        self.foreground = foreground
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case observationId, steps, remainingSteps, stopReason
-        case feedback
+        case feedback, foreground
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -1302,6 +1352,7 @@ public struct ActResult: Codable, Equatable, Sendable {
         remainingSteps = try c.decode(UInt16.self, forKey: .remainingSteps)
         stopReason = try c.decode(StopReason.self, forKey: .stopReason)
         feedback = try c.decodeIfPresent(ObservationFeedback.self, forKey: .feedback)
+        foreground = try c.decodeIfPresent(ForegroundEvidence.self, forKey: .foreground)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -1310,6 +1361,7 @@ public struct ActResult: Codable, Equatable, Sendable {
         try c.encode(remainingSteps, forKey: .remainingSteps)
         try c.encode(stopReason, forKey: .stopReason)
         try c.encode(feedback, forKey: .feedback)
+        try c.encodeIfPresent(foreground, forKey: .foreground)
     }
 }
 

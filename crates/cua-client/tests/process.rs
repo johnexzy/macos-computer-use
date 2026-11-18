@@ -29,6 +29,7 @@ async fn peer(scenario: &str) -> Client {
 fn act(count: usize) -> RequestBody {
     RequestBody::Act(ActRequest {
         grant_id: "model-must-not-select-this-grant".into(),
+        foreground: false,
         feedback: None,
         observation_id: "observation-1".into(),
         target: TargetKey {

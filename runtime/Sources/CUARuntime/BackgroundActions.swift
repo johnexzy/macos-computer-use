@@ -24,6 +24,8 @@ public struct BackgroundActions: Sendable {
     private let foreground: @Sendable () -> UInt32?
     private let predicates: PredicateEvaluator
     private let now: @Sendable () -> UInt64
+    private let foregroundPlatform: any ForegroundPlatform
+    private let coordinateCapture: any VisualCapturing
 
     public init(coordinator: MutationCoordinator = MutationCoordinator(),
                 predicates: PredicateEvaluator = PredicateEvaluator(),
@@ -32,7 +34,16 @@ public struct BackgroundActions: Sendable {
                     guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier, pid > 0 else { return nil }
                     return UInt32(pid)
                 }) {
+        self.init(coordinator: coordinator, predicates: predicates, now: now, foreground: foreground,
+                  foregroundPlatform: NativeForegroundPlatform(), coordinateCapture: ScreenWindowCapture())
+    }
+
+    init(coordinator: MutationCoordinator = MutationCoordinator(), predicates: PredicateEvaluator = PredicateEvaluator(),
+         now: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
+         foreground: @escaping @Sendable () -> UInt32? = { nil },
+         foregroundPlatform: any ForegroundPlatform, coordinateCapture: any VisualCapturing) {
         self.coordinator = coordinator; self.foreground = foreground; self.predicates = predicates; self.now = now
+        self.foregroundPlatform = foregroundPlatform; self.coordinateCapture = coordinateCapture
     }
 
     /// The sink must return only after a full progress frame is physically written.
@@ -45,8 +56,8 @@ public struct BackgroundActions: Sendable {
             state.finish(reason: .unsupported, stop: .unsupported); return state.snapshot()
         }
         let run = {
-            let before = hasMutation ? foreground() : nil
-            if hasMutation && before == nil { throw NativeFailure(.unsupported, "foreground baseline is unavailable") }
+            let before = hasMutation && !request.foreground ? foreground() : nil
+            if hasMutation && !request.foreground && before == nil { throw NativeFailure(.unsupported, "foreground baseline is unavailable") }
             defer {
                 if !state.isSealed && before != nil {
                     // Cleanup must not seal a secondary foreground error ahead of a known interruption.
@@ -59,28 +70,45 @@ public struct BackgroundActions: Sendable {
                 }
             }
             let handle = try semanticHandle(entry, observationId: request.observationId, target: request.target)
+            let foreground = request.foreground ? try ForegroundControl(platform: foregroundPlatform, capture: coordinateCapture,
+                target: handle, context: context, state: state) : nil
+            defer { foreground?.restore() }
             for step in request.steps {
                 try state.checkActive(context: context)
                 try checkLifetime(entry)
+                try foreground?.checkContext()
                 let reason: ReceiptReason?
                 if case .waitFor(let wait) = step.operation {
-                    reason = try waitStep(wait.condition, entry: entry, handle: handle, context: context, state: state)
+                    reason = try waitStep(wait.condition, entry: entry, handle: handle, context: context,
+                                          state: state, foreground: foreground)
+                } else if let foreground {
+                    let already = try executeForeground(step, entry: entry, handle: handle, context: context, state: state, control: foreground)
+                    reason = already ? .alreadySatisfied : nil
                 } else {
                     let already = try execute(step, entry: entry, handle: handle, context: context, state: state, before: before)
                     reason = already ? .alreadySatisfied : nil
                 }
+                try foreground?.checkContext()
                 if before != nil { try checkForeground(before, targetPID: request.target.pid) }
                 if let prefix = try state.settle(context: context, reason: reason), let progress {
                     try progress(prefix, context)
                 }
             }
             if before != nil { try checkForeground(before, targetPID: request.target.pid) }
+            foreground?.restore()
             try state.finalize(context: context)
         }
         do {
             if hasMutation { try coordinator.withOwnership(context: context, run) }
             else { try run() }
         } catch let error as NativeFailure { finish(state, failure: error) }
+        catch let stopped as ForegroundStopped {
+            switch stopped.reason {
+            case .permissionUnavailable, .activationFailed: state.finish(reason: .unsupported, stop: .unsupported)
+            case .frameChanged, .windowChanged: state.finish(reason: .targetStale, stop: .targetStale)
+            default: state.finish(reason: .nativeFailed, stop: .failed)
+            }
+        }
         catch { state.finish(reason: .nativeFailed, stop: .failed) }
         if let requested = request.feedback {
             state.attachFeedback(FeedbackCollector().collect(requested, entry: entry, context: context))
@@ -106,11 +134,12 @@ public struct BackgroundActions: Sendable {
     }
 
     private func waitStep(_ condition: Condition, entry: RetainedObservation, handle: SemanticObservationHandle, context: OperationContext,
-                          state: ActionExecutionState) throws -> ReceiptReason {
+                          state: ActionExecutionState, foreground: ForegroundControl? = nil) throws -> ReceiptReason {
         var first = true
         while true {
             try state.checkActive(context: context)
             try checkLifetime(entry)
+            try foreground?.checkContext()
             do {
                 if let check = try evaluate(condition, handle: handle, context: context) {
                     state.checked([check], verification: check.matched ? .confirmed : .mismatch)
@@ -118,6 +147,49 @@ public struct BackgroundActions: Sendable {
                 }
             } catch is AXReadUnavailable { /* Keep the last genuine witness, if any. */ }
             first = false
+            try pause(context)
+        }
+    }
+
+    private func executeForeground(_ step: ActionStep, entry: RetainedObservation, handle: SemanticObservationHandle,
+                                   context: OperationContext, state: ActionExecutionState, control: ForegroundControl) throws -> Bool {
+        let route: DeliveryRoute
+        switch step.operation {
+        case .click: route = .foregroundClick
+        case .key: route = .foregroundKey
+        default: throw NativeFailure(.unsupported, "foreground operation is not available")
+        }
+        func checkGuard() throws {
+            guard let condition = step.precondition else { return }
+            guard let check = try evaluate(condition, handle: handle, context: context) else {
+                throw NativeFailure(.unsupported, "foreground precondition cannot be read")
+            }
+            if !check.matched {
+                state.checked([check], verification: .unverified)
+                state.finish(reason: .preconditionFailed, stop: .preconditionFailed)
+                throw NativeFailure(.nativeFailed, "foreground precondition no longer holds")
+            }
+        }
+        try checkGuard()
+        if let expected = step.expect, let check = try evaluate(expected, handle: handle, context: context), check.matched {
+            state.checked([check], verification: .confirmed)
+            return true
+        }
+
+        try control.post(step.operation, observation: entry.observation, checkGuard: checkGuard) {
+            try checkLifetime(entry)
+            try state.beginDispatch(context: context, route: route)
+        }
+        state.returnedSuccessfully()
+        guard let expected = step.expect else { return false }
+        while true {
+            try context.check()
+            try checkLifetime(entry)
+            do {
+                let checks = try recordChecks([expected], handle: handle, context: context, state: state)
+                if checks.first?.matched == true { return false }
+            } catch is AXReadUnavailable { /* No usable observation at this sample. */ }
+            try control.checkContext()
             try pause(context)
         }
     }
@@ -303,8 +375,8 @@ public struct BackgroundActions: Sendable {
     }
     private func finish(_ state: ActionExecutionState, failure: NativeFailure) {
         switch failure.code {
-        case .cancelled: state.finish(reason: .cancelled, stop: .cancelled)
-        case .deadlineExceeded: state.finish(reason: .deadlineExceeded, stop: .deadlineExceeded)
+        case .cancelled: _ = state.interrupt(.cancelled)
+        case .deadlineExceeded: _ = state.interrupt(.deadlineExceeded)
         case .unsupported: state.finish(reason: .unsupported, stop: .unsupported)
         case .ambiguousTarget: state.finish(reason: .ambiguousTarget, stop: .ambiguousTarget)
         case .staleElement, .staleObservation, .targetNotFound: state.finish(reason: .targetStale, stop: .targetStale)

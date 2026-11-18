@@ -149,7 +149,7 @@ private func axUnavailable(_ failure: any Error) -> Bool {
     }
 }
 
-private func jpegData(_ image: CGImage) -> Data? {
+func jpegData(_ image: CGImage) -> Data? {
     let data = NSMutableData()
     guard let output = CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
     CGImageDestinationAddImage(output, image, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)

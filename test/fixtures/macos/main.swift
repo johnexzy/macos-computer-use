@@ -70,7 +70,7 @@ final class FixtureTextField: NSTextField {
 final class WindowRecord {
     let key: String
     var generation = 1
-    var window: NSWindow!
+    var window: FixtureWindow!
     var stack: NSStackView!
     var fields: [String: FieldRecord] = [:]
     var order = ["first", "second"]
@@ -79,6 +79,17 @@ final class WindowRecord {
     var pressEffect: PressEffect = .counter
 
     init(key: String) { self.key = key }
+}
+
+@MainActor
+final class FixtureWindow: NSWindow {
+    private(set) var keyDownCount = 0
+    private(set) var mouseDownCount = 0
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown { keyDownCount += 1 }
+        if event.type == .leftMouseDown { mouseDownCount += 1 }
+        super.sendEvent(event)
+    }
 }
 
 @MainActor
@@ -115,7 +126,7 @@ final class FixtureController: NSObject, NSApplicationDelegate {
     }
 
     func makeWindow(_ record: WindowRecord, title: String, frame: NSRect) {
-        let window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        let window = FixtureWindow(contentRect: frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.animationBehavior = .none
         window.setFrame(frame, display: false)
         window.title = title
@@ -252,6 +263,8 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                     "visible": window.window.isVisible,
                     "keyWindow": window.window.isKeyWindow,
                     "pressCount": window.pressCount,
+                    "keyDownCount": window.window.keyDownCount,
+                    "mouseDownCount": window.window.mouseDownCount,
                     "pressEffect": window.pressEffect.rawValue,
                     "frame": ["x": frame.origin.x, "y": frame.origin.y, "width": frame.width, "height": frame.height],
                     "order": window.order,
@@ -294,6 +307,23 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                 revision += 1
                 reset()
             case "state": break
+            case "yield_focus":
+                guard let pid = request["pid"] as? Int32, pid > 0,
+                      let peer = NSRunningApplication(processIdentifier: pid),
+                      peer.bundleIdentifier == Bundle.main.bundleIdentifier else {
+                    throw FixtureError("focus handoff requires a peer fixture process")
+                }
+                if #available(macOS 14, *) { NSApplication.shared.yieldActivation(to: peer) }
+            case "focus":
+                let key = request["window"] as? String ?? "primary"
+                guard let record = windows[key] else { throw FixtureError("unknown window: \(key)") }
+                if #available(macOS 14, *) { NSApplication.shared.activate() }
+                else { NSApplication.shared.activate(ignoringOtherApps: true) }
+                record.window.makeKeyAndOrderFront(nil)
+                if let control = request["control"] as? String {
+                    guard let field = record.fields[control] else { throw FixtureError("unknown control: \(control)") }
+                    record.window.makeFirstResponder(field.field)
+                }
             case "configure", "reorder", "recreate", "close_reopen", "hide_window":
                 let key = request["window"] as? String ?? "primary"
                 guard let window = windows[key] else { throw FixtureError("unknown window: \(key)") }

@@ -69,6 +69,8 @@ pub struct ActArgs {
     #[schemars(length(min = 1, max = 16))]
     pub steps: Vec<ActionStep>,
     pub feedback: Option<FeedbackRequest>,
+    #[serde(default)]
+    pub foreground: bool,
     #[serde(default = "default_budget")]
     #[schemars(range(min = 1, max = 60000))]
     pub budget_ms: u32,
@@ -181,6 +183,14 @@ impl Host {
             ));
         };
         validate_public(&body, budget_ms)?;
+        if matches!(&body, RequestBody::Act(act) if act.foreground)
+            && self.client.execution_mode() != ExecutionMode::ForegroundAllowed
+        {
+            return Ok(before_native_error(
+                ErrorCode::AuthorityDenied,
+                "Operator foreground authority is required",
+            ));
+        }
         let method = match &body {
             RequestBody::Capabilities(_) => "capabilities",
             RequestBody::Targets(_) => "targets",
@@ -315,7 +325,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Run 1-16 ordered typed background actions and predicate waits within one budget. Supports setValue, selection replacement and press on live references; stops at the first failed requirement. Optional feedback returns requested control updates tied to the base observation. No rollback or automatic replay."
+        description = "Run 1-16 ordered typed background actions and predicate waits within one budget. Supports background setValue, selection replacement, and press on live references. Foreground keys and clicks require operator authority and foreground: true. Stops at the first failed requirement. Optional feedback returns requested control updates tied to the base observation. No rollback or automatic replay."
     )]
     async fn act(
         &self,
@@ -329,6 +339,7 @@ impl Host {
                 target: args.target,
                 steps: args.steps,
                 feedback: args.feedback,
+                foreground: args.foreground,
             }),
             args.budget_ms,
             context,
@@ -363,7 +374,7 @@ impl ServerHandler for Host {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("macos-computer-use", env!("CARGO_PKG_VERSION")))
-            .with_instructions("Background authority is installed by the operator. Read capabilities before acting. Observations establish provenance, not freshness. Unknown delivery must be reconciled before retrying. Use only actions advertised by the live element. This runtime accepts up to 16 typed steps per act request under one deadline. Waits send no input. Requested feedback uses the original references; invalidated references require a fresh observation. The runtime never activates a window or sends global input.")
+            .with_instructions("Background authority is installed by the operator. Read capabilities before acting. Observations establish provenance, not freshness. Unknown delivery must be reconciled before retrying. Use only actions advertised by the live element. This runtime accepts up to 16 typed steps per act request under one deadline. Waits send no input. Requested feedback uses the original references; invalidated references require a fresh observation. The foreground route requires an operator grant and explicit foreground: true on act. Foreground clicks require fresh image-backed evidence.")
     }
 }
 

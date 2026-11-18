@@ -302,6 +302,14 @@ impl Client {
             ));
         }
         if let RequestBody::Act(act) = &mut body {
+            if act.foreground
+                && self.authority.mode != cua_protocol::ExecutionMode::ForegroundAllowed
+            {
+                return Err(ClientError::new(
+                    ClientErrorKind::ForbiddenControl,
+                    "operator foreground authority is required",
+                ));
+            }
             act.grant_id = self.authority.grant_id.clone();
         }
         let started = Instant::now();
@@ -377,6 +385,9 @@ impl Client {
         if let Some(worker) = worker {
             let _ = worker.await;
         }
+    }
+    pub fn execution_mode(&self) -> cua_protocol::ExecutionMode {
+        self.authority.mode
     }
     pub fn epoch(&self) -> &str {
         &self.epoch

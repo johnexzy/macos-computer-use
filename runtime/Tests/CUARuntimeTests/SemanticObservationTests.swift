@@ -124,10 +124,14 @@ private struct TestVisualCapture: VisualCapturing {
     }
 }
 
-private func blankFrame(_ target: Target) throws -> CapturedVisual {
+private func blankFrame(_ target: Target, white: Bool = false) throws -> CapturedVisual {
     let width: UInt32 = 160, height: UInt32 = 80
     let bitmap = try XCTUnwrap(CGContext(data: nil, width: Int(width), height: Int(height), bitsPerComponent: 8,
         bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+    if white {
+        bitmap.setFillColor(gray: 1, alpha: 1)
+        bitmap.fill(CGRect(x: 0, y: 0, width: Int(width), height: Int(height)))
+    }
     let image = try XCTUnwrap(bitmap.makeImage())
     let bounds = target.bounds
     let domain = Rect(x: 0, y: 0, width: Double(width), height: Double(height))
@@ -627,5 +631,174 @@ final class PredicateAndFeedbackTests: XCTestCase {
         XCTAssertTrue(result.controls.contains { $0.state == .changed })
         XCTAssertTrue(result.controls.contains { $0.state == .unavailable })
         XCTAssertLessThanOrEqual(try JSONEncoder().encode(result).count, Limits.maxFeedbackBytes)
+    }
+}
+
+
+private final class TestForegroundPlatform: ForegroundPlatform, @unchecked Sendable {
+    let targetPid: UInt32
+    let priorPid: UInt32 = 99
+    let targetWindow: SemanticNode
+    let targetField: SemanticNode
+    let priorWindow = SemanticNode("prior", role: "AXWindow", title: "Other app", bounds: Rect(x: 10, y: 10, width: 100, height: 100))
+    let monitor: ActivationWatch
+    var currentPid: UInt32 = 99
+    var inputCounter: UInt32 = 0
+    var activated: [UInt32] = []
+    var posted = 0
+    var permission = true
+    var beforePost: (() -> Void)?
+    var afterPost: (() -> Void)?
+    var overlappingWindow: TargetKey?
+    var focusedOverride: SemanticNode?
+
+    init(_ fixture: SemanticFixture) {
+        targetPid = fixture.target.key.pid
+        targetWindow = fixture.window
+        targetField = fixture.first
+        monitor = ActivationWatch(expecting: targetPid)
+    }
+
+    func permissionAvailable() -> Bool { permission }
+    func sample() -> ForegroundSample { ForegroundSample(pid: currentPid, hardwareCounters: [inputCounter], inputHeld: false) }
+    func watch(expecting pid: UInt32) -> ActivationWatch { monitor }
+    func focusedWindow(pid: UInt32, context: OperationContext) throws -> (any AXObject)? {
+        try context.check()
+        return pid == targetPid ? (focusedOverride ?? targetWindow) : priorWindow
+    }
+    func focusedElement(pid: UInt32, context: OperationContext) throws -> (any AXObject)? {
+        try context.check()
+        return pid == targetPid ? targetField : nil
+    }
+    func activate(pid: UInt32, window: any AXObject, context: OperationContext, willChangeFocus: () throws -> Void) throws {
+        try context.check()
+        try willChangeFocus()
+        currentPid = pid
+        activated.append(pid)
+    }
+    func hitTest(_ point: Point, in target: SemanticObservationHandle, context: OperationContext) throws -> Bool {
+        try context.check()
+        return overlappingWindow == nil
+    }
+    func post(_ input: ForegroundInput, willDispatch: () throws -> Void) throws {
+        beforePost?()
+        try willDispatch()
+        posted += 1
+        afterPost?()
+    }
+}
+
+final class ForegroundActionTests: XCTestCase {
+    private func execute(_ fixture: SemanticFixture, platform: TestForegroundPlatform, capture: TestVisualCapture,
+                         screenshot: Bool = false, click: Bool = false, repeats: Int = 1,
+                         expect: ((Element) -> Condition)? = nil) throws -> ActResult {
+        let context = OperationContext(budgetMs: 3000)
+        let system = MacOSSystem(backend: fixture.backend, catalog: fixture.catalog, visual: capture, isAXTrusted: { true })
+        let native = try system.observe(params: ObserveRequest(target: fixture.target.key, includeScreenshot: screenshot, includeValues: false),
+            observationId: "obs-foreground", context: context)
+        let field = try XCTUnwrap(native.observation.elements.first)
+        let op: CUAProtocol.Operation = click
+            ? .click(ClickOperation(point: Point(x: 60, y: 40), space: .imagePixels))
+            : .key(KeyOperation(elementRef: field.reference, key: .tab))
+        let steps = (1...repeats).map { ActionStep(actionId: "step-\($0)", operation: op, precondition: nil, expect: expect?(field)) }
+        let act = ActRequest(grantId: "grant", observationId: native.observation.observationId, target: fixture.target.key,
+                             steps: steps, foreground: true)
+        let entry = RetainedObservation(observation: native.observation, handle: native.handle, createdAt: DispatchTime.now().uptimeNanoseconds)
+        let actions = BackgroundActions(foregroundPlatform: platform, coordinateCapture: capture)
+        let result = actions.act(act, entry: entry, context: context, state: ActionExecutionState(act: act), progress: { _, _ in })
+        try Response(version: 1, id: "r", epoch: "epoch", body: .act(result)).validateFor(
+            Request(version: 1, id: "r", epoch: "epoch", budgetMs: 3000, body: .act(act)), expectedEpoch: "epoch")
+        return result
+    }
+
+    func testExplicitForegroundKeyPostsAndRestoresExactPriorFocus() throws {
+        let fixture = SemanticFixture()
+        let platform = TestForegroundPlatform(fixture)
+        let result = try execute(fixture, platform: platform, capture: TestVisualCapture { target, _, _, _ in try blankFrame(target) })
+        XCTAssertEqual(result.stopReason, .completed)
+        XCTAssertEqual(result.steps[0].route, .foregroundKey)
+        XCTAssertEqual(result.steps[0].delivery, .dispatched)
+        XCTAssertEqual(result.steps[0].verification, .unverified)
+        XCTAssertEqual(platform.posted, 1)
+        XCTAssertEqual(platform.activated, [platform.targetPid, platform.priorPid])
+        XCTAssertEqual(result.foreground?.restoration, .restored)
+    }
+
+    func testHardwareActivityAtLastGuardRefusesInputAndLeavesFocusAlone() throws {
+        let fixture = SemanticFixture()
+        let platform = TestForegroundPlatform(fixture)
+        platform.beforePost = { [weak platform] in platform?.inputCounter += 1 }
+        let result = try execute(fixture, platform: platform, capture: TestVisualCapture { target, _, _, _ in try blankFrame(target) })
+        XCTAssertEqual(result.steps[0].delivery, .notDispatched)
+        XCTAssertNil(result.steps[0].route)
+        XCTAssertEqual(result.foreground?.interruption, .inputActivity)
+        XCTAssertEqual(result.foreground?.restoration, .skipped)
+        XCTAssertEqual(platform.posted, 0)
+        XCTAssertEqual(platform.activated, [platform.targetPid])
+    }
+
+    func testKeyboardActivityAfterFirstDispatchPreservesReceiptAndStopsSuffix() throws {
+        let fixture = SemanticFixture()
+        let platform = TestForegroundPlatform(fixture)
+        platform.afterPost = { [weak platform] in platform?.inputCounter += 1 }
+        let result = try execute(fixture, platform: platform, capture: TestVisualCapture { target, _, _, _ in try blankFrame(target) }, repeats: 2)
+        XCTAssertEqual(result.steps[0].delivery, .dispatched)
+        XCTAssertEqual(result.remainingSteps, 1)
+        XCTAssertEqual(result.foreground?.interruption, .inputActivity)
+        XCTAssertEqual(result.foreground?.restoration, .skipped)
+        XCTAssertEqual(platform.posted, 1)
+    }
+
+    func testFocusedSiblingCannotReceiveKey() throws {
+        let fixture = SemanticFixture()
+        let platform = TestForegroundPlatform(fixture)
+        let sibling = SemanticNode("sibling", role: "AXWindow", title: "Same app", bounds: fixture.target.bounds)
+        platform.beforePost = { [weak platform] in platform?.focusedOverride = sibling }
+        let result = try execute(fixture, platform: platform, capture: TestVisualCapture { target, _, _, _ in try blankFrame(target) })
+        XCTAssertEqual(result.foreground?.interruption, .windowChanged)
+        XCTAssertEqual(result.steps[0].delivery, .notDispatched)
+        XCTAssertEqual(platform.posted, 0)
+    }
+
+    func testTransientAppSwitchPreservesDispatchedReceiptAndRefusesSuffix() throws {
+        let fixture = SemanticFixture()
+        let platform = TestForegroundPlatform(fixture)
+        platform.afterPost = { [weak platform] in platform?.monitor.recordExternalActivation() }
+        let result = try execute(fixture, platform: platform, capture: TestVisualCapture { target, _, _, _ in try blankFrame(target) }, repeats: 2)
+        XCTAssertEqual(result.steps[0].delivery, .dispatched)
+        XCTAssertEqual(result.remainingSteps, 1)
+        XCTAssertEqual(result.foreground?.interruption, .focusChanged)
+        XCTAssertEqual(result.foreground?.externalActivation, true)
+        XCTAssertEqual(platform.posted, 1)
+    }
+
+    func testCoordinateRouteRequiresAndRevalidatesFreshRelevantPixels() throws {
+        let fixture = SemanticFixture()
+        let platform = TestForegroundPlatform(fixture)
+        let capture = TestVisualCapture { target, _, _, _ in try blankFrame(target) }
+        let absent = try execute(fixture, platform: platform, capture: capture, click: true)
+        XCTAssertEqual(absent.foreground?.interruption, .frameChanged)
+        XCTAssertTrue(platform.activated.isEmpty)
+        let matching = try execute(fixture, platform: platform, capture: capture, screenshot: true, click: true)
+        XCTAssertEqual(matching.steps[0].route, .foregroundClick)
+        XCTAssertEqual(platform.posted, 1)
+        platform.overlappingWindow = TargetKey(pid: 50, windowId: 55)
+        let obscured = try execute(fixture, platform: platform, capture: capture, screenshot: true, click: true)
+        XCTAssertEqual(obscured.foreground?.interruption, .windowChanged)
+        XCTAssertEqual(obscured.steps[0].delivery, .notDispatched)
+        XCTAssertEqual(platform.posted, 1)
+    }
+
+    func testChangedPixelsWithUnchangedWindowGeometryCannotAuthorizeClick() throws {
+        let fixture = SemanticFixture()
+        let platform = TestForegroundPlatform(fixture)
+        let capture = TestVisualCapture { target, _, _, _ in
+            try blankFrame(target, white: platform.currentPid == platform.targetPid)
+        }
+        let result = try execute(fixture, platform: platform, capture: capture, screenshot: true, click: true)
+        XCTAssertEqual(result.foreground?.interruption, .frameChanged)
+        XCTAssertEqual(result.steps[0].delivery, .notDispatched)
+        XCTAssertEqual(platform.posted, 0)
+        XCTAssertEqual(result.foreground?.restoration, .restored)
     }
 }
