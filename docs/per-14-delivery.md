@@ -49,6 +49,8 @@ The report retains the full assigned denominator, independent oracle grade, mode
 
 ## Run the main campaign after pilot review
 
+The [19 November pilot report](per-14-pilot-2026-11-19.md) records the first 12 verified Claude sessions and the resulting controller fixes.
+
 The main plan assigns 180 trials across both tasks, three variants, three lanes and ten seeds per task. Each of the six lane orders occurs ten times across the paired groups. This balances positions and immediate predecessors across the campaign. Execution requires separate main budget approval and a finalized, reviewed pilot. Each pilot assignment needs a distinct session with the pinned model, the expected tool inventory and a reported cost. Failed trials with verified session evidence remain eligible for review. The actor variant schedules two switches at fixed offsets of 750 ms and 2,000 ms after Claude initializes. The monitor must confirm the switches before the session ends. This gives every lane the same timed perturbation without changing which fields it may batch. The report retains actual switch evidence, including missed switches.
 
 ```sh
