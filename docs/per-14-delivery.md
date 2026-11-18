@@ -47,7 +47,7 @@ The report retains the full assigned denominator, independent oracle grade, mode
 
 ## Run the main campaign after pilot review
 
-The main plan assigns 180 trials across both tasks, three variants, three lanes and ten seeds per task. Execution requires a finalized reviewed pilot report for the same model and separate main budget approval. The actor variant schedules two switches at fixed offsets of 750 ms and 2,000 ms after Claude initializes. The monitor must confirm the switches before the session ends. This gives every lane the same timed perturbation without changing which fields it may batch. The report retains actual switch evidence, including missed switches.
+The main plan assigns 180 trials across both tasks, three variants, three lanes and ten seeds per task. Execution requires separate main budget approval and a finalized, reviewed pilot. Each pilot assignment needs a distinct session with the pinned model, the expected tool inventory and a reported cost. Failed trials with verified session evidence remain eligible for review. The actor variant schedules two switches at fixed offsets of 750 ms and 2,000 ms after Claude initializes. The monitor must confirm the switches before the session ends. This gives every lane the same timed perturbation without changing which fields it may batch. The report retains actual switch evidence, including missed switches.
 
 ```sh
 node test/workflow/pilot.mjs --stage main --execute \
@@ -57,4 +57,4 @@ node test/workflow/pilot.mjs --stage main --execute \
 node test/workflow/report.mjs .artifacts/workflow-paid-main/report.json > docs/per-14-results.md
 ```
 
-Publish measured results after reviewing the paired JSON and the rendered tables, which include Wilson 95% intervals and latency sample counts. Deployable Rust/Swift binaries and client migration belong to PER-11. [PER-14 in Linear](https://linear.app/komonapp/issue/PER-14/measure-success-rate-speed-and-token-cost-on-a-realistic-30-50-action)
+Publish measured results after reviewing the paired JSON and the rendered tables. The lane summary leads with cost per successful task. The cohort tables show Wilson 95% intervals, latency sample counts, safety assessment coverage and pre-handoff refusals. Trials stopped by the turn, time or dollar limit remain in the denominator as budget stops. Deployable Rust/Swift binaries and client migration belong to PER-11. [PER-14 in Linear](https://linear.app/komonapp/issue/PER-14/measure-success-rate-speed-and-token-cost-on-a-realistic-30-50-action)

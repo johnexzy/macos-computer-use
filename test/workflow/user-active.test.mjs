@@ -12,7 +12,7 @@ function fakeActivity(options = {}) {
       const pid = label === "A" ? 101 : 102;
       let activations = 0;
       return { child: { pid }, ready: Promise.resolve({ pid, nonce, label, previousForegroundPID: 99,
-        previousIdentityKnown: !options.unknownPrior, foregroundPID: 99 }),
+        previousIdentityKnown: !options.unknownPrior, foregroundPID: options.changedPrior && label === "B" ? 777 : 99 }),
         call: async (command, args) => {
           state.calls.push({ pid, command, args });
           if (command === "restore") {
@@ -75,10 +75,15 @@ test("a composed batch cannot silently move a causal milestone past other writes
   await activity.close();
 });
 
-test("unknown prior identity or unavailable monitor cannot establish user-active coverage", async () => {
-  for (const options of [{ unknownPrior: true }, { unavailable: true }]) {
-    const { activity } = fakeActivity(options);
-    await assert.rejects(activity.start());
+test("unknown identity, changing foreground and unavailable monitoring cannot establish user-active coverage", async () => {
+  for (const [options, reason, activations] of [
+    [{ unknownPrior: true }, /launch identity unavailable/, 0],
+    [{ changedPrior: true }, /application changed/, 0],
+    [{ unavailable: true }, /monitor is unavailable/, 1],
+  ]) {
+    const { activity, state } = fakeActivity(options);
+    await assert.rejects(activity.start(), reason);
+    assert.equal(state.calls.filter(call => call.command === "activate").length, activations);
     await activity.close();
     assert.notEqual(gradeUserActive(activity.evidence, 42, ["first", "second"]), true);
   }

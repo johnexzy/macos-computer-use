@@ -117,7 +117,7 @@ export async function pilotTrial(assignment, configuration, monitorBinary) {
   const foreground = before ? mergeForegroundWatches(watches, before.pid) : null;
   const grade = gradeWorkflow(assignment.task, plan, before, after, foregroundProof(foreground, before?.pid), activity?.evidence);
   const connection = gateway?.connectionState();
-  const budgetStop = session?.subtype === "error_max_budget_usd" || (session?.costUsd ?? 0) > configuration.budgetUsd;
+  const budgetStop = session?.limit || (session?.costUsd ?? 0) > configuration.budgetUsd;
   const partialUsage = session && (session.costUsd === null || Object.values(session.usage).some(value => value === null));
   const transportLoss = lane?.calls.some(call => call.infrastructureError);
   const outcome = abortSignal?.aborted ? "interrupted" : taskStarted == null ? "setup_blocked" : budgetStop ? "budget_stopped" : grade.outcome === "failed" ? "failed" :

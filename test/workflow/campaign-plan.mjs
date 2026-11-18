@@ -16,13 +16,17 @@ export function campaignAssignments(stage) {
 export function validateReviewedPilot(report, model) {
   const expected = campaignAssignments("pilot");
   const trials = report?.trials;
-  const outcomes = new Set(["passed", "failed", "unknown", "setup_blocked", "budget_stopped"]);
+  const outcomes = new Set(["passed", "failed", "unknown", "budget_stopped"]);
   if (report?.mode !== "actual_claude_session_pilot" || report.model !== model || !report.finishedAt || report.interruption || !Array.isArray(trials) ||
       trials.length !== expected.length || !Number.isFinite(report.summary?.model?.reportedCostUsd) ||
-      !trials.every((trial, i) => outcomes.has(trial.outcome) && trial.task === expected[i].task && trial.variant === expected[i].variant &&
-        trial.lane === expected[i].lane && trial.seed === expected[i].seed &&
-        (!trial.modelStarted || Number.isFinite(trial.session?.costUsd))) ||
-      !lanes.every(lane => trials.some(trial => trial.lane === lane && Number.isFinite(trial.session?.costUsd)))) {
-    throw new Error("Supply a finalized reviewed pilot report for the requested model with all assignments and known model cost for every lane");
+      !trials.every((trial, i) => {
+        const session = trial.session;
+        return outcomes.has(trial.outcome) && trial.task === expected[i].task && trial.variant === expected[i].variant &&
+          trial.lane === expected[i].lane && trial.seed === expected[i].seed && trial.modelStarted === true &&
+          session?.sameSession === true && session.inventoryOk === true && session.modelOk === true &&
+          Number.isFinite(session.costUsd) && session.costUsd >= 0 &&
+          typeof session.sessionId === "string" && session.sessionId.length > 0;
+      }) || new Set(trials.map(trial => trial.session.sessionId)).size !== expected.length) {
+    throw new Error("Supply a finalized reviewed pilot report for the requested model with a distinct verified session and known model cost for every assignment");
   }
 }

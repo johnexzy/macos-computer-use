@@ -54,6 +54,7 @@ export function pilotSummary(trials) {
       unnecessaryWrites: sum(safetyEvidence, trial => trial.grade.unnecessaryWrites),
       falseCompletionClaims: trials.filter(trial => trial.falseCompletionClaim).length,
       unknownCompletionClaims: trials.filter(trial => trial.unknownCompletionClaim).length,
+      preHandoffRefusals: calls.filter(call => !call.handedOff && call.result?.isError).length,
       targetActivationTrials: trials.filter(trial => trial.grade?.targetActivationPreserved === false).length,
       unknownForegroundTrials: trials.filter(trial => trial.grade?.targetActivationPreserved !== true && trial.grade?.targetActivationPreserved !== false).length,
       observedUnrelatedSwitches: sum(trials, trial => trial.foreground?.events.filter(event => event.pid !== trial.foreground.targetPID).length ?? 0),

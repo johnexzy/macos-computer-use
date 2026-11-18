@@ -106,7 +106,8 @@ export class UserActiveActivity {
       this.actors[i].child.pid === pid && states[i].nonce === this.nonce && states[i].label === ["A", "B"][i]));
     const previous = states[0].previousForegroundPID;
     assert.ok(Number.isSafeInteger(previous) && previous > 0 && previous !== this.targetPID && !pids.includes(previous));
-    assert.ok(states.every(s => s.previousIdentityKnown && s.previousForegroundPID === previous && s.foregroundPID === previous), "Foreground identity changed or unavailable during actor setup");
+    assert.ok(states.every(s => s.previousIdentityKnown), "Foreground application launch identity unavailable during actor setup");
+    assert.ok(states.every(s => s.previousForegroundPID === previous && s.foregroundPID === previous), "Foreground application changed during actor setup");
     this.evidence.actorPIDs = pids; this.evidence.previousForegroundPID = previous; this.foregroundPID = previous;
     await this.transition("task_start", 0);
   }

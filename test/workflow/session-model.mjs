@@ -6,6 +6,7 @@ import { claudeEnvironment } from "../evaluation/model.mjs";
 import { laneName } from "./session-lane.mjs";
 
 const maxStreamBytes = 32 * 1024 * 1024;
+const wallClockLimit = "Agent session wall-clock budget exceeded";
 const valid = (value) => Number.isFinite(value) && value >= 0 ? value : null;
 const usageFields = ["inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"];
 const namespaced = (tools) => tools.map(tool => `mcp__${laneName}__${tool.name}`).sort();
@@ -61,10 +62,12 @@ export function summarizeSession(records, { model, tools, exitCode, failure }) {
   const sameSession = Boolean(sessionId && result?.session_id === sessionId && records.every(r => !r.session_id || r.session_id === sessionId));
   const text = typeof result?.result === "string" ? result.result.trim() : "";
   const claim = text === "COMPLETE" ? "complete" : text === "INCOMPLETE" ? "incomplete" : null;
+  const limit = failure === wallClockLimit ? "time" : result?.subtype === "error_max_turns" ? "turns" :
+    result?.subtype === "error_max_budget_usd" ? "cost" : null;
   return { ok: Boolean(!failure && exitCode === 0 && ordered && result.subtype === "success" && result.is_error !== true && inventoryOk && modelOk && sameSession),
     sessionId, sameSession, inventoryOk, modelOk, models, observedAssistantModels, usage, costUsd: valid(result?.total_cost_usd), costSource: "cli_reported_estimate",
     numTurns: valid(result?.num_turns), apiMs: valid(result?.duration_api_ms), subtype: result?.subtype ?? null, claim,
-    terminalResults: results.length, initEvents: inits.length, exitCode, failure };
+    terminalResults: results.length, initEvents: inits.length, exitCode, failure, limit };
 }
 
 export async function runSession({ binary, prefix = [], env, cwd, model, tools, config, prompt, budgetUsd, turns, timeoutMs, onReady, onStop, abortSignal }) {
@@ -125,7 +128,7 @@ export async function runSession({ binary, prefix = [], env, cwd, model, tools, 
     child.once("error", (err) => stop(redact(err.message)));
     child.once("close", (code, signal) => resolve({ code, signal }));
   });
-  const timer = setTimeout(() => stop("Agent session wall-clock budget exceeded"), timeoutMs);
+  const timer = setTimeout(() => stop(wallClockLimit), timeoutMs);
   const abort = () => stop("Campaign interrupted");
   abortSignal?.addEventListener("abort", abort, { once: true });
   child.stdout.on("data", (chunk) => {
