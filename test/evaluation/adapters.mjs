@@ -113,7 +113,7 @@ export class ProposalRejected extends Error {
 
 const failedReasons = { preconditionFailed: "preconditionFailed", verificationFailed: "verificationFailed", cancelled: "cancelled",
   deadlineExceeded: "deadlineExceeded", helperDied: "helperDied", targetStale: "targetStale", ambiguousTarget: "ambiguousTarget", unsupported: "unsupported", nativeFailed: "failed" };
-function correlatedPrefix(args, result) {
+export function correlatedPrefix(args, result) {
   if (!result || result.observationId !== args.observationId || !Array.isArray(result.steps) || !result.steps.length ||
       !Number.isInteger(result.remainingSteps) || result.remainingSteps < 0 || result.steps.length + result.remainingSteps !== args.steps.length ||
       !["completed", ...Object.values(failedReasons)].includes(result.stopReason)) return false;

@@ -1,0 +1,58 @@
+# PER-14 benchmark delivery
+
+The benchmark compares macOS computer use on invoice entry and settings. The invoice form has 27 fields, one submission and two transition checks. The settings task has 15 controls across three pages and measures whether already-correct settings stay untouched. A disposable AppKit fixture evaluates outcomes from its controls, submission and event journal. The agent receives only the public task and MCP tool results.
+
+The clean and friction trial matrix has 12 assignments: two tasks, two variants and three lanes. The lanes use legacy 3.0.2, the rebuilt host with at most one action per request, and the rebuilt host with up to 16 actions per request. Seeds are paired across lanes and order rotates. The user-active variant uses two separate disposable foreground actors and runs as an additional unpaid check.
+
+## Build and verify
+
+Use an unlocked Mac with Node 20 or newer, the repository's supported Rust and Swift toolchains, and existing Accessibility access for the CUA executables. Claude Code is required for the loopback and paid session commands.
+
+```sh
+npm ci
+npm run build
+npm run build:runtime
+sh test/fixtures/macos/build.sh
+mkdir -p .artifacts
+node --test test/workflow/*.test.mjs test/evaluation/*.test.mjs
+node test/workflow/scripted.mjs --output .artifacts/workflow-readiness
+node test/workflow/scripted.mjs --variant user-active --output .artifacts/workflow-user-active
+node test/workflow/session-live.mjs .artifacts/workflow-session-smoke
+node test/workflow/session-loopback.mjs .artifacts/workflow-cli-loopback
+node test/workflow/pilot.mjs
+node test/workflow/pilot.mjs --stage main
+```
+
+Run the live commands serially. The user-active check deliberately puts its two test apps in the foreground at defined workflow milestones. It yields if the user changes apps and only attempts to restore the original application while a test actor remains in front. Confirmation comes from the independent foreground monitor. The check uses public AppKit calls, where the check and activation can race.
+
+The session smoke drives the actual MCP lanes with a deterministic test process. The loopback smoke drives the installed Claude CLI with a dummy key and local Messages API. Both exercise session handling with zero provider inference. Their results establish harness behavior and fixture conformance. Success rate, latency and token cost for an actual agent require the pilot.
+
+## Run the paid pilot after budget approval
+
+`pilot.mjs` defaults to printing the trial plan. It requires an explicit execute switch, overall budget, per-trial budget, new output directory and owner-only API key file for a provider run.
+
+```sh
+node test/workflow/pilot.mjs --execute \
+  --budget-usd "$PER14_APPROVED_TOTAL_USD" --per-trial-usd "$PER14_APPROVED_TRIAL_USD" \
+  --api-key-file "$PER14_PRIVATE_KEY_PATH" --output .artifacts/workflow-paid-pilot
+```
+
+Each trial starts one Claude Code process with a fixed model, turn limit, wall-clock limit and one scoped MCP server. The campaign owns the live backend and ledger. A replacement stdio relay cannot initiate another connection for the same trial. A known validation clear can permit one correction after a fresh public observation and a settled prior dispatch. Missing delivery evidence stays uncertain across reference refreshes.
+
+The legacy inventory retains the 17 default tool names. Exact owned-window reads and semantic edits are available. App launch, URLs, coordinate input, and separate typing and key routes are listed as restricted. This measures the current lanes under a common disposable background scope. An attempted edit to a disposable Notes control reaches the fixture and fails grading. Legacy continues to resolve selectors through its own implementation.
+
+The report retains the full assigned denominator, independent oracle grade, model claim, tool manifest, session stream, timing, model usage and version hashes. It includes matched trial records and results by task, variant and lane. Dollars per successful task includes the reported cost of failures. If costs are missing or there are zero strict successes, that ratio is unavailable. Unknown spend or a reported cap overshoot stops further admission. SIGINT and SIGTERM stop active input and model work, then write an interrupted checkpoint. The CLI dollar limit is an estimate and can be exceeded by an in-flight request. [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference)
+
+## Run the main campaign after pilot review
+
+The main plan assigns 180 trials across both tasks, three variants, three lanes and ten seeds per task. Execution requires a finalized reviewed pilot report for the same model and separate main budget approval. The actor variant schedules two switches at fixed offsets of 750 ms and 2,000 ms after Claude initializes. The monitor must confirm the switches before the session ends. This gives every lane the same timed perturbation without changing which fields it may batch. The report retains actual switch evidence, including missed switches.
+
+```sh
+node test/workflow/pilot.mjs --stage main --execute \
+  --reviewed-pilot .artifacts/workflow-paid-pilot/report.json \
+  --budget-usd "$PER14_APPROVED_MAIN_USD" --per-trial-usd "$PER14_APPROVED_MAIN_TRIAL_USD" \
+  --api-key-file "$PER14_PRIVATE_KEY_PATH" --output .artifacts/workflow-paid-main
+node test/workflow/report.mjs .artifacts/workflow-paid-main/report.json > docs/per-14-results.md
+```
+
+Publish measured results after reviewing the paired JSON and the rendered tables, which include Wilson 95% intervals and latency sample counts. Deployable Rust/Swift binaries and client migration belong to PER-11. [PER-14 in Linear](https://linear.app/komonapp/issue/PER-14/measure-success-rate-speed-and-token-cost-on-a-realistic-30-50-action)

@@ -35,8 +35,9 @@ final class FieldRecord {
 final class FixtureTextField: NSTextField {
     var onAccessibilityWrite: ((String) -> Void)?
     var selectedRange = NSRange(location: 0, length: 0)
+    var controlTitle = "Value"
 
-    override func accessibilityTitle() -> String? { "Value" }
+    override func accessibilityTitle() -> String? { controlTitle }
 
     override func setAccessibilityValue(_ accessibilityValue: Any?) {
         guard let value = accessibilityValue as? String else { return }
@@ -436,7 +437,13 @@ struct FixtureError: Error, CustomStringConvertible {
 MainActor.assumeIsolated {
     let application = NSApplication.shared
     application.setActivationPolicy(.accessory)
-    let fixture = FixtureController()
+    let fixture: any NSApplicationDelegate
+    if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--workflow" {
+        let config = try! JSONDecoder().decode(WorkflowConfig.self, from: Data(CommandLine.arguments[2].utf8))
+        fixture = WorkflowFixture(config)
+    } else {
+        fixture = FixtureController()
+    }
     application.delegate = fixture
-    application.run()
+    withExtendedLifetime(fixture) { application.run() }
 }
