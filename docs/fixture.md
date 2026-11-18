@@ -171,8 +171,8 @@ and foreground monitoring through cleanup in an owner-readable `report.json`.
 Run serially on an unlocked Mac with Accessibility access already available.
 
 The driver uses expected values to exercise a reference action sequence. Its
-results measure scripted readiness. The actual Claude session pilot and the
-controlled user-active variant are separate PER-14 work.
+results measure scripted readiness. See the [PER-14 delivery guide](per-14-delivery.md)
+for the session harness, user-active checks, and paid pilot controls.
 
 The controlled `pauseAfterApplyMs` fault (0–2000 ms, default zero) emits a
 `write_applied` event with independent native state after changing the value, then
