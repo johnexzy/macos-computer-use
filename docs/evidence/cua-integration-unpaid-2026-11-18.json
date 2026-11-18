@@ -1,0 +1,133 @@
+{
+  "composition": {
+    "source": {
+      "revision": "a82e1dd7fcdcbbd1410edf7d47e112622fa71086",
+      "dirty": false,
+      "hostSha256": "e636eac82d9e4a7bea4c86e24b4e31575847e228e7f364624bf26a41e9099f09",
+      "helperSha256": "508d8f5128593aa891e570b3c97a7414f0c6a736e9d9e2db24dcd5c2a871802e",
+      "fixtureSha256": "42e32228c3b9cdd664fa0ac49c932c893eb8952c2ab531ec6a23d163b155572e"
+    },
+    "assigned": 36,
+    "passed": 36,
+    "failed": 0,
+    "setupBlocked": 0,
+    "cleanupErrors": 0,
+    "unrelatedForegroundChanges": 2,
+    "targetActivationFailures": 0,
+    "latencyMs": {
+      "samples": 36,
+      "p50": 235.6300000000001,
+      "p95": 1252.5967920000003
+    },
+    "actualHelperLossTrials": 9
+  },
+  "workflow": {
+    "cleanAndFriction": {
+      "source": {
+        "revision": "399672c1d9c812eff7f143b10f5cdb9a2cf7ed1a",
+        "dirty": false,
+        "sha256": {
+          "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture": "42e32228c3b9cdd664fa0ac49c932c893eb8952c2ab531ec6a23d163b155572e",
+          "native_helper": "d9e29751912cf2ec79647b25a87095de1d2aab4fb8780196631ce282cf4c8466",
+          ".artifacts/runtime-install/cua-host": "eeb978753d01525217bf0758305e8f5180f8a517a5048ff4dcb218e4f34971f3",
+          ".artifacts/runtime-install/cua-runtime": "508d8f5128593aa891e570b3c97a7414f0c6a736e9d9e2db24dcd5c2a871802e",
+          "test/fixtures/macos/WorkflowFixture.swift": "781c8851c427b361895ccc9c88edc1331f33e4426561e3384ebb9b7509360f71",
+          "test/workflow/scripted.mjs": "06a6b4fdc2d141b30c0afde6104dc275f102c9653cc689c4a3d55af90247d0a9",
+          "test/workflow/task.mjs": "64da1207b39fb48b99335d7881bee3d9dc27a3bb34fc72791d70b69c7324fca6"
+        }
+      },
+      "assigned": 12,
+      "byLane": {
+        "legacy": {
+          "passed": 4,
+          "assigned": 4,
+          "medianScriptedTaskMs": 8384.87
+        },
+        "single": {
+          "passed": 4,
+          "assigned": 4,
+          "medianScriptedTaskMs": 4359.84
+        },
+        "composed": {
+          "passed": 4,
+          "assigned": 4,
+          "medianScriptedTaskMs": 4126.48
+        }
+      },
+      "observedActorTransitions": 0,
+      "wrongTargetAttempts": 0,
+      "modelCalls": 0
+    },
+    "userActive": {
+      "source": {
+        "revision": "a82e1dd7fcdcbbd1410edf7d47e112622fa71086",
+        "dirty": false,
+        "sha256": {
+          "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture": "42e32228c3b9cdd664fa0ac49c932c893eb8952c2ab531ec6a23d163b155572e",
+          "native_helper": "d9e29751912cf2ec79647b25a87095de1d2aab4fb8780196631ce282cf4c8466",
+          ".artifacts/runtime-install/cua-host": "e636eac82d9e4a7bea4c86e24b4e31575847e228e7f364624bf26a41e9099f09",
+          ".artifacts/runtime-install/cua-runtime": "508d8f5128593aa891e570b3c97a7414f0c6a736e9d9e2db24dcd5c2a871802e",
+          "test/fixtures/macos/WorkflowFixture.swift": "781c8851c427b361895ccc9c88edc1331f33e4426561e3384ebb9b7509360f71",
+          "test/workflow/scripted.mjs": "06a6b4fdc2d141b30c0afde6104dc275f102c9653cc689c4a3d55af90247d0a9",
+          "test/workflow/task.mjs": "64da1207b39fb48b99335d7881bee3d9dc27a3bb34fc72791d70b69c7324fca6",
+          "test/workflow/support/user-active-actor.swift": "2400cf6aedb8166593caece9f7b58555c2895bdddd4a266eb3ff1e0866b80405",
+          "test/workflow/support/user-active.mjs": "7fabee3a9bb77c98d3511138491b1e0699e3681326c0e9d3d47bcc5d58146300",
+          ".artifacts/workflow-actor-A.app/Contents/MacOS/WorkflowActor": "f546594bb50cb81ba30c616987f3d01d3f17198e98050267532a1d2a8f942df9",
+          ".artifacts/workflow-actor-A.app/Contents/Info.plist": "196053e2e3792ec51d6baa50849c74cc5617a0b38451528e09dea91a29791218",
+          ".artifacts/workflow-actor-B.app/Contents/MacOS/WorkflowActor": "f546594bb50cb81ba30c616987f3d01d3f17198e98050267532a1d2a8f942df9",
+          ".artifacts/workflow-actor-B.app/Contents/Info.plist": "b199c949df41d96d44b393aa0287f236f23cc701b22bdc3e4bcea075dc3ede58"
+        }
+      },
+      "assigned": 6,
+      "byLane": {
+        "legacy": {
+          "passed": 2,
+          "assigned": 2,
+          "medianScriptedTaskMs": 7687.31
+        },
+        "single": {
+          "passed": 2,
+          "assigned": 2,
+          "medianScriptedTaskMs": 1390.56
+        },
+        "composed": {
+          "passed": 2,
+          "assigned": 2,
+          "medianScriptedTaskMs": 1007.11
+        }
+      },
+      "observedActorTransitions": 18,
+      "wrongTargetAttempts": 0,
+      "modelCalls": 0
+    },
+    "earlierAttempts": [
+      {
+        "source": "399672c1d9c812eff7f143b10f5cdb9a2cf7ed1a",
+        "dirty": false,
+        "context": "Initial test actor activation declined",
+        "assigned": 6,
+        "outcomes": {
+          "setup_blocked": 6
+        }
+      },
+      {
+        "source": "399672c1d9c812eff7f143b10f5cdb9a2cf7ed1a",
+        "dirty": true,
+        "context": "Session lock observed after AX lookup failures",
+        "assigned": 6,
+        "outcomes": {
+          "failed": 1,
+          "setup_blocked": 5
+        }
+      }
+    ],
+    "measurement": "Local scripted fixture latency"
+  },
+  "offlineAgentSessions": {
+    "assigned": 5,
+    "completePassed": 3,
+    "negativeCasesRejected": 2,
+    "providerCalls": 0
+  },
+  "paidModelCalls": 0
+}
