@@ -108,7 +108,7 @@ sends no input; mixed sequences preserve the same boundary before later mutation
 | --- | --- |
 | `capabilities` | Read-only permission booleans, installed mode, and actual supported action kinds. It does not request permission. |
 | `targets` | Optionally filter by bundle ID; return exact window/process keys, titles, and logical bounds. `truncated` makes the bound visible. |
-| `observe` | Exact target and explicit value, screenshot, and OCR inclusion flags. Visual collection accepts a window-local crop and image dimension limit. |
+| `observe` | Exact target; explicit value, screenshot, and OCR inclusion flags; optional exact `axSelectors` and `eventHistory` cursor. Visual collection accepts a window-local crop and image dimension limit. |
 | `act` | Installed grant, observation, exact target, and 1–16 ordered steps. No arbitrary scripts or execution-mode override. |
 | `waitFor` | Evaluate a typed condition for the same exact target within the request deadline. It never mutates. |
 
@@ -117,6 +117,17 @@ The current runtime implements AX and opt-in visual `observe` and bounded linear
 operation. Every step shares the exact target, original observation/refs, and
 whole-request budget. There are no branches, nested sequences, or target switches.
 Presence checks do not create new action refs inside a sequence.
+
+`axSelectors` contains 1–16 unique selectors. Selected observations keep window
+`accessibility: partial` and separately report `axSelection` query coverage,
+ambiguity and visited-node count. `eventHistory` requires selectors and returns
+only changes after its cursor: bounded historical projections, source/read
+intervals, stale/overrun flags, mode, sample count and coalesced wakeups. Historical
+controls have no refs/actions. Values remain opt-in, and history never refreshes
+an observation's refs or lifetime. These fields are omitted by default so the
+existing v1 AX wire shape is preserved. A matching updated host/helper is required
+to request them. See [selective-observation.md](selective-observation.md) for exact
+limits, lifecycle, and caller requery policy.
 
 `WaitOperation` is `{condition: Condition}`. Its enclosing step's `precondition`
 and `expect` must be omitted or null. Standalone waits, mutation guards, and

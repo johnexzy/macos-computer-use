@@ -13,16 +13,17 @@ The Rust + Swift rebuild runs alongside the existing Node/Swift server. It now s
 - [Rust–Swift protocol and conformance contract](docs/protocol.md) (PER-2)
 - [Rust MCP host, semantic observations, and bounded composition](docs/runtime.md) (PER-3 through PER-8)
 - [Matched fixture and model evaluation](docs/evaluation.md)
+- [Selective AX reads and bounded transient retention](docs/selective-observation.md) (PER-12)
 
 | Rust runtime tool | Implemented scope |
 | --- | --- |
 | `capabilities` | Permission preflight and supported action kinds without permission prompts. |
 | `targets` | Exact process/window keys for visible application windows. |
-| `observe` | Bounded AX controls with retained opaque references; values are private by default. |
-| `act` | Up to 16 ordered retained-control `setValue`, selected-text `typeText`, `press`, or read-only `waitFor` steps, with separate delivery and verification receipts. |
+| `observe` | Bounded AX controls with retained refs, optional selected scope and bounded selected-state history; on-demand window capture/OCR. AX values are private by default. |
+| `act` | Up to 16 semantic actions or waits per request with separate delivery and verification receipts. An explicitly authorized foreground sequence can use keys or clicks with waits. |
 | `waitFor` | Wait for presence, absence, enabled state, exact value, or exact window-key absence; closed-window proof needs no new observation. |
 
-The new runtime associates CG and AX windows through unique PID, exact logical bounds, and available titles. This is a public-metadata association, not an OS-attested window-ID mapping or atomic snapshot. Each action revalidates the retained AX object, owning window, observed role, and raw AX identifier. Duplicate labels never select a replacement control. Keys, scrolling, and coordinate actions remain unsupported. On macOS 14+, explicit screenshot/OCR observations return visual evidence and transforms; macOS 13 retains semantic operation with an unsupported visual channel.
+The runtime associates CG and AX windows through a unique PID, exact logical bounds, and available titles. Each action revalidates the retained AX object, owning window, observed role and subrole, and raw AX identifier. On macOS 14+, opt-in screenshots and Vision OCR return mapped visual evidence. macOS 13 supports the semantic route. Foreground keys and clicks require an operator grant and explicit per-sequence selection.
 
 Sequences use one target, one original observation, and one whole-request deadline. Settled progress is written before the next input step. References keep their original 60-second expiry. Optional feedback reports bounded changes to requested public projections using the same refs; `feedback: null` means unavailable, not unchanged. Values require explicit inclusion. Read-only waits never claim input dispatch.
 

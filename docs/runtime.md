@@ -4,7 +4,9 @@ The rebuild has a standalone Rust MCP executable and one persistent Swift child
 per connection. PER-3/PER-4 provide coordination and lifecycle; PER-5/PER-6 add
 retained semantic observations and background actions. PER-8 adds bounded linear
 composition, typed waits, and requested compact feedback. PER-9 adds on-demand
-window capture and Vision OCR. PER-10 adds explicitly scoped foreground input. These executables use protocol v1 from [protocol.md](protocol.md).
+window capture and Vision OCR. PER-10 adds explicitly scoped foreground input.
+PER-12 adds optional selective AX reads and bounded selected-state history.
+These executables use protocol v1 from [protocol.md](protocol.md).
 
 ## Build and run from the checkout
 
@@ -40,8 +42,8 @@ the private Rust–Swift protocol has its own version and epoch.
 | --- | --- |
 | `capabilities` | Read permission booleans and installed mode without permission prompts; advertise semantic AX actions when available. An operator-authorized connection can advertise foreground keys and clicks after permission preflight. |
 | `targets` | Return at most 256 visible, layer-zero windows with bundle IDs and exact process/window keys. |
-| `observe` | Associate the exact CG target with one AX window; return at most 256 controls with retained opaque references, bounds, actions, labels, and optional identifiers. Values, screenshots, and OCR are opt-in. |
-| `act` | Execute 1–16 ordered `setValue`, `typeText`, `press`, or read-only `waitFor` steps against the same target and original observation. Revalidate before every mutation and stop on failure or unknown delivery. Foreground key and click sequences require an explicit selector and operator authority. |
+| `observe` | Associate the exact CG target with one AX window and return at most 256 retained controls. Optional `axSelectors` scopes the read and reports query completeness. `eventHistory` retains bounded selected-state changes without historical action refs. Values, screenshots, and OCR are opt-in. |
+| `act` | Execute 1–16 ordered `setValue`, `typeText`, `press`, or read-only `waitFor` steps against the same target and original observation. Revalidate before each mutation and stop on failure or unknown delivery. Foreground key and click sequences require an explicit selector and operator authority. |
 | `waitFor` | Poll `elementExists`, `elementAbsent`, `enabled`, `valueEquals`, or `windowAbsent` within the original budget. Element waits return a fresh value-private observation; exact window absence returns its timed witness without a new observation. |
 
 Scrolling remains unsupported. Composition has no branching, nested sequences, or target switching.
@@ -49,6 +51,14 @@ All mutations use the original retained refs; a presence wait does not issue ref
 for newly discovered controls. The wire format can
 represent more operations than this implementation executes. It does not route
 around missing capabilities through legacy selectors, activation, or global input.
+
+## Selective AX and event history
+
+Selective AX collection and transient retention are described in
+[selective-observation.md](selective-observation.md), including the separate unpaid
+three-lane fixture comparison and its measurement limits. Notification callbacks
+only wake reads on the same serial native worker as actions. History never grants
+action authority or implies that every transition was observed.
 
 ## Screenshot and OCR evidence
 
