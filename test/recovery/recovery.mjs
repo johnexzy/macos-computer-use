@@ -101,9 +101,9 @@ function evidenceState(observation, artifact) {
   return null;
 }
 
-function visualTextAgrees(observation, identifier) {
+function visualTextAgrees(observation, identifier, source = observation) {
   const control = observation.elements?.find(item => item.identifier === identifier);
-  const visual = observation.visual, map = visual?.frame?.imageToScreen;
+  const visual = source.visual, map = visual?.frame?.imageToScreen;
   if (!control?.bounds || typeof control.value !== "string" || !map || !["complete", "partial"].includes(visual.ocr?.status)) return false;
   return visual.ocr.matches.some(match => {
     const box = match.imageBounds;
@@ -152,7 +152,9 @@ export async function recover({ policy = "none", enabled = false, request, respo
     // Fresh state can reconcile the goal, but it never erases uncertain input history.
     if (initial.uncertain.length) return finish();
     if (policy === "guarded") {
-      const disagreement = evidenceState(observation, artifact);
+      const visualSource = artifact ?? (observation.visual ? observation : null);
+      const disagreement = evidenceState(observation, artifact) ??
+        (visualSource && !visualTextAgrees(observation, pending[0].identifier, visualSource) ? "visual_text_unverified" : null);
       if (disagreement) {
         if (!port.observeVisual) throw new Error(disagreement);
         observation = await call("reobserve_visual", (remaining, entry) => { entry.handedOff = true; return port.observeVisual(pending[0].identifier, observation, remaining); });

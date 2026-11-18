@@ -69,6 +69,27 @@ test("version or persistent visual disagreement blocks repair rather than choosi
   assert.equal(stale.final.strictCompletion, true);
 });
 
+test("fresh geometry-valid OCR contradiction is reconciled read-only, never ignored", async () => {
+  for (const source of ["observation", "artifact"]) {
+    const setup = offlineTrial("visual-conflict", `fresh-${source}`);
+    const artifact = source === "artifact" ? {} : null;
+    const visual = setup.port.observeVisual;
+    setup.port.observe = async () => {
+      const observation = await visual("primary.second");
+      if (artifact) {
+        Object.assign(artifact, structuredClone(observation));
+        delete observation.visual;
+      }
+      return observation;
+    };
+    const result = await recover({ ...setup, artifact, policy: "guarded", enabled: true });
+    assert.equal(result.mutations, 0, source);
+    assert.equal(result.calls.filter(call => call.kind === "reobserve_visual").length, 1);
+    assert.ok(result.reasons.includes("visual_text_unverified"));
+    assert.deepEqual(result.final.unmet, ["set-1"]);
+  }
+});
+
 test("route evidence is specific to app, runtime, control and bounded lifetime", () => {
   const setup = offlineTrial("known-unsent", "route");
   const control = setup.routes.records[0].control;
