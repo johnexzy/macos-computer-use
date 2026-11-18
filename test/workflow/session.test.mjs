@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { runSession, summarizeSession } from "./session-model.mjs";
 import { pilotAssignments, pilotSummary } from "./pilot.mjs";
-import { WorkflowLane } from "./session-lane.mjs";
+import { exposedToolSchemas, WorkflowLane } from "./session-lane.mjs";
 import { makeTask } from "./task.mjs";
 import { compareCampaign } from "./session-metrics.mjs";
 import { campaignAssignments, validateReviewedPilot } from "./campaign-plan.mjs";
@@ -105,6 +105,17 @@ test("pilot includes all assignments and prices failures in dollars per success"
   assert.equal(pilotSummary([completed, { outcome: "admitted" }]).dollarsPerSuccessfulTask, null);
   assert.equal(pilotSummary([completed, { outcome: "interrupted", modelStarted: true }]).dollarsPerSuccessfulTask, null);
   assert.equal(pilotSummary([failed]).dollarsPerSuccessfulTask, null);
+});
+
+test("legacy AX schemas require an owned window without the redundant target alternative", () => {
+  const selector = { type: "object" };
+  const anyOf = [{ required: ["appName"] }, { required: ["windowId"] }];
+  const [tool] = exposedToolSchemas([{ name: "set_accessibility_value", inputSchema: {
+    type: "object", properties: { windowId: { type: "integer" }, selector }, required: ["selector"], anyOf,
+  } }], "legacy");
+  assert.deepEqual(tool.inputSchema.required, ["selector", "windowId"]);
+  assert.equal(tool.inputSchema.anyOf, undefined);
+  assert.deepEqual(tool.inputSchema.properties.selector, selector);
 });
 
 test("report keeps separate matched cohorts, missing field evidence and complete denominators", () => {

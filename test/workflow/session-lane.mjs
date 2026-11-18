@@ -39,6 +39,10 @@ export function exposedToolSchemas(tools, lane) {
     } else if (lane === "legacy" && !legacyDiscovery.has(tool.name)) {
       tool.description = `${tool.description} This workflow requires an exact owned windowId. Use an exact selector identifier for input.`;
       tool.inputSchema.required = [...new Set([...(tool.inputSchema.required ?? []), "windowId"])];
+      if (tool.inputSchema.anyOf?.some(clause => Object.keys(clause).length === 1 &&
+          clause.required?.length === 1 && clause.required[0] === "windowId")) {
+        delete tool.inputSchema.anyOf;
+      }
     } else if (lane !== "legacy") {
       tool.inputSchema.properties.budgetMs = { ...tool.inputSchema.properties.budgetMs, minimum: 1, maximum: budgetMs, default: budgetMs };
       if (lane === "single" && tool.name === "act") {
