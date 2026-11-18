@@ -57,6 +57,7 @@ export class WorkflowLane {
     this.lane = lane;
     this.client = client;
     this.tools = exposedToolSchemas(tools, lane);
+    this.routes = lane === "legacy" ? legacyRoutes : rebuiltRoutes;
     this.readFixture = readFixture;
     this.before = before;
     this.fields = new Map(plan.fields.map(f => [f.id, { kind: f.kind, label: f.label, window: "work" }]));
@@ -69,6 +70,10 @@ export class WorkflowLane {
     this.stopped = false;
     const ajv = new AjvJsonSchemaValidator(new Ajv2020({ strict: false, validateFormats: false }));
     this.validators = new Map(this.tools.map(tool => [tool.name, ajv.getValidator(tool.inputSchema)]));
+  }
+
+  get backgroundToolNames() {
+    return this.tools.filter(tool => this.routes.has(tool.name)).map(tool => tool.name);
   }
 
   async backend(name, args) {
@@ -106,11 +111,11 @@ export class WorkflowLane {
     const state = await this.readFixture();
     if (state.pid !== this.before.pid || state.runNonce !== this.before.runNonce) throw new Error("Owned fixture process changed");
     const legacy = this.lane === "legacy";
+    if (!this.routes.has(name)) throw new Error("Tool is outside the fixture background authority");
     const args = { ...input };
     let mutations = [];
     let windowId;
     if (legacy) {
-      if (!legacyRoutes.has(name)) throw new Error("Tool is outside the fixture background authority");
       if (args.appName != null || args.targetApp != null) throw new Error("Use an exact owned windowId, without app aliases");
       windowId = args.windowId;
       if (!legacyDiscovery.has(name)) {
@@ -137,7 +142,6 @@ export class WorkflowLane {
         mutations = [{ index: 0, id, kind: press ? "press" : "setValue", control, observed }];
       }
     } else {
-      if (!rebuiltRoutes.has(name)) throw new Error("Tool is outside the fixture background authority");
       windowId = args.target?.windowId;
       if (!["targets", "capabilities"].includes(name)) {
         const closedWait = name === "waitFor" && args.condition?.kind === "windowAbsent" &&

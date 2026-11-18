@@ -126,6 +126,7 @@ export async function pilotTrial(assignment, configuration, monitorBinary) {
   return { ...assignment, outcome, modelStarted: taskStarted != null, readyMs, taskMs: taskStarted == null ? null : performance.now() - taskStarted,
     error, cleanupErrors, grade, before, after, foreground, connection, activity: activity?.evidence, calls: lane?.calls ?? [], session,
     promptSha256: hash(prompt), tools: lane?.tools, toolsSha256: lane ? hash(JSON.stringify(lane.tools)) : null,
+    backgroundToolNames: lane?.backgroundToolNames,
     falseCompletionClaim: session?.claim === "complete" && grade.outcome === "failed",
     unknownCompletionClaim: session?.claim === "complete" && grade.outcome === "unknown" };
 }
@@ -146,25 +147,29 @@ export async function withCampaignSignals(run) {
 async function main(argv) {
   const { values } = parseArgs({ args: argv, options: {
     execute: { type: "boolean" }, output: { type: "string" }, "api-key-file": { type: "string" }, claude: { type: "string", default: "claude" },
+    auth: { type: "string", default: "api-key" },
     model: { type: "string", default: "claude-sonnet-5" }, "budget-usd": { type: "string" }, "per-trial-usd": { type: "string" },
     stage: { type: "string", default: "pilot" }, "reviewed-pilot": { type: "string" },
     "max-turns": { type: "string", default: "46" }, "trial-seconds": { type: "string", default: "240" },
   } });
   const binary = values.claude, model = values.model;
-  const stage = values.stage;
+  const stage = values.stage, authMode = values.auth;
   const assignments = campaignAssignments(stage);
   const budgetUsd = Number(values["budget-usd"]), perTrialUsd = Number(values["per-trial-usd"]);
   const turns = Number(values["max-turns"]), timeoutMs = Number(values["trial-seconds"]) * 1000;
   if (!Number.isInteger(turns) || turns <= 0 || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || !model.startsWith("claude-")) {
     throw new Error("Provide a full Claude model ID and positive trial time and turn limits");
   }
-  if (values.execute && !(values.output && values["api-key-file"] && Number.isFinite(budgetUsd) &&
+  if (!["api-key", "terminal"].includes(authMode) || (authMode === "terminal" && values["api-key-file"])) {
+    throw new Error("Select --auth api-key or --auth terminal. Only api-key accepts --api-key-file.");
+  }
+  if (values.execute && !(values.output && (authMode === "terminal" || values["api-key-file"]) && Number.isFinite(budgetUsd) &&
     Number.isFinite(perTrialUsd) && perTrialUsd > 0 && perTrialUsd <= budgetUsd)) {
-    throw new Error("After budget approval, specify --execute, --output, --api-key-file, --budget-usd and --per-trial-usd");
+    throw new Error("Execution requires --output, --budget-usd, --per-trial-usd and an API key file or terminal login");
   }
   const cliVersion = execFileSync(binary, ["--version"], { encoding: "utf8", timeout: 5000 }).trim();
   if (!values.execute) {
-    console.log(JSON.stringify({ mode: "plan", stage, modelCalls: 0, cliVersion, model, turns, timeoutMs, assignments }, null, 2));
+    console.log(JSON.stringify({ mode: "plan", stage, modelCalls: 0, cliVersion, model, authMode, turns, timeoutMs, assignments }, null, 2));
     return;
   }
   let reviewedPilotSha256;
@@ -180,8 +185,18 @@ async function main(argv) {
   await mkdir(output, { mode: 0o700 });
   const cwd = path.join(output, "agent-cwd");
   await mkdir(cwd, { mode: 0o700 });
-  const keyEnv = await apiKeyEnvironment(values["api-key-file"]);
-  const env = { PATH: process.env.PATH, HOME: process.env.HOME, LANG: process.env.LANG ?? "en_US.UTF-8", ANTHROPIC_API_KEY: keyEnv.ANTHROPIC_API_KEY };
+  const env = Object.fromEntries(["PATH", "HOME", "LOGNAME", "USER", "LANG", "TMPDIR"].filter(key => process.env[key])
+    .map(key => [key, process.env[key]]));
+  let subscriptionType;
+  if (authMode === "terminal") {
+    const status = JSON.parse(execFileSync(binary, ["auth", "status", "--json"], { cwd, env, encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "ignore"] }));
+    if (!status.loggedIn || status.authMethod !== "claude.ai" || status.apiProvider !== "firstParty" || !status.subscriptionType) {
+      throw new Error("Terminal mode requires a first-party Claude subscription login");
+    }
+    subscriptionType = status.subscriptionType;
+  } else {
+    Object.assign(env, await apiKeyEnvironment(values["api-key-file"]));
+  }
   const budget = new ModelBudget(budgetUsd, perTrialUsd);
   const files = [fixtureBinary, "native_helper", ".artifacts/runtime-install/cua-host", ".artifacts/runtime-install/cua-runtime",
     "test/fixtures/macos/WorkflowFixture.swift", "test/workflow/task.mjs", "test/workflow/session-lane.mjs", "test/workflow/session-gateway.mjs",
@@ -190,7 +205,7 @@ async function main(argv) {
   const source = { revision: git("rev-parse", "HEAD"), dirty: Boolean(git("status", "--porcelain")),
     sha256: Object.fromEntries(await Promise.all(files.map(async (file) => [file, hash(await readFile(path.join(root, file)))]))) };
   const trials = assignments.map(assignment => ({ ...assignment, outcome: "not_started" }));
-  const report = { schemaVersion: 2, mode: `actual_claude_session_${stage}`, stage, reviewedPilotSha256, cliVersion, model, turns, timeoutMs, source,
+  const report = { schemaVersion: 2, mode: `actual_claude_session_${stage}`, stage, reviewedPilotSha256, cliVersion, model, authMode, subscriptionType, turns, timeoutMs, source,
     systemPromptSha256: hash(workflowSystemPrompt), trials, startedAt: new Date().toISOString() };
   const save = async () => {
     report.budget = budget.summary();
@@ -220,7 +235,7 @@ async function main(argv) {
         trials[index] = { ...assignment, outcome: "budget_stopped", error: stopReason ?? "Remaining budget cannot reserve another trial" };
         continue;
       }
-      const trial = await pilotTrial(assignment, { binary, cwd, env, model, turns, timeoutMs, budgetUsd: allowance, abortSignal, actorBinaries,
+      const trial = await pilotTrial(assignment, { binary, cwd, env, model, turns, timeoutMs, budgetUsd: allowance, authMode, abortSignal, actorBinaries,
         beforeSession: async () => {
           trials[index] = { ...assignment, outcome: "admitted", reservedUsd: allowance };
           await save();

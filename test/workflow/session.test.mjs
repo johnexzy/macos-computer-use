@@ -111,7 +111,9 @@ test("report keeps separate matched cohorts, missing field evidence and complete
   const trials = pilotAssignments().map(assignment => ({ ...assignment, outcome: "budget_stopped" }));
   trials[0] = { ...trials[0], outcome: "passed", taskMs: 30, grade: { correctFields: 27, requiredFields: 27,
     wrongTargetAttempts: 0, unnecessaryWrites: 0, targetActivationPreserved: true }, session: { costUsd: 1, numTurns: 5, usage: final.modelUsage[model] },
-    calls: [{ result: { isError: true } }, { handedOff: true, result: { isError: true } }] };
+    calls: [{ result: { isError: true } }, { handedOff: true, result: { isError: true } }],
+    foreground: { targetPID: 19, events: [{ pid: 20 }, { pid: 21 }] },
+    tools: [{ name: "screenshot" }, { name: "click" }], toolsSha256: "legacy-schema", backgroundToolNames: ["screenshot"] };
   const summary = pilotSummary(trials);
   assert.deepEqual(summary.fields, { assigned: 252, assessed: 27, correct: 27, unassessed: 225 });
   assert.equal(summary.strictSuccessRate, 1 / 12);
@@ -127,6 +129,8 @@ test("report keeps separate matched cohorts, missing field evidence and complete
   assert.match(markdown, /\| legacy \| \$1\.0000 \| \$1\.0000 \| 1\/4/);
   assert.match(markdown, /\| 0\/0 \(1\/1\) \| 1 \|/);
   assert.match(markdown, /\| — \(0\/1\) \| 0 \|/);
+  assert.match(markdown, /\| 0\/0 \| 2 \|/);
+  assert.match(markdown, /\| legacy \| screenshot, click \| screenshot \|/);
 });
 
 test("main pairs all 180 assignments and requires a finalized priced pilot", () => {
@@ -164,6 +168,28 @@ test("main pairs all 180 assignments and requires a finalized priced pilot", () 
   assert.throws(() => validateReviewedPilot(mismatched, model), /requested model/);
   pilot.trials[0].session.costUsd = null;
   assert.throws(() => validateReviewedPilot(pilot, model), /known model cost/);
+});
+
+test("main balances lane position and predecessor within matched trials", () => {
+  const assignments = campaignAssignments("main");
+  const orders = new Map(), predecessors = new Map();
+  for (let i = 0; i < assignments.length; i += 3) {
+    const pair = assignments.slice(i, i + 3);
+    assert.ok(pair.every(trial => trial.task === pair[0].task && trial.variant === pair[0].variant && trial.seed === pair[0].seed));
+    const order = pair.map(trial => trial.lane);
+    const key = order.join("/");
+    orders.set(key, (orders.get(key) ?? 0) + 1);
+    for (let position = 1; position < order.length; position++) {
+      const edge = `${order[position - 1]}→${order[position]}`;
+      predecessors.set(edge, (predecessors.get(edge) ?? 0) + 1);
+    }
+  }
+  assert.deepEqual([...orders.values()], Array(6).fill(10));
+  assert.deepEqual([...predecessors.values()], Array(6).fill(20));
+  const pilot = campaignAssignments("pilot");
+  for (let position = 0; position < 3; position++) {
+    assert.equal(new Set(pilot.filter((_, index) => index % 3 === position).map(trial => trial.lane)).size, 3);
+  }
 });
 
 test("fresh references cannot replay an unknown mutation, while a settled visible validation clear can be corrected once", async () => {

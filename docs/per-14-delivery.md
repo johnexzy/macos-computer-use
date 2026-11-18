@@ -2,7 +2,7 @@
 
 The benchmark compares macOS computer use on invoice entry and settings. The invoice form has 27 fields, one submission and two transition checks. The settings task has 15 controls across three pages and measures whether already-correct settings stay untouched. A disposable AppKit fixture evaluates outcomes from its controls, submission and event journal. The agent receives only the public task and MCP tool results.
 
-The clean and friction trial matrix has 12 assignments: two tasks, two variants and three lanes. The lanes use legacy 3.0.2, the rebuilt host with at most one action per request, and the rebuilt host with up to 16 actions per request. Seeds are paired across lanes and order rotates. The user-active variant uses two separate disposable foreground actors and runs as an additional unpaid check.
+The clean and friction trial matrix has 12 assignments: two tasks, two variants and three lanes. The lanes use legacy 3.0.2, the rebuilt host with at most one action per request, and the rebuilt host with up to 16 actions per request. Each seed is paired across lanes. The pilot places every lane at least once in each position. The user-active variant uses two separate disposable foreground actors and runs as an additional unpaid check.
 
 ## Build and verify
 
@@ -29,15 +29,17 @@ apps. The check yields if the user changes apps and only attempts to restore the
 
 The session smoke drives the actual MCP lanes with a deterministic test process. The loopback smoke drives the installed Claude CLI with a dummy key and local Messages API. Both exercise session handling with zero provider inference. Their results establish harness behavior and fixture conformance. Success rate, latency and token cost for an actual agent require the pilot.
 
-## Run the paid pilot after budget approval
+## Run the pilot
 
-`pilot.mjs` defaults to printing the trial plan. It requires an explicit execute switch, overall budget, per-trial budget, new output directory and owner-only API key file for a provider run.
+`pilot.mjs` defaults to printing the trial plan. It requires an explicit execute switch, overall and per-trial dollar-estimate limits, and a new output directory. Use an owner-only API key file for a separately approved API run.
 
 ```sh
 node test/workflow/pilot.mjs --execute \
   --budget-usd "$PER14_APPROVED_TOTAL_USD" --per-trial-usd "$PER14_APPROVED_TRIAL_USD" \
   --api-key-file "$PER14_PRIVATE_KEY_PATH" --output .artifacts/workflow-paid-pilot
 ```
+
+Use `--auth terminal` in place of `--api-key-file` to use the installed Claude Code subscription login. Check `/usage` before an included-usage run to verify that the seat has available quota and usage credits are off. The CLI dollar figures estimate API-equivalent cost for comparing lanes. Seat usage is tracked by the subscription.
 
 Each trial starts one Claude Code process with a fixed model, turn limit, wall-clock limit and one scoped MCP server. The campaign owns the live backend and ledger. A replacement stdio relay cannot initiate another connection for the same trial. A known validation clear can permit one correction after a fresh public observation and a settled prior dispatch. Missing delivery evidence stays uncertain across reference refreshes.
 
@@ -47,7 +49,7 @@ The report retains the full assigned denominator, independent oracle grade, mode
 
 ## Run the main campaign after pilot review
 
-The main plan assigns 180 trials across both tasks, three variants, three lanes and ten seeds per task. Execution requires separate main budget approval and a finalized, reviewed pilot. Each pilot assignment needs a distinct session with the pinned model, the expected tool inventory and a reported cost. Failed trials with verified session evidence remain eligible for review. The actor variant schedules two switches at fixed offsets of 750 ms and 2,000 ms after Claude initializes. The monitor must confirm the switches before the session ends. This gives every lane the same timed perturbation without changing which fields it may batch. The report retains actual switch evidence, including missed switches.
+The main plan assigns 180 trials across both tasks, three variants, three lanes and ten seeds per task. Each of the six lane orders occurs ten times across the paired groups. This balances positions and immediate predecessors across the campaign. Execution requires separate main budget approval and a finalized, reviewed pilot. Each pilot assignment needs a distinct session with the pinned model, the expected tool inventory and a reported cost. Failed trials with verified session evidence remain eligible for review. The actor variant schedules two switches at fixed offsets of 750 ms and 2,000 ms after Claude initializes. The monitor must confirm the switches before the session ends. This gives every lane the same timed perturbation without changing which fields it may batch. The report retains actual switch evidence, including missed switches.
 
 ```sh
 node test/workflow/pilot.mjs --stage main --execute \
@@ -57,4 +59,4 @@ node test/workflow/pilot.mjs --stage main --execute \
 node test/workflow/report.mjs .artifacts/workflow-paid-main/report.json > docs/per-14-results.md
 ```
 
-Publish measured results after reviewing the paired JSON and the rendered tables. The lane summary leads with cost per successful task. The cohort tables show Wilson 95% intervals, latency sample counts, safety assessment coverage and pre-handoff refusals. Trials stopped by the turn, time or dollar limit remain in the denominator as budget stops. Deployable Rust/Swift binaries and client migration belong to PER-11. [PER-14 in Linear](https://linear.app/komonapp/issue/PER-14/measure-success-rate-speed-and-token-cost-on-a-realistic-30-50-action)
+Publish measured results after reviewing the paired JSON and the rendered tables. The lane summary leads with cost per successful task. The cohort tables show Wilson 95% intervals, latency sample counts, safety assessment coverage, unrelated app switches and pre-handoff refusals. The tool inventory lists the tools advertised to the model and the subset eligible for background use in the fixture. Trials stopped by the turn, time or dollar limit remain in the denominator as budget stops. Deployable Rust/Swift binaries and client migration belong to PER-11. [PER-14 in Linear](https://linear.app/komonapp/issue/PER-14/measure-success-rate-speed-and-token-cost-on-a-realistic-30-50-action)

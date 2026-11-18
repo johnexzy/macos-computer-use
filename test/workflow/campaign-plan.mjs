@@ -2,6 +2,14 @@ import { makeTask } from "./task.mjs";
 
 export const lanes = ["legacy", "single", "composed"];
 const tasks = ["invoice", "settings"];
+const laneOrders = [
+  ["legacy", "single", "composed"],
+  ["single", "composed", "legacy"],
+  ["composed", "legacy", "single"],
+  ["composed", "single", "legacy"],
+  ["single", "legacy", "composed"],
+  ["legacy", "composed", "single"],
+];
 
 export function campaignAssignments(stage) {
   if (!["pilot", "main"].includes(stage)) throw new Error("Campaign stage must be pilot or main");
@@ -9,7 +17,8 @@ export function campaignAssignments(stage) {
   return Array.from({ length: stage === "pilot" ? 1 : 10 }, (_, repeat) => tasks.flatMap((task, i) => variants.flatMap((variant, j) => {
     const seed = stage === "pilot" ? `workflow-${task}-1` : `workflow-${task}-main-${repeat + 1}`;
     const fieldsRequired = makeTask(task, variant, seed).fields.length;
-    return lanes.map((_, k) => ({ task, variant, lane: lanes[(repeat + i + j + k) % lanes.length], seed, fieldsRequired }));
+    const order = laneOrders[(repeat + i * variants.length + j) % laneOrders.length];
+    return order.map(lane => ({ task, variant, lane, seed, fieldsRequired }));
   }))).flat();
 }
 

@@ -29,10 +29,10 @@ export function workflowPrompt(task) {
     : "Make Workflow Settings match the Settings Specification. Check all three pages, change only differences, and leave Notes untouched.";
 }
 
-export function sessionArguments({ model, budgetUsd, turns, config, tools }) {
-  return ["--bare", "-p", "--output-format", "stream-json", "--verbose", "--tools", "", "--allowedTools", namespaced(tools).join(","),
+export function sessionArguments({ model, budgetUsd, turns, config, tools, authMode }) {
+  return [authMode === "terminal" ? "--restricted" : "--bare", "-p", "--output-format", "stream-json", "--verbose", "--tools", "", "--allowedTools", namespaced(tools).join(","),
     "--disable-slash-commands", "--no-chrome", "--strict-mcp-config", "--mcp-config", JSON.stringify(config),
-    "--setting-sources", "", "--no-session-persistence", "--permission-mode", "dontAsk", "--max-turns", String(turns),
+    "--setting-sources", "", "--no-session-persistence", "--permission-mode", "dontAsk", "--permission-prompts", "none", "--max-turns", String(turns),
     "--max-budget-usd", String(budgetUsd), "--effort", "low", "--model", model, "--system-prompt", workflowSystemPrompt];
 }
 
@@ -70,9 +70,9 @@ export function summarizeSession(records, { model, tools, exitCode, failure }) {
     terminalResults: results.length, initEvents: inits.length, exitCode, failure, limit };
 }
 
-export async function runSession({ binary, prefix = [], env, cwd, model, tools, config, prompt, budgetUsd, turns, timeoutMs, onReady, onStop, abortSignal }) {
+export async function runSession({ binary, prefix = [], env, cwd, model, tools, config, prompt, budgetUsd, turns, timeoutMs, authMode, onReady, onStop, abortSignal }) {
   abortSignal?.throwIfAborted();
-  const args = sessionArguments({ model, budgetUsd, turns, config, tools });
+  const args = sessionArguments({ model, budgetUsd, turns, config, tools, authMode });
   const childEnv = { ...claudeEnvironment({ env, model }), CLAUDE_CODE_MAX_OUTPUT_TOKENS: "8192", ENABLE_TOOL_SEARCH: "false",
     DISABLE_NON_ESSENTIAL_MODEL_CALLS: "1", CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1", MCP_TIMEOUT: "10000" };
   const secrets = [childEnv.ANTHROPIC_API_KEY, childEnv.ANTHROPIC_AUTH_TOKEN, childEnv.CLAUDE_CODE_OAUTH_TOKEN].filter(Boolean);

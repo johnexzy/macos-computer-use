@@ -25,7 +25,8 @@ export function renderCampaign(report) {
   const cohorts = Object.entries(compareCampaign(report.trials).byCohort);
   const label = (key) => key.split("/");
   const totals = Object.entries(summary.outcomes).map(([name, count]) => `${count} ${name}`).join(", ");
-  const lead = `# PER-14 ${report.stage} results\n\n${summary.assigned} assigned trials (${totals}). Model ${report.model}. Source ${report.source.revision}.\n\n`;
+  const auth = report.authMode === "terminal" ? ` Claude Code terminal subscription (${report.subscriptionType}).` : "";
+  const lead = `# PER-14 ${report.stage} results\n\n${summary.assigned} assigned trials (${totals}). Model ${report.model}.${auth} Source ${report.source.revision}.\n\n`;
   const perLane = table(["Lane", "USD / success", "Total USD", "Strict success", "Wilson 95%", "p50 / p90 ms (n)", "Input / output", "Cache writes / reads"],
     lanes.map(lane => {
       const result = pilotSummary(report.trials.filter(trial => trial.lane === lane));
@@ -35,21 +36,30 @@ export function renderCampaign(report) {
         `${value(result.model.inputTokens)}/${value(result.model.outputTokens)}`,
         `${value(result.model.cacheCreationInputTokens)}/${value(result.model.cacheReadInputTokens)}`];
     }));
-  const goals = table(["Task", "Variant", "Lane", "Strict success", "Wilson 95%", "Fields correct / assessed", "Fields assigned", "Wrong / unnecessary (assessed trials)", "Pre-handoff refusals", "False / unknown claims", "Target activations / unknown foreground"],
+  const goals = table(["Task", "Variant", "Lane", "Strict success", "Wilson 95%", "Fields correct / assessed", "Fields assigned", "Wrong / unnecessary (assessed trials)", "Pre-handoff refusals", "False / unknown claims", "Target activations / unknown foreground", "Unrelated switches observed"],
     cohorts.map(([key, cohort]) => [...label(key), `${cohort.strictSuccesses}/${cohort.assigned} (${percent(cohort.strictSuccessRate)})`, interval(cohort.strictSuccessWilson95),
       `${cohort.fields.correct}/${cohort.fields.assessed}`, value(cohort.fields.assigned),
       `${cohort.safety.assessedTrials ? `${cohort.safety.wrongTargetAttempts}/${cohort.safety.unnecessaryWrites}` : "—"} (${cohort.safety.assessedTrials}/${cohort.assigned})`,
       cohort.safety.preHandoffRefusals,
-      `${cohort.safety.falseCompletionClaims}/${cohort.safety.unknownCompletionClaims}`, `${cohort.safety.targetActivationTrials}/${cohort.safety.unknownForegroundTrials}`]));
-  const usage = table(["Task", "Variant", "Lane", "p50 / p90 ms (n)", "Turns", "MCP calls", "Field writes / presses / waits", "Input / output", "Cache writes / reads", "USD / assigned", "USD / success"],
+      `${cohort.safety.falseCompletionClaims}/${cohort.safety.unknownCompletionClaims}`, `${cohort.safety.targetActivationTrials}/${cohort.safety.unknownForegroundTrials}`,
+      cohort.safety.observedUnrelatedSwitches || (cohort.safety.unknownForegroundTrials === cohort.assigned ? "—" : 0)]));
+  const usage = table(["Task", "Variant", "Lane", "p50 / p90 ms (n)", "Turns", "MCP calls", "Field mutations / navigation and submit presses / waits requested", "Input / output", "Cache writes / reads", "USD / assigned", "USD / success"],
     cohorts.map(([key, cohort]) => [...label(key), `${value(cohort.taskMs.p50)}/${value(cohort.taskMs.p90)} (${cohort.taskMs.samples})`, value(cohort.model.cliReportedTurns),
       cohort.toolCalls, `${cohort.actions.fieldMutationAttempts}/${cohort.actions.navigationPresses + cohort.actions.submitAttempts}/${cohort.actions.waitRequests + cohort.actions.waitStepsSubmitted}`,
       `${value(cohort.model.inputTokens)}/${value(cohort.model.outputTokens)}`, `${value(cohort.model.cacheCreationInputTokens)}/${value(cohort.model.cacheReadInputTokens)}`,
       dollars(cohort.dollarsPerAssignedTask), dollars(cohort.dollarsPerSuccessfulTask)]));
+  const inventory = table(["Lane", "Advertised tools", "Eligible for background use"], lanes.flatMap(lane => {
+    const observed = new Map(report.trials.filter(trial => trial.lane === lane && trial.toolsSha256 && trial.tools)
+      .map(trial => [trial.toolsSha256, trial]));
+    return observed.size ? [...observed.values()].map(trial => [lane, trial.tools.map(tool => tool.name).join(", "),
+      trial.backgroundToolNames?.join(", ") ?? "—"]) : [[lane, "—", "—"]];
+  }));
   const notes = `
-All assigned trials remain in the success denominator. Field accuracy covers observed fields only. Latency includes started outcomes, with sample counts shown. Dollar amounts use terminal CLI estimates, including failed sessions. A dash indicates missing evidence or a ratio without a finite denominator. These intervals describe each cohort and do not establish a paired treatment effect. The source JSON retains individual paired trials and observed unrelated switches.
+All assigned trials remain in the success denominator. Field accuracy covers observed fields only. Latency includes started outcomes, with sample counts shown. Wait counts include requests handed to the backend, including wait steps in a batch that stopped early. Dollar amounts use terminal CLI estimates, including failed sessions. A dash indicates missing evidence or a ratio without a finite denominator. These intervals describe the cohorts individually. The source JSON retains paired trials and tool schema hashes.
+
+Background-eligible tool names are still subject to the owned window and action checks. The single lane permits one action per request, and the composed lane permits up to 16.
 `;
-  return `${lead}${perLane}\n\n${goals}\n\n${usage}\n${notes}`;
+  return `${lead}${perLane}\n\n${goals}\n\n${usage}\n\n${inventory}\n${notes}`;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

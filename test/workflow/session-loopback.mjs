@@ -66,6 +66,7 @@ try {
   const result = await runSession({ binary: "claude", env: { PATH: process.env.PATH, HOME: process.env.HOME, CLAUDE_CONFIG_DIR: configDirectory,
     ANTHROPIC_API_KEY: dummyKey, ANTHROPIC_BASE_URL: `http://127.0.0.1:${api.address().port}` }, cwd: output,
     model, tools: lane.tools, config: gateway.config, prompt: workflowPrompt("settings"), budgetUsd: 1, turns: 4, timeoutMs: 20000,
+    authMode: process.argv[3],
     onReady: () => { lane.stopped = false; }, onStop: () => { lane.stopped = true; } });
   await writeFile(path.join(output, "report.json"), JSON.stringify({ mode: "installed_cli_loopback_api", providerCalls: 0, result, calls, requests }, null, 2), { mode: 0o600 });
   assert.equal(result.ok, true, JSON.stringify({ ...result, records: undefined, args: undefined }));
