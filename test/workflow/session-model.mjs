@@ -60,8 +60,8 @@ export function summarizeSession(records, { model, tools, exitCode, failure }) {
   const observedAssistantModels = [...new Set(records.map(assistantModel).filter(Boolean))];
   const modelOk = models.length === 1 && models[0] === model && observedAssistantModels.every(value => value === model);
   const sameSession = Boolean(sessionId && result?.session_id === sessionId && records.every(r => !r.session_id || r.session_id === sessionId));
-  const text = typeof result?.result === "string" ? result.result.trim() : "";
-  const claim = text === "COMPLETE" ? "complete" : text === "INCOMPLETE" ? "incomplete" : null;
+  const finalLine = typeof result?.result === "string" ? result.result.trim().split("\n").at(-1)?.trim() : null;
+  const claim = finalLine === "COMPLETE" ? "complete" : finalLine === "INCOMPLETE" ? "incomplete" : null;
   const limit = failure === wallClockLimit ? "time" : result?.subtype === "error_max_turns" ? "turns" :
     result?.subtype === "error_max_budget_usd" ? "cost" : null;
   return { ok: Boolean(!failure && exitCode === 0 && ordered && result.subtype === "success" && result.is_error !== true && inventoryOk && modelOk && sameSession),

@@ -37,6 +37,8 @@ test("terminal usage is counted once and absent or duplicate results are unprice
   const unrecognizedClaim = parsed(init, { ...final, result: "The workflow is finished." });
   assert.equal(unrecognizedClaim.ok, true);
   assert.equal(unrecognizedClaim.claim, null);
+  assert.equal(parsed(init, { ...final, result: "The original form closed.\n\nCOMPLETE" }).claim, "complete");
+  assert.equal(parsed(init, { ...final, result: "The confirmation is missing.\nINCOMPLETE" }).claim, "incomplete");
 });
 
 const childSession = (script, options = {}) => runSession({ binary: process.execPath, prefix: ["-e", script, "--"], env: {},
@@ -116,6 +118,34 @@ test("legacy AX schemas require an owned window without the redundant target alt
   assert.deepEqual(tool.inputSchema.required, ["selector", "windowId"]);
   assert.equal(tool.inputSchema.anyOf, undefined);
   assert.deepEqual(tool.inputSchema.properties.selector, selector);
+});
+
+test("foreground proposals are refused before backend dispatch or ledger entry", async () => {
+  const target = { pid: 90, windowId: 19 };
+  const state = { pid: target.pid, runNonce: "fixture", windows: [{ key: "work", windowId: target.windowId, visible: true }],
+    values: {}, generations: {}, events: [] };
+  const plan = makeTask("invoice", "clean", "foreground-refusal");
+  const tools = ["observe", "act"].map(name => ({ name, inputSchema: { type: "object", properties: { steps: { type: "array" } } } }));
+  const reply = (result, data) => ({ structuredContent: { body: { result, data } }, content: [] });
+  const observed = { observationId: "initial", elements: [{ identifier: "invoice.submit", reference: "submit" }] };
+  let presses = 0;
+  const client = { async callTool({ name }) {
+    if (name === "observe") return reply(name, observed);
+    presses++;
+    return reply(name, { observationId: observed.observationId, steps: [{ actionId: "submit", delivery: "dispatched" }] });
+  } };
+  const lane = new WorkflowLane({ lane: "composed", client, tools, before: state, plan, readFixture: async () => state });
+  await lane.call("observe", { target });
+  const request = { target, observationId: observed.observationId,
+    steps: [{ actionId: "submit", operation: { kind: "press", params: { elementRef: "submit" } } }] };
+  assert.equal(lane.tools[1].inputSchema.properties.foreground.const, false);
+  const rejected = await lane.call("act", { ...request, foreground: true });
+  assert.match(rejected.content[0].text, /permits background input only/);
+  assert.equal(lane.calls.at(-1).handedOff, undefined);
+  assert.equal(lane.ledger.size, 0);
+  assert.equal(presses, 0);
+  assert.equal((await lane.call("act", { ...request, foreground: false })).isError, undefined);
+  assert.equal(presses, 1);
 });
 
 test("report keeps separate matched cohorts, missing field evidence and complete denominators", () => {

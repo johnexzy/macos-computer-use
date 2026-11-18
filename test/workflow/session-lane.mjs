@@ -45,9 +45,12 @@ export function exposedToolSchemas(tools, lane) {
       }
     } else if (lane !== "legacy") {
       tool.inputSchema.properties.budgetMs = { ...tool.inputSchema.properties.budgetMs, minimum: 1, maximum: budgetMs, default: budgetMs };
-      if (lane === "single" && tool.name === "act") {
-        tool.description = "Execute one typed step using the retained observation and target.";
-        tool.inputSchema.properties.steps.maxItems = 1;
+      if (tool.name === "act") {
+        tool.inputSchema.properties.foreground = { type: "boolean", const: false, description: "This fixture permits background input only." };
+        if (lane === "single") {
+          tool.description = "Execute one typed step using the retained observation and target.";
+          tool.inputSchema.properties.steps.maxItems = 1;
+        }
       }
     }
     return tool;
@@ -92,6 +95,7 @@ export class WorkflowLane {
       if (this.stopped) throw new Error("Trial tool admission has ended");
       // Do not interleave a fresh observation with a mutation whose effect has not settled.
       if (this.active) throw new Error("Another tool call is in flight. Wait for its result before trying again.");
+      if (name === "act" && input.foreground === true) throw new Error("This fixture permits background input only. Omit foreground or set it to false.");
       const validate = this.validators.get(name);
       if (!validate || !validate(input).valid) throw new Error("Invalid lane tool arguments");
       this.active = this.dispatch(entry, name, input);
