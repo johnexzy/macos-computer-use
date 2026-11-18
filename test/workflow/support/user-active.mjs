@@ -172,9 +172,13 @@ export const agentActivityOffsetsMs = [750, 2000];
 
 export async function exerciseDuringAgent(activity, signal, offsets = agentActivityOffsetsMs) {
   const start = performance.now();
+  activity.evidence.switchTiming = [];
   for (const offset of offsets) {
     await sleep(Math.max(0, offset - (performance.now() - start)), undefined, { signal });
+    const timing = { scheduledOffsetMs: offset, requestedOffsetMs: performance.now() - start };
+    activity.evidence.switchTiming.push(timing);
     await activity.advance(signal);
+    timing.confirmedOffsetMs = performance.now() - start;
     // Only switches confirmed while the session is live count toward coverage.
     if (signal.aborted) activity.evidence.sessionEndedDuringSwitch = true;
     signal.throwIfAborted();

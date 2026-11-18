@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout as sleep } from "node:timers/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { data, payload } from "../../evaluation/adapters.mjs";
@@ -63,6 +64,7 @@ const mutate = async (observed, changes, target = work) => {
 
 try {
   for (const [page, settings] of pages.entries()) {
+    if (process.env.FAKE_WORKFLOW_USER_ACTIVE === "1") await sleep(1200);
     let snapshot = await observe(work);
     if (page) {
       const switched = await mutate(snapshot, [{ control: element(snapshot, `settings.tab.${page}`) }]);
