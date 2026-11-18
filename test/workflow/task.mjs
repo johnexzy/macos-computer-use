@@ -2,8 +2,14 @@ import { createHash } from "node:crypto";
 
 const field = (id, label, expected, initial = "", kind = "text") => ({ id, label, expected, initial, kind });
 
+export function workflowVariants(requested) {
+  if (requested == null) return ["clean", "friction"];
+  if (!["clean", "friction", "user-active"].includes(requested)) throw new Error("Unknown workflow variant");
+  return [requested];
+}
+
 export function makeTask(task, variant, seed) {
-  if (!["invoice", "settings"].includes(task) || !["clean", "friction"].includes(variant)) {
+  if (!["invoice", "settings"].includes(task) || !["clean", "friction", "user-active"].includes(variant)) {
     throw new Error("Unknown workflow task or variant");
   }
   const bytes = createHash("sha256").update(seed).digest();
@@ -44,11 +50,25 @@ export function makeTask(task, variant, seed) {
   }
   const protectedValues = { "source.notes": "Source reference", ...(task === "invoice" ? { "work.notes": "Form reference" } : {}) };
   const expected = Object.fromEntries(fields.map(f => [f.id, f.expected]));
-  return { fields, expected, protectedValues, config: { task, source,
+  return { fields, expected, protectedValues,
+    userActiveMilestones: variant === "user-active" ? task === "invoice" ? ["invoice.customer", "invoice.1.item"] : ["settings.0", "settings.1"] : null,
+    config: { task, source,
     fields: fields.map(({ expected: _expected, ...f }) => f), friction: variant === "friction" ? friction : null } };
 }
 
-export function gradeWorkflow(task, plan, before, after, foreground) {
+export function gradeUserActive(evidence, targetPID, milestones) {
+  if (!evidence || evidence.targetPID !== targetPID || evidence.actorPIDs?.length !== 2 ||
+      new Set(evidence.actorPIDs).size !== 2 || !evidence.actorPIDs.every(pid => Number.isSafeInteger(pid) && pid > 0 && pid !== targetPID)) return null;
+  if (!Number.isSafeInteger(evidence.previousForegroundPID) || evidence.previousForegroundPID <= 0 ||
+      evidence.previousForegroundPID === targetPID || evidence.actorPIDs.includes(evidence.previousForegroundPID)) return null;
+  const expected = ["task_start", ...milestones.map(id => `after:${id}`)];
+  return evidence.controlledProcessesStopped === true && evidence.cleanupComplete === true && Array.isArray(evidence.transitions) && evidence.transitions.length === 3 && evidence.transitions.every((step, i) =>
+    step.checkpoint === expected[i] && step.actorPID === evidence.actorPIDs[i % 2] &&
+    step.beforePID === (i ? evidence.actorPIDs[(i - 1) % 2] : evidence.previousForegroundPID) &&
+    step.monitorKnown === true && step.activationCount > 0 && Number.isFinite(step.observedUptimeNs));
+}
+
+export function gradeWorkflow(task, plan, before, after, foreground, activity = null) {
   if (!before || !after || before.runNonce !== after.runNonce) return { outcome: "unknown" };
   const { values, events, submission, windows } = after;
   const correctFields = Object.entries(plan.expected).filter(([id, value]) => values[id] === value).length;
@@ -61,15 +81,16 @@ export function gradeWorkflow(task, plan, before, after, foreground) {
     events.filter(e => e.kind === "submit_attempt").length === 1 &&
     windows.some(w => w.key === "confirmation" && w.visible) && windows.some(w => w.key === "work" && !w.visible));
   const targetActivationPreserved = after.activationCount > 0 ? false : foreground;
+  const userActiveExercised = plan.userActiveMilestones ? gradeUserActive(activity, before.pid, plan.userActiveMilestones) : null;
   const fault = plan.config.friction;
   const faultsExercised = !fault || (fault.recreate.every(id => events.filter(e => e.kind === "recreated" && e.id === id).length === 1) &&
     events.filter(e => e.kind === "validation_cleared" && e.id === fault.cleared).length === 1 &&
     events.filter(e => e.kind === "delayed" && e.id === fault.delayed).length === 1);
   const normalizedInput = fault && events.some(e => e.kind === "normalized" && e.id === fault.decimal && e.value === plan.expected[fault.decimal]);
   const passed = correctFields === plan.fields.length && !wrongTargetAttempts && !unnecessaryWrites && protectedPreserved &&
-    invoiceSubmitted && after.pending === 0 && faultsExercised;
-  return { outcome: !passed || targetActivationPreserved === false ? "failed" : targetActivationPreserved === null ? "unknown" : "passed",
+    invoiceSubmitted && after.pending === 0 && faultsExercised && userActiveExercised !== false;
+  return { outcome: !passed || targetActivationPreserved === false ? "failed" : targetActivationPreserved === null || (plan.userActiveMilestones && userActiveExercised === null) ? "unknown" : "passed",
     correctFields, requiredFields: plan.fields.length, wrongTargetAttempts, unnecessaryWrites, protectedPreserved, invoiceSubmitted,
     targetActivationPreserved, faultsExercised, normalizedInput: Boolean(normalizedInput), pendingWrites: after.pending, mutationAttempts: attempts.length,
-    navigationPresses: events.filter(e => e.kind === "tab").length };
+    navigationPresses: events.filter(e => e.kind === "tab").length, userActiveExercised };
 }

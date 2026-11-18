@@ -11,7 +11,8 @@ import { Fixture } from "../fixtures/macos/client.mjs";
 import { root, data, payload } from "../evaluation/adapters.mjs";
 import { foregroundProof, mergeForegroundWatches } from "../evaluation/metrics.mjs";
 import { buildForegroundMonitor, ForegroundMonitor } from "../runtime/support/foreground-monitor.mjs";
-import { gradeWorkflow, makeTask } from "./task.mjs";
+import { gradeWorkflow, makeTask, workflowVariants } from "./task.mjs";
+import { buildUserActiveActors, userActiveSource, UserActiveActivity } from "./support/user-active.mjs";
 
 const host = path.join(root, ".artifacts/runtime-install/cua-host");
 const fixturePath = "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture";
@@ -31,13 +32,17 @@ async function ready(read) {
   throw last;
 }
 
-async function trial(assignment, monitorBinary) {
+const stopped = (exit, label) => Promise.race([exit, sleep(2000, undefined, { ref: false }).then(() => {
+  throw new Error(`${label} stop was not observed`);
+})]);
+
+async function trial(assignment, monitorBinary, actorBinaries) {
   const { task, variant, lane, seed } = assignment;
   const plan = makeTask(task, variant, seed);
   const legacy = lane === "legacy";
   const maxBatch = lane === "composed" ? 12 : 1;
   const calls = [];
-  let fixture, client, monitor, before, after, observation, setupMs, taskMs, error, cleanupError, staleProof;
+  let fixture, client, hostClosed, monitor, activity, before, after, observation, setupMs, taskMs, error, cleanupError, staleProof;
   const watches = [];
   const setupStarted = performance.now();
   const lookup = (state, key) => ({ pid: state.pid, windowId: state.windows.find(w => w.key === key && w.visible)?.windowId });
@@ -89,6 +94,7 @@ async function trial(assignment, monitorBinary) {
       assert.equal(result.steps[0].delivery, "dispatched");
       if (condition) assert.equal(result.steps[0].verification, "confirmed");
     }
+    await activity?.afterMutation([id]);
   };
   const write = async (target, observed, specs, special) => {
     if (legacy) {
@@ -110,6 +116,7 @@ async function trial(assignment, monitorBinary) {
         assert.ok(result.steps.every(s => s.delivery === "dispatched" && s.verification === "confirmed"));
       }
     }
+    await activity?.afterMutation(specs.map(spec => spec.id));
   };
   const populate = async (target, scope) => {
     const fault = plan.config.friction;
@@ -142,6 +149,7 @@ async function trial(assignment, monitorBinary) {
       } else {
         const batch = [spec];
         while (batch.length < maxBatch && remaining.length && remaining[0].kind !== "checkbox" &&
+            !activity?.isMilestone(batch.at(-1).id) &&
             ![fault?.trigger, fault?.cleared, fault?.decimal].includes(remaining[0].id)) batch.push(remaining.shift());
         await write(target, observation, batch);
       }
@@ -156,6 +164,7 @@ async function trial(assignment, monitorBinary) {
     assert.ok(foregroundProof(watches[0], before.pid) && watches[0].startedForegroundPID !== before.pid, "Fixture must begin in the background");
     const transport = new StdioClientTransport({ command: legacy ? process.execPath : host,
       args: legacy ? [path.join(root, "server.mjs")] : [], cwd: root, stderr: "pipe", env: { MACOS_COMPUTER_USE_UNSAFE: "0" } });
+    hostClosed = new Promise(resolve => { transport.onclose = resolve; });
     transport.stderr?.resume();
     client = new Client({ name: "workflow-scripted", version: "1" });
     await client.connect(transport);
@@ -166,6 +175,11 @@ async function trial(assignment, monitorBinary) {
       for (const spec of plan.fields.slice(0, task === "invoice" ? 27 : 5)) element(observed, spec.id);
       return observed;
     });
+    if (plan.userActiveMilestones) {
+      activity = new UserActiveActivity({ binaries: actorBinaries, targetPID: before.pid, milestones: plan.userActiveMilestones,
+        snapshot: async () => { const sample = await monitor.snapshot(); watches.push(sample); return sample; } });
+      await activity.start();
+    }
     setupMs = performance.now() - setupStarted;
     const start = performance.now();
     if (task === "invoice") {
@@ -208,17 +222,26 @@ async function trial(assignment, monitorBinary) {
     try { if (monitor) watches.push(await monitor.snapshot()); } catch (err) { cleanupError ??= err.message; }
     try { await client?.close(); } catch (err) { cleanupError ??= err.message; }
     try { await fixture?.close(); } catch (err) { cleanupError ??= err.message; }
+    if (activity) {
+      try {
+        await stopped(hostClosed, "MCP host");
+        await stopped(fixture.exited, "Workflow fixture");
+        activity.evidence.controlledProcessesStopped = true;
+      } catch (err) { cleanupError ??= err.message; }
+    }
+    // Actors remain alive until native work and all controlled fixture windows have stopped.
+    try { await activity?.close(); } catch (err) { cleanupError ??= err.message; }
     try { if (monitor) watches.push(await monitor.close()); } catch (err) { cleanupError ??= err.message; }
   }
   const foreground = before ? mergeForegroundWatches(watches, before.pid) : null;
-  const grade = gradeWorkflow(task, plan, before, after, foregroundProof(foreground, before?.pid));
+  const grade = gradeWorkflow(task, plan, before, after, foregroundProof(foreground, before?.pid), activity?.evidence);
   if (!error && variant === "friction" && !grade.normalizedInput) error = "Scripted normalization probe did not exercise the formatter";
   const outcome = error && setupMs == null ? "setup_blocked" : error ? "failed" : cleanupError ? "unknown" : grade.outcome;
-  return { ...assignment, outcome, setupMs, taskMs, error, cleanupError, grade, before, after, foreground, staleProof, calls };
+  return { ...assignment, outcome, setupMs, taskMs, error, cleanupError, grade, before, after, foreground, activity: activity?.evidence, staleProof, calls };
 }
 
 const { values } = parseArgs({ options: { output: { type: "string" }, task: { type: "string" }, variant: { type: "string" }, lane: { type: "string" } } });
-const options = { task: ["invoice", "settings"], variant: ["clean", "friction"], lane: ["legacy", "single", "composed"] };
+const options = { task: ["invoice", "settings"], variant: workflowVariants(values.variant), lane: ["legacy", "single", "composed"] };
 for (const [name, allowed] of Object.entries(options)) {
   if (values[name] != null) {
     assert.ok(allowed.includes(values[name]), `Unsupported ${name}`);
@@ -230,9 +253,12 @@ const output = path.resolve(values.output);
 await mkdir(output, { mode: 0o700 });
 const plan = options.task.flatMap((task, i) => options.variant.flatMap((variant, j) => options.lane.map((_, k) =>
   ({ task, variant, lane: options.lane[(i + j + k) % options.lane.length], seed: `workflow-${task}-1` }))));
+const actorBinaries = options.variant.includes("user-active") ? await buildUserActiveActors() : null;
 const evidenceFiles = [fixturePath, ...(options.lane.includes("legacy") ? ["native_helper"] : []),
   ...(options.lane.some(lane => lane !== "legacy") ? [".artifacts/runtime-install/cua-host", ".artifacts/runtime-install/cua-runtime"] : []),
-  "test/fixtures/macos/WorkflowFixture.swift", "test/workflow/scripted.mjs", "test/workflow/task.mjs"];
+  "test/fixtures/macos/WorkflowFixture.swift", "test/workflow/scripted.mjs", "test/workflow/task.mjs",
+  ...(actorBinaries ? [userActiveSource, "test/workflow/support/user-active.mjs", ...actorBinaries.flatMap(binary =>
+    [path.relative(root, binary), path.relative(root, path.join(path.dirname(binary), "../Info.plist"))])] : [])];
 const binariesAndSources = Object.fromEntries(await Promise.all(evidenceFiles.map(async p => [p, hash(await readFile(path.join(root, p)))])));
 const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 const report = { mode: "oracle_informed_scripted_readiness", modelCalls: 0, source: { revision: git("rev-parse", "HEAD"),
@@ -241,7 +267,7 @@ const save = () => writeFile(path.join(output, "report.json"), JSON.stringify(re
 await save();
 const monitorBinary = await buildForegroundMonitor();
 for (let i = 0; i < plan.length; i++) {
-  const episode = await trial(plan[i], monitorBinary);
+  const episode = await trial(plan[i], monitorBinary, actorBinaries);
   report.trials[i] = episode;
   await save();
   const { task, variant, lane, outcome, grade, error, cleanupError } = episode;
