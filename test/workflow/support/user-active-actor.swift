@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Foundation
 
 private struct Request: Decodable, Sendable {
@@ -95,8 +96,24 @@ private final class Actor: NSObject, NSApplicationDelegate {
             }
             busy = true
             window.makeKeyAndOrderFront(nil)
-            if #available(macOS 14, *) { NSApplication.shared.activate() }
-            else { NSApplication.shared.activate(ignoringOtherApps: true) }
+            if #available(macOS 14, *) {
+                if owned.contains(current) || !AXIsProcessTrusted() {
+                    NSApplication.shared.activate()
+                } else {
+                    // Initial entry starts from an unrelated application. Target only this disposable actor.
+                    let selfApp = AXUIElementCreateApplication(ProcessInfo.processInfo.processIdentifier)
+                    guard currentPID() == current else {
+                        busy = false
+                        reject(request, "foreground_changed_before_actor_activation")
+                        return
+                    }
+                    guard AXUIElementSetAttributeValue(selfApp, kAXFrontmostAttribute as CFString, kCFBooleanTrue) == .success else {
+                        busy = false
+                        reject(request, "owned_actor_activation_refused")
+                        return
+                    }
+                }
+            } else { NSApplication.shared.activate(ignoringOtherApps: true) }
             awaitForeground(request, pid: ProcessInfo.processInfo.processIdentifier,
                 deadline: DispatchTime.now().uptimeNanoseconds + 1_000_000_000, restoring: false)
         case "restore":

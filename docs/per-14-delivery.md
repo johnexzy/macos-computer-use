@@ -23,7 +23,9 @@ node test/workflow/pilot.mjs
 node test/workflow/pilot.mjs --stage main
 ```
 
-Run the live commands serially. The user-active check deliberately puts its two test apps in the foreground at defined workflow milestones. It yields if the user changes apps and only attempts to restore the original application while a test actor remains in front. Confirmation comes from the independent foreground monitor. The check uses public AppKit calls, where the check and activation can race.
+Run the live commands serially. The user-active check deliberately puts its two test apps in the foreground at defined workflow milestones. The initial handoff can activate only the
+owned actor through Accessibility. Subsequent switches use cooperating test
+apps. The check yields if the user changes apps and only attempts to restore the original application while a test actor remains in front. Confirmation comes from the independent foreground monitor. The check uses public AppKit calls, where the check and activation can race.
 
 The session smoke drives the actual MCP lanes with a deterministic test process. The loopback smoke drives the installed Claude CLI with a dummy key and local Messages API. Both exercise session handling with zero provider inference. Their results establish harness behavior and fixture conformance. Success rate, latency and token cost for an actual agent require the pilot.
 
