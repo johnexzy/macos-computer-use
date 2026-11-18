@@ -138,3 +138,24 @@ Full and selected snapshots may intentionally miss the between-turn toast while
 still completing the field/dialog workflow. The runner exits nonzero on blocked
 setup, unknown evidence, false toast claims, unsafe foreground, workflow failure,
 or retained-lane failure. No live result is implied by compilation/pure tests.
+
+## Observed fixture results
+
+All nine trials completed the underlying edit and delayed confirmation. The
+transient toast was caught in all three retained trials. Full and selective
+reads each missed all three toasts between turns. No lane claimed a false toast
+or activated the target fixture.
+
+| Lane | Workflow completed | Toasts caught | Total MCP response bytes | Median observation latency | Median helper CPU |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Full | 3/3 | 0/3 | 419,411 | 35.9 ms | 40 ms |
+| Selective | 3/3 | 0/3 | 124,467 | 30.7 ms | 40 ms |
+| Selective + history | 3/3 | 3/3 | 147,255 | 16.3 ms | 50 ms |
+
+Selective history used about 65% fewer response bytes than full reads on this
+fixture, including setup and MCP response duplication. The history lane performed
+20 background samples. Its latency and resource measurements have three trials
+per lane. The helper CPU counter has 10 ms resolution. The
+[verification record](evidence/per-12-selective-observation-2026-11-18.json)
+includes byte counts, RSS endpoints and artifact hashes. Provider tokens and cost
+remain unmeasured.
