@@ -51,7 +51,7 @@ async function run() {
 
   stage = "peer focus";
   await priorFixture.call("configure", { frame: { x: 710, y: 320, width: 440, height: 230 } });
-  await priorFixture.call("focus");
+  await priorFixture.call("focus", { expectedForegroundPID: peer.foregroundPID });
   await until(() => priorFixture.call("state"), (state) => state.foregroundPID === peer.pid && primary(state).keyWindow, "prior fixture focus");
   const registered = () => tool(session, "targets", { bundleId: "com.johnoba.cua.fixture" })
     .then((receipt) => body(receipt, "targets").targets.some(({ key }) => key.pid === target.pid && key.windowId === target.windowId));
@@ -111,8 +111,7 @@ async function run() {
   }, click(button, "refused-suffix")]);
   await until(() => targetFixture.call("state"),
     (state) => primary(state).pressCount === primary(afterClick).pressCount + 1, "expected first dispatch");
-  await targetFixture.call("yield_focus", { pid: peer.pid });
-  await priorFixture.call("focus");
+  await priorFixture.call("focus", { expectedForegroundPID: target.pid });
   await until(() => priorFixture.call("state"), (state) => state.foregroundPID === peer.pid, "interfering application switch");
   const interrupted = await later;
   assert.equal(interrupted.steps[0].delivery, "dispatched", resultSummary(interrupted));
@@ -129,8 +128,7 @@ async function run() {
   assert.equal(afterSwitchPeer.mouseDownCount, primary(peer).mouseDownCount);
 
   stage = "exact focused key";
-  await priorFixture.call("yield_focus", { pid: target.pid });
-  await targetFixture.call("focus", { control: "first" });
+  await targetFixture.call("focus", { control: "first", expectedForegroundPID: peer.pid });
   const beforeKey = await until(() => targetFixture.call("state"),
     (state) => state.foregroundPID === target.pid && primary(state).keyWindow, "target key focus");
   const keyObservation = await observe();

@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Foundation
 
 enum PressEffect: String {
@@ -308,22 +309,22 @@ final class FixtureController: NSObject, NSApplicationDelegate {
                 revision += 1
                 reset()
             case "state": break
-            case "yield_focus":
-                guard let pid = request["pid"] as? Int32, pid > 0,
-                      let peer = NSRunningApplication(processIdentifier: pid),
-                      peer.bundleIdentifier == Bundle.main.bundleIdentifier else {
-                    throw FixtureError("focus handoff requires a peer fixture process")
-                }
-                if #available(macOS 14, *) { NSApplication.shared.yieldActivation(to: peer) }
             case "focus":
                 let key = request["window"] as? String ?? "primary"
                 guard let record = windows[key] else { throw FixtureError("unknown window: \(key)") }
-                if #available(macOS 14, *) { NSApplication.shared.activate() }
-                else { NSApplication.shared.activate(ignoringOtherApps: true) }
+                if let expected = request["expectedForegroundPID"] as? Int32,
+                   NSWorkspace.shared.frontmostApplication?.processIdentifier != expected {
+                    throw FixtureError("foreground changed before fixture activation")
+                }
                 record.window.makeKeyAndOrderFront(nil)
                 if let control = request["control"] as? String {
                     guard let field = record.fields[control] else { throw FixtureError("unknown control: \(control)") }
                     record.window.makeFirstResponder(field.field)
+                }
+                let app = AXUIElementCreateApplication(ProcessInfo.processInfo.processIdentifier)
+                guard AXIsProcessTrusted(),
+                      AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue) == .success else {
+                    throw FixtureError("owned fixture activation was refused")
                 }
             case "configure", "reorder", "recreate", "close_reopen", "hide_window":
                 let key = request["window"] as? String ?? "primary"
