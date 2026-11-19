@@ -202,12 +202,18 @@ record!(Rect {
     height: f64
 });
 record!(Point { x: f64, y: f64 });
-record!(Target {
-    key: TargetKey,
-    bundle_id: String,
-    title: String,
-    bounds: Rect
-});
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Target {
+    pub key: TargetKey,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+    pub title: String,
+    pub bounds: Rect,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_name: Option<String>,
+}
 record!(TargetsRequest { bundle_id: Option<String> });
 record!(TargetsResult { targets: Vec<Target>, truncated: bool });
 record!(CollectionInterval {
@@ -1584,7 +1590,15 @@ impl Frame {
                         require(v.targets.len() <= MAX_TARGETS, "too many targets")?;
                         for t in &v.targets {
                             target(&t.key)?;
-                            id(&t.bundle_id)?;
+                            if let Some(bundle_id) = &t.bundle_id {
+                                id(bundle_id)?;
+                            }
+                            if let Some(owner_name) = &t.owner_name {
+                                require(
+                                    !owner_name.trim().is_empty() && owner_name.len() <= 1024,
+                                    "invalid target owner name",
+                                )?;
+                            }
                             rect(&t.bounds)?;
                         }
                     }

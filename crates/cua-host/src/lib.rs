@@ -286,7 +286,7 @@ impl Host {
     }
 
     #[tool(
-        description = "List bounded exact process/window targets, optionally filtering by bundle ID."
+        description = "List bounded exact process/window targets. Unfiltered results include verified window owners without a bundle ID. The optional bundle ID filter matches only that exact ID."
     )]
     async fn targets(
         &self,
@@ -304,7 +304,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Observe one exact window. Optional axSelectors reads matching AX controls and reports query coverage separately from window coverage. Optional eventHistory retains bounded selected-state changes between observations; historical controls have no actionable refs. Values, screenshots, and Vision OCR are opt-in. cropWindow uses window-local points. Partial coverage cannot prove absence; history can be stale or overrun."
+        description = "Observe one exact window. For verified owners without a bundle ID, request screenshot or OCR for a read-only observation with no actionable AX refs. Optional axSelectors reads matching AX controls and reports query coverage separately from window coverage. Optional eventHistory retains bounded selected-state changes between observations; historical controls have no actionable refs. Values, screenshots, and Vision OCR are opt-in. cropWindow uses window-local points. Partial coverage cannot prove absence; history can be stale or overrun."
     )]
     async fn observe(
         &self,

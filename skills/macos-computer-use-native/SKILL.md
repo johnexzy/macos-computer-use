@@ -10,9 +10,10 @@ Use the connected server's `capabilities`, `targets`, `observe`, `act`, and `wai
 ## Find and observe
 
 1. Check `capabilities` for available permissions, actions, and the installed execution mode.
-2. Use `targets`, optionally with `bundleId`, to find the intended open window. Match the app and document title, then pass the returned `key` as `target` with its exact `pid` and `windowId`. Resolve ambiguity before input.
+2. Use `targets`, optionally with `bundleId`, to find the intended open window. If filtering by bundle ID misses an open app, call `targets` without the filter. A launcher child process may own the window without its own bundle ID. Match the available `ownerName` and window title, then pass the returned `key` as `target` with its exact `pid` and `windowId`. Resolve any target ambiguity before observing or acting.
 3. Observe that target close to the action. Use `includeValues: true` when you need to read or verify field values. Use `axSelectors` for known controls when a narrower read suffices. Partial coverage, an omitted value, or `enabled: null` gives incomplete evidence.
 4. Use `includeOcr: true` for visible text that Accessibility omits, such as PDF content. Request `includeScreenshot: true` when layout or image evidence is needed. The live preview and pointer are operator feedback. Use tool results as task evidence.
+5. For windows without a bundle ID, use window-only screenshot or OCR with `observe`. These windows have unavailable AX coverage and no actionable references. Treat their observations as read-only.
 
 ## Act and verify
 

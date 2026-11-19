@@ -86,7 +86,19 @@ public extension AXReading {
 public protocol WindowCatalog: Sendable {
     func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult
     func window(_ key: TargetKey, context: OperationContext) throws -> Target
+    func windowSnapshot(_ key: TargetKey, context: OperationContext) throws -> WindowSnapshot
     func processWindows(pid: UInt32, context: OperationContext) throws -> [Target]
+}
+
+public struct WindowSnapshot: Sendable {
+    public let target: Target
+    let generation: ProcessGeneration?
+}
+
+public extension WindowCatalog {
+    func windowSnapshot(_ key: TargetKey, context: OperationContext) throws -> WindowSnapshot {
+        WindowSnapshot(target: try window(key, context: context), generation: nil)
+    }
 }
 
 public struct NativeObservation: Sendable {
@@ -210,9 +222,14 @@ public struct SemanticAXObserver: Sendable {
     public init(backend: any AXReading, catalog: any WindowCatalog) { self.backend = backend; self.catalog = catalog }
 
     public func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation {
-        guard !params.includeScreenshot && !params.includeOcr else { throw NativeFailure(.unsupported, "semantic observer only accepts AX requests") }
-        let started = milliseconds()
         let target = try catalog.window(params.target, context: context)
+        return try observe(params: params, observationId: observationId, target: target, context: context)
+    }
+
+    func observe(params: ObserveRequest, observationId: String, target: Target, context: OperationContext) throws -> NativeObservation {
+        guard !params.includeScreenshot && !params.includeOcr else { throw NativeFailure(.unsupported, "semantic observer only accepts AX requests") }
+        guard target.bundleId != nil else { throw NativeFailure(.unsupported, "unbundled windows support visual reads only") }
+        let started = milliseconds()
         let axStarted = milliseconds()
         let application = try backend.application(pid: target.key.pid, context: context)
         let window = try associatedWindow(target: target, application: application, backend: backend, catalog: catalog, context: context)

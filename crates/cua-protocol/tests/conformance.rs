@@ -37,6 +37,19 @@ fn shared_valid_fixtures_decode_and_round_trip() {
 }
 
 #[test]
+fn bundled_and_unbundled_targets_omit_absent_metadata() {
+    let frame = fixture("targets-response");
+    let encoded: serde_json::Value = serde_json::from_slice(&encode_line(&frame).unwrap()).unwrap();
+    let targets = encoded["message"]["body"]["data"]["targets"]
+        .as_array()
+        .unwrap();
+    assert_eq!(targets[0]["bundleId"], "com.apple.TextEdit");
+    assert!(targets[0].get("ownerName").is_none());
+    assert_eq!(targets[1]["ownerName"], "Window Fixture");
+    assert!(targets[1].get("bundleId").is_none());
+}
+
+#[test]
 fn absent_visual_options_keep_the_legacy_ax_wire_shape() {
     let old = fixture("observe-request");
     let encoded: serde_json::Value = serde_json::from_slice(&encode_line(&old).unwrap()).unwrap();

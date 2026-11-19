@@ -496,7 +496,11 @@ extension Frame {
                 try require(value.targets.count <= Limits.maxTargets, "too many targets")
                 for target in value.targets {
                     try validTarget(target.key)
-                    try identifier(target.bundleId)
+                    if let bundleId = target.bundleId { try identifier(bundleId) }
+                    if let ownerName = target.ownerName {
+                        try require(!ownerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    && ownerName.utf8.count <= 1024, "invalid target owner name")
+                    }
                     try validRect(target.bounds)
                 }
             case .observe(let value): try value.validate()

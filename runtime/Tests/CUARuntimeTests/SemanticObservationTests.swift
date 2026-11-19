@@ -74,6 +74,7 @@ private final class SemanticBackend: AXReading, @unchecked Sendable {
 
 private final class SemanticCatalog: WindowCatalog, @unchecked Sendable {
     var records: [Target]
+    var generation: ProcessGeneration?
     var didReadWindow: (() -> Void)?
     init(_ records: [Target]) { self.records = records }
     func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult {
@@ -87,6 +88,9 @@ private final class SemanticCatalog: WindowCatalog, @unchecked Sendable {
     }
     func processWindows(pid: UInt32, context: OperationContext) throws -> [Target] {
         try context.check(); return records.filter { $0.key.pid == pid }
+    }
+    func windowSnapshot(_ key: TargetKey, context: OperationContext) throws -> WindowSnapshot {
+        WindowSnapshot(target: try window(key, context: context), generation: generation)
     }
 }
 
@@ -292,6 +296,28 @@ final class SemanticObservationTests: XCTestCase {
         XCTAssertEqual(result.observation.visual?.ocr?.status, .unavailable)
         XCTAssertNil(result.observation.visual?.frame)
         XCTAssertNil(result.observation.screenshot)
+    }
+
+    func testUnbundledProcessReplacementDiscardsPixelsAndOCR() throws {
+        let fixture = SemanticFixture()
+        let catalog = fixture.catalog
+        catalog.records = [Target(key: fixture.target.key, bundleId: nil, title: fixture.target.title,
+                                  bounds: fixture.target.bounds, ownerName: "Unbundled fixture")]
+        let executable = UUID()
+        catalog.generation = ProcessGeneration(startAbstime: 1, executableUUID: executable)
+        let capture = TestVisualCapture { target, _, _, _ in
+            let frame = try blankFrame(target)
+            catalog.generation = ProcessGeneration(startAbstime: 2, executableUUID: executable)
+            return frame
+        }
+        let system = MacOSSystem(backend: fixture.backend, catalog: catalog, visual: capture, isAXTrusted: { true })
+        let result = try system.observe(params: ObserveRequest(target: fixture.target.key, includeScreenshot: true,
+            includeValues: false, includeOcr: true), observationId: "process-reuse", context: OperationContext(budgetMs: 5000))
+        XCTAssertEqual(result.observation.accessibility, .unavailable)
+        XCTAssertEqual(result.observation.visual?.captureStatus, .unavailable)
+        XCTAssertEqual(result.observation.visual?.ocr?.status, .unavailable)
+        XCTAssertNil(result.observation.screenshot)
+        XCTAssertNil(result.handle)
     }
 
     func testUnavailableReadKeepsReadableSiblingsWithoutProvingAbsence() throws {

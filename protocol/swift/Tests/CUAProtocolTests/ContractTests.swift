@@ -24,6 +24,20 @@ final class ContractTests: XCTestCase {
             XCTAssertEqual(try Frame.decodeLine(encoded), frame, path.lastPathComponent)
         }
     }
+    func testBundledAndUnbundledTargetsOmitAbsentMetadata() throws {
+        let frame = try fixture("targets-response")
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: frame.encodeLine()) as? [String: Any])
+        let message = try XCTUnwrap(object["message"] as? [String: Any])
+        let body = try XCTUnwrap(message["body"] as? [String: Any])
+        let data = try XCTUnwrap(body["data"] as? [String: Any])
+        let targets = try XCTUnwrap(data["targets"] as? [[String: Any]])
+        XCTAssertEqual(targets.count, 2)
+        XCTAssertEqual(targets[0]["bundleId"] as? String, "com.apple.TextEdit")
+        XCTAssertNil(targets[0]["ownerName"])
+        XCTAssertEqual(targets[1]["ownerName"] as? String, "Window Fixture")
+        XCTAssertNil(targets[1]["bundleId"])
+    }
+
     func testAbsentVisualOptionsKeepTheLegacyAXWireShape() throws {
         let request = try fixture("observe-request")
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: request.encodeLine()) as? [String: Any])

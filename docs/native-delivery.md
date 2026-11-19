@@ -43,6 +43,10 @@ Application identity and [Apple notarization](https://developer.apple.com/docume
 
 The deployment target remains **macOS 13.0**, on **Apple Silicon and Intel**.
 Semantic AX observations/actions work within the app's advertised capabilities.
+Unfiltered `targets` also lists visible windows owned by verified live processes
+without a bundle ID. Match the owner name and window title, then use the returned
+PID and window ID for read-only screenshot and OCR. These targets have unavailable
+AX coverage and no actionable references.
 Screenshot/OCR capture requires macOS 14+ and Screen Recording permission; on
 macOS 13 the visual channel reports `unsupported` while AX can remain available.
 The build produces and checks both `arm64` and `x86_64` slices in each executable.

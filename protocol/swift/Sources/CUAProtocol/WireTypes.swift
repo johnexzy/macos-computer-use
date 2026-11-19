@@ -398,31 +398,35 @@ public struct Point: Codable, Equatable, Sendable {
 
 public struct Target: Codable, Equatable, Sendable {
     public let key: TargetKey
-    public let bundleId: String
+    public let bundleId: String?
     public let title: String
     public let bounds: Rect
-    public init(key: TargetKey, bundleId: String, title: String, bounds: Rect) {
+    public let ownerName: String?
+    public init(key: TargetKey, bundleId: String?, title: String, bounds: Rect, ownerName: String? = nil) {
         self.key = key
         self.bundleId = bundleId
         self.title = title
         self.bounds = bounds
+        self.ownerName = ownerName
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case key, bundleId, title, bounds
+        case key, bundleId, title, bounds, ownerName
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
         key = try c.decode(TargetKey.self, forKey: .key)
-        bundleId = try c.decode(String.self, forKey: .bundleId)
+        bundleId = try c.decodeIfPresent(String.self, forKey: .bundleId)
         title = try c.decode(String.self, forKey: .title)
         bounds = try c.decode(Rect.self, forKey: .bounds)
+        ownerName = try c.decodeIfPresent(String.self, forKey: .ownerName)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(key, forKey: .key)
-        try c.encode(bundleId, forKey: .bundleId)
+        try c.encodeIfPresent(bundleId, forKey: .bundleId)
         try c.encode(title, forKey: .title)
         try c.encode(bounds, forKey: .bounds)
+        try c.encodeIfPresent(ownerName, forKey: .ownerName)
     }
 }
 

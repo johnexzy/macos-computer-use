@@ -107,7 +107,7 @@ sends no input; mixed sequences preserve the same boundary before later mutation
 | Method | Contract |
 | --- | --- |
 | `capabilities` | Read-only permission booleans, installed mode, and actual supported action kinds. It does not request permission. |
-| `targets` | Optionally filter by bundle ID; return exact window/process keys, titles, and logical bounds. `truncated` makes the bound visible. |
+| `targets` | Return exact window/process keys, titles, logical bounds, and bundle ID and owner name when available. A bundle ID filter matches only that exact ID. `truncated` makes the bound visible. |
 | `observe` | Exact target; explicit value, screenshot, and OCR inclusion flags; optional exact `axSelectors` and `eventHistory` cursor. Visual collection accepts a window-local crop and image dimension limit. |
 | `act` | Installed grant, observation, exact target, and 1–16 ordered steps. No arbitrary scripts or execution-mode override. |
 | `waitFor` | Evaluate a typed condition for the same exact target within the request deadline. It never mutates. |
@@ -192,9 +192,17 @@ boundary and does not query a Mac.
 The current runtime associates AX windows using unique PID, exact logical bounds,
 and titles when available, rejecting ties in AX candidates and CG siblings. Public
 AX provides no OS-attested `CGWindowID` association or atomic snapshot guarantee.
-Catalog calls use one running-application bundle map for every CG row; missing
-metadata cannot silently remove a process sibling during association. Exact CG
-absence is distinguished from unavailable process metadata.
+Catalog calls verify the live owner of each CG window. Unfiltered discovery can
+return a window with no bundle ID, including windows owned by launcher child
+processes. Such a target uses the actual owner PID and CG window ID, with
+`ownerName` present when available. A bundle ID filter matches only the actual
+owner's bundle ID. Window association retains all of the owner's CG siblings,
+and exact CG absence remains distinct from unavailable process identity.
+
+For a window without a bundle ID, `observe` reports unavailable AX coverage and
+returns no actionable references. Screenshot and OCR can still use a unique
+ScreenCaptureKit match on the exact window ID and owner PID. Capture checks the
+live process generation and window geometry before returning any visual evidence.
 Each reference retains an actual object plus observed role, subrole and raw identifier;
 live `CFEqual` tree/window membership, ownership and identity metadata are checked
 before use. Changed labels, values, or control positions do not remap the reference.
