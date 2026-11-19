@@ -1,0 +1,292 @@
+{
+  "buildRevision": "f624059d6ead0f60d93626ffd4e6aac9123ca8c9",
+  "testedHost": {
+    "architecture": "arm64",
+    "macOS": "27.2.1",
+    "x86_64Launch": "Rosetta"
+  },
+  "package": {
+    "filename": "cua-native-0.1.0-macos-universal.tar.gz",
+    "sha256": "fe3b30e399d5be884d84e97c5f59fb62a349f7c664cfccc85f9f4a97657ea8f3",
+    "installedSmoke": {
+      "arm64": {
+        "version": "cua-host 0.1.0",
+        "architecture": "arm64",
+        "sourceRevision": "f624059d6ead0f60d93626ffd4e6aac9123ca8c9",
+        "runtimeDirectPreflight": true,
+        "checks": [
+          {
+            "termination": "EOF",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "termination": "SIGINT",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "termination": "SIGTERM",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "symlinkLaunch": true,
+            "termination": "EOF",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          }
+        ],
+        "missingHelperRejected": true,
+        "minimalPath": true,
+        "pathsWithSpaces": true,
+        "mutations": 0,
+        "captures": 0,
+        "permissionRequests": 0
+      },
+      "x86_64": {
+        "version": "cua-host 0.1.0",
+        "architecture": "x86_64",
+        "sourceRevision": "f624059d6ead0f60d93626ffd4e6aac9123ca8c9",
+        "runtimeDirectPreflight": true,
+        "checks": [
+          {
+            "termination": "EOF",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "termination": "SIGINT",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "termination": "SIGTERM",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "symlinkLaunch": true,
+            "termination": "EOF",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          }
+        ],
+        "missingHelperRejected": true,
+        "minimalPath": true,
+        "pathsWithSpaces": true,
+        "mutations": 0,
+        "captures": 0,
+        "permissionRequests": 0
+      }
+    }
+  },
+  "automatedPassed": {
+    "rust": 45,
+    "swiftRuntime": 157,
+    "swiftProtocol": 16,
+    "mcpProcess": 13,
+    "evaluationHarness": 73
+  },
+  "foregroundFixture": {
+    "sourceRevision": "320eb90",
+    "runs": [
+      {
+        "authorityRefused": true,
+        "clickVerified": true,
+        "exactPriorFocusRestored": true,
+        "staleLayoutRefused": true,
+        "switchedAppStoppedSuffix": true,
+        "keyDeliveryObserved": true,
+        "wrongTargetInputs": 0
+      },
+      {
+        "authorityRefused": true,
+        "clickVerified": true,
+        "exactPriorFocusRestored": true,
+        "staleLayoutRefused": true,
+        "switchedAppStoppedSuffix": true,
+        "keyDeliveryObserved": true,
+        "wrongTargetInputs": 0
+      },
+      {
+        "authorityRefused": true,
+        "clickVerified": true,
+        "exactPriorFocusRestored": true,
+        "staleLayoutRefused": true,
+        "switchedAppStoppedSuffix": true,
+        "keyDeliveryObserved": true,
+        "wrongTargetInputs": 0
+      }
+    ]
+  },
+  "visualFixture": {
+    "result": {
+      "captureStatus": "captured",
+      "full": [
+        880,
+        460
+      ],
+      "cropped": [
+        512,
+        246
+      ],
+      "portrait": [
+        281,
+        360
+      ],
+      "substringMappedInsideFixtureField": true,
+      "coordinateClicksRefused": 2,
+      "fixtureActivations": 0
+    }
+  },
+  "selectiveSetupAttempt": {
+    "sourceRevision": "460e8778cf48584cfba59c8b5b932b2a2349287c",
+    "lockedSessionObserved": true,
+    "assigned": 9,
+    "setupBlocked": 9
+  },
+  "paidModelCalls": 0,
+  "selectiveLive": {
+    "sourceRevision": "5e970d5ad499018aa2c8a1f0870bf27ce209ae95",
+    "assigned": 9,
+    "workflowCompleted": 9,
+    "retainedToastsCaught": 3,
+    "retainedResponseBytes": 147255,
+    "fullResponseBytes": 419411
+  },
+  "deliveryComposition": {
+    "sourceRevision": "d1f1960d5845930cc5ff6ff446040638f8610714",
+    "assigned": 12,
+    "passed": 12,
+    "failed": 0,
+    "setupBlocked": 0,
+    "cleanupErrors": 0,
+    "unrelatedForegroundChanges": 0,
+    "targetActivationFailures": 0,
+    "latencyMs": {
+      "samples": 12,
+      "p50": 182.72208299999966,
+      "p95": 1161.0430840000008
+    }
+  },
+  "deliveryCleanFriction": {
+    "sourceRevision": "d1f1960d5845930cc5ff6ff446040638f8610714",
+    "assigned": 12,
+    "outcomes": {
+      "passed": 12
+    }
+  },
+  "deliveryUserActiveRepeat": {
+    "sourceRevision": "d1f1960d5845930cc5ff6ff446040638f8610714",
+    "assigned": 6,
+    "outcomes": {
+      "setup_blocked": 6
+    },
+    "setupEvidence": "System notification app foreground with unavailable launch identity. Actor setup refused before any task action."
+  },
+  "deliveryUserActiveFollowup": {
+    "sourceRevision": "5e2aab1f8b71f7c7142b97734f732502baf53c62",
+    "cleanCheckout": true,
+    "mode": "oracle_informed_scripted_readiness",
+    "assigned": 6,
+    "outcomes": {
+      "passed": 6
+    },
+    "confirmedActorTransitions": 18,
+    "wrongTargetAttempts": 0,
+    "unnecessaryWrites": 0,
+    "targetActivations": 0,
+    "cleanupCompleted": 6,
+    "priorForegroundObservedAtEnd": 6,
+    "modelCalls": 0
+  },
+  "deliveryTimedUserActiveSession": {
+    "sourceRevision": "4dacc0e",
+    "mode": "offline_fake_cli",
+    "assigned": 3,
+    "passed": 3,
+    "scheduledOffsetsMs": [750, 2000],
+    "confirmedOffsetsMsRounded": {
+      "legacy": [769, 2017],
+      "single": [773, 2021],
+      "composed": [765, 2020]
+    },
+    "confirmedActorTransitions": 9,
+    "targetActivations": 0,
+    "cleanupCompleted": 3,
+    "priorForegroundObservedAtEnd": 3,
+    "providerCalls": 0,
+    "reportSha256": "e88c6878578394050fa692f6428c1ca4894843ece4c22b796dda33b3f641c544"
+  },
+  "acceptedEarlierUserActive": {
+    "sourceRevision": "a82e1dd7fcdcbbd1410edf7d47e112622fa71086",
+    "assigned": 6,
+    "byLane": {
+      "legacy": {
+        "passed": 2,
+        "assigned": 2,
+        "medianScriptedTaskMs": 7687.31
+      },
+      "single": {
+        "passed": 2,
+        "assigned": 2,
+        "medianScriptedTaskMs": 1390.56
+      },
+      "composed": {
+        "passed": 2,
+        "assigned": 2,
+        "medianScriptedTaskMs": 1007.11
+      }
+    },
+    "observedActorTransitions": 18
+  }
+}

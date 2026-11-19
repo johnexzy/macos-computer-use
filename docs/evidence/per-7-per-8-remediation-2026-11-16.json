@@ -1,0 +1,471 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-11-16T11:24:21Z",
+  "milestones": [
+    "PER-7",
+    "PER-8"
+  ],
+  "status": {
+    "remediationConformanceRuns": "completed",
+    "milestoneAcceptance": "incomplete",
+    "postFixModelRevalidation": "on_hold_by_user",
+    "newBenchmarkModelCalls": 0
+  },
+  "scope": "Sanitized aggregate evidence for local unpaid remediation checks. Scripted conformance does not establish autonomous task reliability, a model improvement, or SOTA.",
+  "source": {
+    "revision": "9a539e427d3b054d87ed6fb858c5339a5a53b6d6",
+    "tree": "00b0c6a39af7cb633d38d341ff02b8e5eb4b93b4",
+    "acceptedCampaignReportsDirty": false,
+    "acceptedCampaignSourceAndInstalledBinaryHashesAgree": true,
+    "binarySha256": {
+      ".artifacts/runtime-install/cua-host": "73eab32790ae4bf06e14e67dffbd8ec42d5854e428e2195859ef88275736e6bd",
+      ".artifacts/runtime-install/cua-runtime": "01baf579186b914af91695882caeddf4501a4af3fa568dbf2bd57f39e7726d51",
+      "native_helper": "d9e29751912cf2ec79647b25a87095de1d2aab4fb8780196631ce282cf4c8466",
+      "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2",
+      ".artifacts/foreground-monitor": "940bb3211b4f22af1efbbb971a11430261b9c6dc3768448b4bee977ee45ad791"
+    },
+    "sourceFileSha256": {
+      "test/realworld/dataset.mjs": "bcbe19d9e5527a53aaa6706f9193d7b161252477814e7083ae9f4a983de8e286",
+      "test/realworld/workspace.mjs": "3aaba0fa0eb5147184f0e022df03b30263a62a1ad73143534cc072f2154417c9",
+      "test/realworld/oracle.mjs": "1e9e1102737819e146191a06f87a797b291a7d6da66ba33aa4911726e7e283f7",
+      "test/realworld/controller.mjs": "08b853b2c72f51e52905a8a08a379f17cce77f12ec44a46b777c031f39770055",
+      "test/realworld/run.mjs": "c526edab9c883f379aac85edbcaabd661d4cea867a9899244eea4492c8a1af00",
+      "test/evaluation/model.mjs": "c198e1b3708de184c20b21540772ed1d98b46b8fecc093bc9910f20dc08612c8",
+      "test/evaluation/adapters.mjs": "887c4145c81a18a9f5a63ccb6a6e23a4ed6429383af7c33446ce8d5a53bbe7f4",
+      "test/runtime/support/foreground-monitor.swift": "062e00fdd1214fef2665ba1c7d31c29a9486a9a6bff64acbcf70afd97ad9bb96",
+      "test/evaluation/run.mjs": "b210842c7ca537e115620e42e30e3ba7f2280daff704474e9709a065158d9895",
+      "test/evaluation/metrics.mjs": "a26bff9821bd8a2b9c2d3f3524001e792827d54f36f5cad6724efbd4398ca035",
+      "test/runtime/support/foreground-monitor.mjs": "c1f339240f76e650c0c110249d8918c241d6e16e6a226d300656668adc14a5a2",
+      "crates/cua-client/src/coordinator.rs": "eb562ed1b8fd3cd993a612a67b0088e05a052cb64b626fc72abb337859f67859",
+      "runtime/Sources/CUARuntime/AXAttributeResults.swift": "2e036fc5dd52e4b43b9caf32ca0c5d3a4e65e2b3a9cb244e1ce92a884da11c34",
+      "runtime/Sources/CUARuntime/BackgroundActions.swift": "f09c19280c4576ace2da9a76e459810d3e2808902edcc7d45e0218d1b989bf5d",
+      "runtime/Sources/CUARuntime/SemanticAX.swift": "893cb1bfa6159aed7c6ead6641345363748b911f4d7fc60e1c460791b2159300",
+      "test/runtime/composition-live.mjs": "6a50d4775acd8cbbce7883cd9ace2a7ca4c633d8172f2643e62f14ba6fe1865d"
+    },
+    "sourceFilesMatchRecordedCommit": true,
+    "legacySourceRevision": "f1ef2a023e8bedfd340d4832f7b3d94b991d3b91",
+    "checkLogProvenanceLimit": "Check logs record outcomes without embedding a git revision; accepted campaign reports independently record clean source and installed binary hashes."
+  },
+  "checks": {
+    "executedTestCases": 266,
+    "passed": 266,
+    "failed": 0,
+    "skipped": 0,
+    "groups": [
+      {
+        "name": "Rust workspace",
+        "passed": 40,
+        "breakdown": {
+          "clientProcess": 25,
+          "host": 2,
+          "protocol": 13
+        },
+        "log": ".artifacts/per78-accepted-rust.log"
+      },
+      {
+        "name": "Swift runtime",
+        "passed": 118,
+        "log": ".artifacts/per78-final-swift.log"
+      },
+      {
+        "name": "Swift protocol",
+        "passed": 12,
+        "log": ".artifacts/per78-accepted-swift-protocol.log"
+      },
+      {
+        "name": "Node",
+        "passed": 96,
+        "log": ".artifacts/per78-accepted-node.log"
+      }
+    ],
+    "format": {
+      "command": "cargo fmt --all -- --check",
+      "result": "passed",
+      "verification": "Independently rerun read-only while producing this record; no separate retained log."
+    },
+    "clippy": {
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "result": "passed",
+      "log": ".artifacts/per78-accepted-clippy.log"
+    },
+    "installedReleaseBuild": {
+      "result": "passed",
+      "log": ".artifacts/per78-poll-fixed-build.log"
+    },
+    "typescriptBuild": {
+      "command": "npm run build:ts",
+      "result": "passed",
+      "log": ".artifacts/per78-final-typescript.log"
+    },
+    "readOnlyNativeProcessSmoke": {
+      "result": "passed",
+      "mutations": 0,
+      "permissionRequests": 0,
+      "log": ".artifacts/per78-final-process-smoke.log"
+    },
+    "counting": "Executed test cases across suites; scripted/live trials and process-smoke checks are separate from the 266 total."
+  },
+  "acceptedCampaigns": {
+    "nativeComposition": {
+      "report": ".artifacts/per78-fixed-native-v4/report.json",
+      "trace": ".artifacts/per78-fixed-native-v4/trace.jsonl",
+      "log": ".artifacts/per78-fixed-native-v4.log",
+      "startedAt": "2026-11-16T11:08:40.675Z",
+      "finishedAt": "2026-11-16T11:09:11.709Z",
+      "repetitions": 3,
+      "caseCount": 12,
+      "summary": {
+        "assigned": 36,
+        "passed": 36,
+        "failed": 0,
+        "setupBlocked": 0,
+        "cleanupErrors": 0,
+        "targetActivationFailures": 0
+      },
+      "foreground": {
+        "episodeCount": 36,
+        "availableThroughFinalStop": 36,
+        "untruncated": 36,
+        "controlledTargetActivations": 0
+      },
+      "unrelatedForegroundChanges": 1,
+      "coverage": "Mixed sequences, stopping/unsent suffixes, presence/absence/privacy/feedback, and three gated helper-death phases."
+    },
+    "matchedScriptedFixture": {
+      "report": ".artifacts/per78-fixed-scripted-v2/report.json",
+      "trace": ".artifacts/per78-fixed-scripted-v2/trace.jsonl",
+      "log": ".artifacts/per78-fixed-scripted-v2.log",
+      "startedAt": "2026-11-16T11:09:11.787Z",
+      "finishedAt": "2026-11-16T11:10:45.791Z",
+      "repetitions": 3,
+      "caseCount": 9,
+      "policyVersion": 2,
+      "allLanes": {
+        "assigned": 81,
+        "passed": 75,
+        "failed": 6,
+        "unknown": 0,
+        "setupBlocked": 0,
+        "strictCompletions": 54,
+        "correctRefusals": 12,
+        "correctNoncompletions": 9,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 6,
+        "falseCompletionClaims": 0,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "blocked",
+        "targetActivationFailures": 0,
+        "unknownForegroundEvidence": 0,
+        "unrelatedForegroundSwitches": 2
+      },
+      "candidateLanes": {
+        "assigned": 54,
+        "passed": 54,
+        "failed": 0,
+        "unknown": 0,
+        "setupBlocked": 0,
+        "strictCompletions": 36,
+        "correctRefusals": 12,
+        "correctNoncompletions": 6,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 0,
+        "falseCompletionClaims": 0,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "passed",
+        "targetActivationFailures": 0,
+        "unknownForegroundEvidence": 0,
+        "unrelatedForegroundSwitches": 2
+      },
+      "byLane": {
+        "legacy": {
+          "assigned": 27,
+          "passed": 21,
+          "failed": 6,
+          "unknown": 0,
+          "setupBlocked": 0,
+          "strictCompletions": 18,
+          "correctRefusals": 0,
+          "correctNoncompletions": 3,
+          "falseConfirmations": 0,
+          "unknownConfirmations": 0,
+          "wrongTargetDispatches": 6,
+          "falseCompletionClaims": 0,
+          "unknownCompletionClaims": 0,
+          "cleanupErrors": 0,
+          "safetyGate": "blocked",
+          "targetActivationFailures": 0,
+          "unknownForegroundEvidence": 0,
+          "unrelatedForegroundSwitches": 0
+        },
+        "rebuild-single": {
+          "assigned": 27,
+          "passed": 27,
+          "failed": 0,
+          "unknown": 0,
+          "setupBlocked": 0,
+          "strictCompletions": 18,
+          "correctRefusals": 6,
+          "correctNoncompletions": 3,
+          "falseConfirmations": 0,
+          "unknownConfirmations": 0,
+          "wrongTargetDispatches": 0,
+          "falseCompletionClaims": 0,
+          "unknownCompletionClaims": 0,
+          "cleanupErrors": 0,
+          "safetyGate": "passed",
+          "targetActivationFailures": 0,
+          "unknownForegroundEvidence": 0,
+          "unrelatedForegroundSwitches": 1
+        },
+        "rebuild-composed": {
+          "assigned": 27,
+          "passed": 27,
+          "failed": 0,
+          "unknown": 0,
+          "setupBlocked": 0,
+          "strictCompletions": 18,
+          "correctRefusals": 6,
+          "correctNoncompletions": 3,
+          "falseConfirmations": 0,
+          "unknownConfirmations": 0,
+          "wrongTargetDispatches": 0,
+          "falseCompletionClaims": 0,
+          "unknownCompletionClaims": 0,
+          "cleanupErrors": 0,
+          "safetyGate": "passed",
+          "targetActivationFailures": 0,
+          "unknownForegroundEvidence": 0,
+          "unrelatedForegroundSwitches": 1
+        }
+      },
+      "foreground": {
+        "episodeCount": 81,
+        "availableThroughFinalStop": 81,
+        "untruncated": 81,
+        "controlledTargetActivations": 0
+      },
+      "interpretation": "Candidate 54/54 conformance includes 36 strict completions, 12 correct refusals and 6 correct noncompletions. The six legacy wrong-target failures remain in the 81-trial denominator; they do not fail candidate-only safety gates."
+    },
+    "textEditReference": {
+      "report": ".artifacts/per78-textedit-reference-final/report.json",
+      "trace": ".artifacts/per78-textedit-reference-final/trace.jsonl",
+      "startedAt": "2026-11-16T11:17:59.443Z",
+      "finishedAt": "2026-11-16T11:18:17.512Z",
+      "mode": "scripted",
+      "lane": "rebuild-composed",
+      "summary": {
+        "assigned": 3,
+        "passed": 3,
+        "failed": 0,
+        "unknown": 0,
+        "setupBlocked": 0,
+        "strictCompletions": 3,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "passed"
+      },
+      "fileOracle": {
+        "expectedTargets": 18,
+        "targetMatches": 18,
+        "expectedDecoys": 3,
+        "decoyMatches": 3,
+        "postCleanupTargetMatches": 18,
+        "postCleanupDecoyMatches": 3,
+        "unexpectedFiles": 0
+      },
+      "gradedMutationSteps": 36,
+      "foreground": {
+        "episodeCount": 3,
+        "availableThroughFinalStop": 3,
+        "untruncated": 3,
+        "controlledTargetActivations": 0
+      },
+      "allTargetWindowsClosed": true,
+      "decoyReadOnlyPreserved": true,
+      "claimBoundary": "Private-oracle-informed actuator reference. Exact persisted file bytes and protected references passed; no autonomous/model completion or physical disk-write count is claimed."
+    }
+  },
+  "retainedFailedNativeRuns": [
+    {
+      "report": ".artifacts/per78-fixed-native-v2/report.json",
+      "trace": ".artifacts/per78-fixed-native-v2/trace.jsonl",
+      "log": ".artifacts/per78-fixed-native-v2.log",
+      "source": {
+        "revision": "08f32dbf833c9a0585cc9e4bafdf236d26f20faf",
+        "dirty": false,
+        "hostSha256": "bb42ee3e99820b852bfed991f1d0e02d96e6eb660d397a5e43615ec6404c966b",
+        "helperSha256": "e767567c27a3aff6b43541a7c93cfda00cecd43bda6c9320d1cc7eb1fc00f2e6",
+        "fixtureSha256": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2"
+      },
+      "summary": {
+        "assigned": 36,
+        "passed": 29,
+        "failed": 7,
+        "setupBlocked": 0,
+        "cleanupErrors": 0,
+        "targetActivationFailures": 0
+      },
+      "failedCaseCounts": {
+        "element-absence": 3,
+        "presence-waits": 3,
+        "window-absence-hidden": 1
+      },
+      "diagnosis": [
+        "Explicit unsupported AXEnabled was incorrectly counted as an unreadable subtree, preventing complete absence/presence scans.",
+        "A host deadline sent generic cancel and reconciliation could return native cancelled instead of the known deadline cause."
+      ],
+      "remediationCommits": [
+        "eb4baeb55b889816f4c41ff6637ecb9a3db4e478",
+        "3f29ef4d538b91898f9ffa84478d7bf9f9d3a326"
+      ],
+      "disposition": "Preserved as failed evidence; not overwritten, pooled into accepted results, or converted to success."
+    },
+    {
+      "report": ".artifacts/per78-fixed-native-v3/report.json",
+      "trace": ".artifacts/per78-fixed-native-v3/trace.jsonl",
+      "log": ".artifacts/per78-fixed-native-v3.log",
+      "source": {
+        "revision": "3f29ef4d538b91898f9ffa84478d7bf9f9d3a326",
+        "dirty": false,
+        "hostSha256": "73eab32790ae4bf06e14e67dffbd8ec42d5854e428e2195859ef88275736e6bd",
+        "helperSha256": "4318bf45a00b4b4759c92dc30a0cbc5888c71ae4c6efa63b939b6f62c189990f",
+        "fixtureSha256": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2"
+      },
+      "summary": {
+        "assigned": 36,
+        "passed": 35,
+        "failed": 1,
+        "setupBlocked": 0,
+        "cleanupErrors": 0,
+        "targetActivationFailures": 0
+      },
+      "failedCaseCounts": {
+        "wait-timeout-unsent": 1
+      },
+      "diagnosis": "Pure-wait terminal failure near the deadline; a separate diagnostic reproduced AXCannotComplete with 567583ns remaining. Read unavailability was stopping polling before the original budget expired.",
+      "separateDiagnostic": {
+        "report": ".artifacts/per78-native-diagnostic/report.json",
+        "trace": ".artifacts/per78-native-diagnostic/native.jsonl",
+        "axError": -25204,
+        "remainingNanosecondsAtThrow": 567583,
+        "provenance": "Temporary diagnostic reproduction, not an accepted clean-source campaign."
+      },
+      "remediationCommit": "9a539e427d3b054d87ed6fb858c5339a5a53b6d6",
+      "disposition": "Preserved. Narrow read-only polling and partial-observation handling were fixed; no writer or admission-guard replay was added."
+    }
+  ],
+  "supplementalProbes": {
+    "waitStress": {
+      "report": ".artifacts/per78-wait-stress-fixed/report.json",
+      "trace": ".artifacts/per78-wait-stress-fixed/trace.json",
+      "assigned": 30,
+      "passed": 30,
+      "nativeBudgetMs": 500,
+      "verifiedPrefixes": 30,
+      "readOnlyWaitDeadlineStops": 30,
+      "unsentTrailingSteps": 30,
+      "waitReceipt": {
+        "delivery": "not_dispatched",
+        "verification": "mismatch",
+        "reason": "deadlineExceeded"
+      },
+      "provenance": "Ad hoc retained report/trace do not record a source revision, dirty state or binary hashes. Not pooled with accepted campaigns or represented as equivalent provenance."
+    },
+    "controlledActivation": {
+      "report": ".artifacts/per78-controlled-activation-gate/report.json",
+      "trace": ".artifacts/per78-controlled-activation-gate/trace.json",
+      "deliberateExternalIntervention": true,
+      "independentMonitor": {
+        "available": true,
+        "truncated": false,
+        "targetActivations": 1
+      },
+      "fixtureActivationCount": 1,
+      "stopReason": "failed",
+      "remainingSteps": 1,
+      "steps": [
+        {
+          "delivery": "dispatched",
+          "verification": "confirmed",
+          "reason": null
+        },
+        {
+          "delivery": "not_dispatched",
+          "verification": "confirmed",
+          "reason": "nativeFailed"
+        }
+      ],
+      "trailingControlMutationAttempts": 0,
+      "trailingControlAppliedWrites": 0,
+      "interpretation": "Positive refusal gate: independently observed controlled-target activation stops the next mutation while retaining the confirmed prefix and read-only witness.",
+      "provenance": "Ad hoc report/trace lack source and binary provenance; not autonomous evidence or an accepted-campaign success trial."
+    }
+  },
+  "historicalPaidEvidence": {
+    "verificationRecord": "docs/evidence/per-7-per-8-verification-2026-11-16.json",
+    "report": ".artifacts/evaluation-claude-corrected-nov16/report.json",
+    "trace": ".artifacts/evaluation-claude-corrected-nov16/trace.jsonl",
+    "sourceRevision": "be3dca6efe7ca54ecc606eee1918f1fbf1625c04",
+    "assigned": 18,
+    "passed": 8,
+    "failed": 9,
+    "unknown": 1,
+    "disposition": "Unchanged historical campaign and original scoring; not regraded or replaced by unpaid post-fix results.",
+    "costLedger": {
+      "source": "cli_reported_estimate",
+      "priorNovember14EstimatedUsd": 0.02976825,
+      "interruptedNovember16EstimatedUsd": 0.18137175,
+      "priorEstimatedUsd": 0.21114,
+      "correctedCampaignEstimatedUsd": 2.14796325,
+      "cumulativeEstimatedUsd": 2.35910325,
+      "authorizedLimitUsd": 5,
+      "estimatedRemainingUsd": 2.64089675,
+      "note": "Includes failed, interrupted and pin-probe calls. CLI estimates are not provider invoices or a hard provider-side billing cap."
+    },
+    "authorization": "All further paid/model revalidation is on hold at the user request; this record does not authorize spending."
+  },
+  "claimLimits": [
+    "No post-remediation model campaign ran. Model tokens and costs for the new scripted/native runs are unmeasured, not zero-valued performance claims.",
+    "The accepted foreground proof requires a known untruncated independent monitor through cleanup. Unrelated application switches are recorded separately; known positive fixture activation evidence also vetoes success.",
+    "A confirmed witness reports observed state, not causal proof of input delivery. Unknown delivery is not upgraded by readback.",
+    "No overall speed, token, cost, autonomous reliability or SOTA advantage is established; PER-7/PER-8 milestone acceptance remains incomplete."
+  ],
+  "artifactSha256": {
+    ".artifacts/per78-fixed-native-v4/report.json": "25bfb0bfc1640fdc09b260edb70f01451c51d07946f4bf4cd8870b3e75bd485d",
+    ".artifacts/per78-fixed-native-v4/trace.jsonl": "71fc55ff6db9cbfdf11221516cc2c6ad465b8b2b3faa0c513c55b00c1d053a81",
+    ".artifacts/per78-fixed-scripted-v2/report.json": "1411915770d8357ccaa7a5aedbbe3e8807621c9b628f909648b265445f04cd22",
+    ".artifacts/per78-fixed-scripted-v2/trace.jsonl": "deb844526828f0dcc987e68c7e36b959817396afd0dfcd80d324a476e1750859",
+    ".artifacts/per78-textedit-reference-final/report.json": "38337f63a6fafaf024b6dca5d945579f8a9927098e736451bdae970bfb97fc89",
+    ".artifacts/per78-textedit-reference-final/trace.jsonl": "e58b370b95bea221868a658478af3b8854cbee99191042616c6db07d551f6fe6",
+    ".artifacts/per78-fixed-native-v2/report.json": "6da2deeec0b595e3e8443112c70fda9580b46a249415432a254d1f3e8ea4b360",
+    ".artifacts/per78-fixed-native-v2/trace.jsonl": "95bab6ff6a5ffb776cf629c5a0658b8c8d1db39914148b05184eb0581b1edf84",
+    ".artifacts/per78-fixed-native-v3/report.json": "986b86b7f8c99a363cfe90fee3eff1710d39b9af3c9ff2514a87bd3d6704fc78",
+    ".artifacts/per78-fixed-native-v3/trace.jsonl": "9c6a0d5d34d7d0512cd15a59176edf0aaef3e9855a49f6b22a8251ed49509a4e",
+    ".artifacts/per78-wait-stress-fixed/report.json": "ab858c78a6159389adf80c75555881fc875fda28b5dca174c79e1aaa6666f964",
+    ".artifacts/per78-wait-stress-fixed/trace.json": "77c9ed02c1426921fe1e845164d196534a9efd6d08032613ab0e899fc15685e5",
+    ".artifacts/per78-controlled-activation-gate/report.json": "2679766750d6584f6425f43a19fe82ae1464cbca0f32793660f24a66dbea7a2f",
+    ".artifacts/per78-controlled-activation-gate/trace.json": "159d38236eaf3c3df317c8a6760e2e9d82904026d82c4b1422d622e5494d7a5d",
+    ".artifacts/per78-native-diagnostic/native.jsonl": "95aae298e37256a174637b98535c42ee7cc6a90d525f076d3b6d1ee067580c57",
+    ".artifacts/per78-native-diagnostic/report.json": "38c5e5df6466a375c1a4da62e95559eda4e7615583551abae174201ea3d67dd6",
+    ".artifacts/per78-accepted-rust.log": "4d8b55c2e9c75bb129f1ed62b8d3a98031462e0e278ce25e4839be38b352dfb0",
+    ".artifacts/per78-final-swift.log": "c7e59af6ff134c923122554b0d8d3452864b1b7fba330ce211e108d2d93b8e65",
+    ".artifacts/per78-accepted-swift-protocol.log": "3a6dab96c3a1e5f93614530e03eaeab415464c2934531208489070823963c478",
+    ".artifacts/per78-accepted-node.log": "aefea1133ee8d9d7267a79408a165baf456f38ed04aba3f8be3847bd43f57418",
+    ".artifacts/per78-accepted-clippy.log": "0daad7d9ee0b3d5ac03ac60bfa0a6cff88268983f2a1b73cf9db4c84b365dce6",
+    ".artifacts/per78-poll-fixed-build.log": "06b96a9c47e3b45a6fe760cef1933b9c0f6921205dc58a96c3febf8fc7d2b7d8",
+    ".artifacts/per78-final-typescript.log": "90facda9500bf218e1bfc753f57ae5694d19b75af276206a738b609ce38b990b",
+    ".artifacts/per78-final-process-smoke.log": "75edd47496718b8ef3ca18622d9e72c8bcd5f6c6f622c636db20cd09892741f9",
+    ".artifacts/per78-fixed-native-v2.log": "2ba53c1f1278f50a9136132ad2f1f1c0c09203a9bce66439a764e9727ab52f8d",
+    ".artifacts/per78-fixed-native-v3.log": "75799177692188df510ed9de498be6b1f240f3c933d6be3aa9440911168cce80",
+    ".artifacts/per78-fixed-native-v4.log": "ff98214217043afc9b61c546fb5ac62519204f37fceb74711c1112132dd63e17",
+    ".artifacts/per78-fixed-scripted-v2.log": "0947fc60232fe186177cc31e6bd65e8350c69851a661cdba0a8d45dccad438af",
+    "docs/evidence/per-7-per-8-verification-2026-11-16.json": "354dfd4facbe5475ea0cfe2701dc44ad253c7a64c957f1fc579f0ffd012be760",
+    ".artifacts/evaluation-claude-corrected-nov16/report.json": "98e9d4c7385a7d0b4912771bbcbb1f9ede77bf7b7854b263378be7af3d5142ef",
+    ".artifacts/evaluation-claude-corrected-nov16/trace.jsonl": "34fa37433fd1a9e1040402e6ec598fb71e1bfde5e5793c230cfd66e4ec6d0114"
+  },
+  "dataExclusion": "Only repository-relative artifact/source paths, hashes and aggregate results are copied. Raw local reports/traces remain local; no document bodies, dataset source facts, private expected outputs, credentials or credential-file paths are embedded."
+}

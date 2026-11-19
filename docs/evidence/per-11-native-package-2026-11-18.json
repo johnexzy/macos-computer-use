@@ -1,0 +1,325 @@
+{
+  "schemaVersion": 1,
+  "verifiedDate": "2026-11-18",
+  "issue": "PER-11",
+  "source": {
+    "branch": "feat/native-delivery-per11",
+    "base": "a8bc6111b34d2110739f5aad3b4f683be9ac7cba",
+    "implementationRevision": "cbd82ee6cf4241d8d945bfa597b9974398ab6bb9",
+    "packageBuiltFromCleanSource": true
+  },
+  "archive": {
+    "path": ".artifacts/per11-delivery/cua-native-0.1.0-macos-universal.tar.gz",
+    "sha256": "ad2c5e1fdd6905e350778591e1359631c0531727d82825067760bde71700ebb4",
+    "manifestSha256": "47b156c9d5236052ba1e8721e27ee5b537651cd5ff579009b30195722bc3ab01",
+    "checksumSidecar": ".artifacts/per11-delivery/cua-native-0.1.0-macos-universal.tar.gz.sha256",
+    "files": {
+      "bin/cua-host": {
+        "sha256": "df5a7e86105f8ee1424191e2032e8852237d896da91d9199c47ffd3e87a1a5be",
+        "architectures": [
+          "x86_64",
+          "arm64"
+        ],
+        "identifier": "com.johnoba.cua.cua-host",
+        "signing": "ad-hoc",
+        "notarized": false,
+        "slices": {
+          "x86_64": {
+            "minimumMacOS": "13.0",
+            "linkedLibraries": [
+              "/usr/lib/libiconv.2.dylib",
+              "/usr/lib/libSystem.B.dylib"
+            ]
+          },
+          "arm64": {
+            "minimumMacOS": "13.0",
+            "linkedLibraries": [
+              "/usr/lib/libiconv.2.dylib",
+              "/usr/lib/libSystem.B.dylib"
+            ]
+          }
+        }
+      },
+      "bin/cua-runtime": {
+        "sha256": "c121b440c7da30d0f59e891b73de0eb86659e8df145bb30d131504d251c4e65f",
+        "architectures": [
+          "x86_64",
+          "arm64"
+        ],
+        "identifier": "com.johnoba.cua.cua-runtime",
+        "signing": "ad-hoc",
+        "notarized": false,
+        "slices": {
+          "x86_64": {
+            "minimumMacOS": "13.0",
+            "linkedLibraries": [
+              "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+              "/usr/lib/libobjc.A.dylib",
+              "/usr/lib/libSystem.B.dylib",
+              "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+              "/System/Library/Frameworks/ApplicationServices.framework/Versions/A/ApplicationServices",
+              "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+              "/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics",
+              "/System/Library/Frameworks/ImageIO.framework/Versions/A/ImageIO",
+              "/System/Library/Frameworks/ScreenCaptureKit.framework/Versions/A/ScreenCaptureKit",
+              "/System/Library/Frameworks/Vision.framework/Versions/A/Vision",
+              "/usr/lib/swift/libswiftAVFoundation.dylib",
+              "/usr/lib/swift/libswiftAccelerate.dylib",
+              "/usr/lib/swift/libswiftCompression.dylib",
+              "/usr/lib/swift/libswiftCore.dylib",
+              "/usr/lib/swift/libswiftCoreAudio.dylib",
+              "/usr/lib/swift/libswiftCoreFoundation.dylib",
+              "/usr/lib/swift/libswiftCoreImage.dylib",
+              "/usr/lib/swift/libswiftCoreMIDI.dylib",
+              "/usr/lib/swift/libswiftDarwin.dylib",
+              "/usr/lib/swift/libswiftDispatch.dylib",
+              "/usr/lib/swift/libswiftIOKit.dylib",
+              "/usr/lib/swift/libswiftMetal.dylib",
+              "/usr/lib/swift/libswiftOSLog.dylib",
+              "/usr/lib/swift/libswiftObjectiveC.dylib",
+              "/usr/lib/swift/libswiftQuartzCore.dylib",
+              "/usr/lib/swift/libswiftSpatial.dylib",
+              "/usr/lib/swift/libswiftUniformTypeIdentifiers.dylib",
+              "/usr/lib/swift/libswiftXPC.dylib",
+              "/usr/lib/swift/libswift_Concurrency.dylib",
+              "/usr/lib/swift/libswiftos.dylib",
+              "/usr/lib/swift/libswiftsimd.dylib",
+              "/usr/lib/swift/libswiftCoreGraphics.dylib",
+              "/usr/lib/swift/libswiftVision.dylib"
+            ]
+          },
+          "arm64": {
+            "minimumMacOS": "13.0",
+            "linkedLibraries": [
+              "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation",
+              "/usr/lib/libobjc.A.dylib",
+              "/usr/lib/libSystem.B.dylib",
+              "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit",
+              "/System/Library/Frameworks/ApplicationServices.framework/Versions/A/ApplicationServices",
+              "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation",
+              "/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics",
+              "/System/Library/Frameworks/ImageIO.framework/Versions/A/ImageIO",
+              "/System/Library/Frameworks/ScreenCaptureKit.framework/Versions/A/ScreenCaptureKit",
+              "/System/Library/Frameworks/Vision.framework/Versions/A/Vision",
+              "/usr/lib/swift/libswiftAVFoundation.dylib",
+              "/usr/lib/swift/libswiftAccelerate.dylib",
+              "/usr/lib/swift/libswiftCompression.dylib",
+              "/usr/lib/swift/libswiftCore.dylib",
+              "/usr/lib/swift/libswiftCoreAudio.dylib",
+              "/usr/lib/swift/libswiftCoreFoundation.dylib",
+              "/usr/lib/swift/libswiftCoreImage.dylib",
+              "/usr/lib/swift/libswiftCoreMIDI.dylib",
+              "/usr/lib/swift/libswiftDarwin.dylib",
+              "/usr/lib/swift/libswiftDispatch.dylib",
+              "/usr/lib/swift/libswiftIOKit.dylib",
+              "/usr/lib/swift/libswiftMetal.dylib",
+              "/usr/lib/swift/libswiftOSLog.dylib",
+              "/usr/lib/swift/libswiftObjectiveC.dylib",
+              "/usr/lib/swift/libswiftQuartzCore.dylib",
+              "/usr/lib/swift/libswiftSpatial.dylib",
+              "/usr/lib/swift/libswiftUniformTypeIdentifiers.dylib",
+              "/usr/lib/swift/libswiftXPC.dylib",
+              "/usr/lib/swift/libswift_Concurrency.dylib",
+              "/usr/lib/swift/libswiftos.dylib",
+              "/usr/lib/swift/libswiftsimd.dylib",
+              "/usr/lib/swift/libswiftCoreGraphics.dylib",
+              "/usr/lib/swift/libswiftVision.dylib"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "build": {
+    "deploymentTarget": "13.0",
+    "architectures": [
+      "arm64",
+      "x86_64"
+    ],
+    "toolchain": {
+      "rust": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+      "swift": "swift-driver version: 1.168.6 Apple Swift version 6.4.2 (swiftlang-6.4.2.1.9 clang-2100.4.1.1)\nTarget: arm64-apple-macosx27.2.0",
+      "xcode": "Xcode 27.2\nBuild version 27B52",
+      "sdk": "27.2"
+    },
+    "buildOnlyProcMacroStripping": "disabled to avoid documented Rust/LLVM LINKEDIT defect",
+    "linkedDependencies": "only /System/Library and /usr/lib"
+  },
+  "localVerification": {
+    "machine": {
+      "macOS": "27.2.1",
+      "hardwareArchitecture": "arm64"
+    },
+    "nativeArchiveSmoke": {
+      "arm64": {
+        "version": "cua-host 0.1.0",
+        "architecture": "arm64",
+        "sourceRevision": "cbd82ee6cf4241d8d945bfa597b9974398ab6bb9",
+        "runtimeDirectPreflight": true,
+        "checks": [
+          {
+            "termination": "EOF",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "termination": "SIGINT",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "termination": "SIGTERM",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "symlinkLaunch": true,
+            "termination": "EOF",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          }
+        ],
+        "missingHelperRejected": true,
+        "minimalPath": true,
+        "pathsWithSpaces": true,
+        "mutations": 0,
+        "captures": 0,
+        "permissionRequests": 0
+      },
+      "x86_64": {
+        "version": "cua-host 0.1.0",
+        "architecture": "x86_64",
+        "sourceRevision": "cbd82ee6cf4241d8d945bfa597b9974398ab6bb9",
+        "runtimeDirectPreflight": true,
+        "checks": [
+          {
+            "termination": "EOF",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "termination": "SIGINT",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "termination": "SIGTERM",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          },
+          {
+            "symlinkLaunch": true,
+            "termination": "EOF",
+            "persistentHelper": true,
+            "helperReaped": true,
+            "permissions": {
+              "accessibility": true,
+              "inputPosting": true,
+              "screenRecording": true
+            },
+            "mcpPreflightCalls": 3
+          }
+        ],
+        "missingHelperRejected": true,
+        "minimalPath": true,
+        "pathsWithSpaces": true,
+        "mutations": 0,
+        "captures": 0,
+        "permissionRequests": 0
+      }
+    },
+    "intelExecution": "x86_64 slice executed through already available Rosetta, not native Intel hardware",
+    "rust": {
+      "testsPassed": 44,
+      "testsFailed": 0,
+      "allFeatures": true,
+      "clippy": "passed with -D warnings",
+      "format": "passed",
+      "minimumRust": "1.88.0 workspace/all-targets/all-features locked check passed"
+    },
+    "workflowSyntax": "both YAML files parsed locally; remote CI has not run",
+    "scriptSyntax": "shell -n and Python compilation passed",
+    "diffCheck": "passed"
+  },
+  "publishing": {
+    "mainPushTriggersPublication": false,
+    "legacyNpm": "manual workflow_dispatch, main ref and explicit confirm_publish=true required",
+    "nativeArchive": "no publish/upload/installation activation performed"
+  },
+  "commands": [
+    "sh scripts/package-native.sh .artifacts/per11-delivery",
+    "python3 test/distribution/package-smoke.py .artifacts/per11-delivery/cua-native-0.1.0-macos-universal.tar.gz --architecture arm64",
+    "python3 test/distribution/package-smoke.py .artifacts/per11-delivery/cua-native-0.1.0-macos-universal.tar.gz --architecture x86_64",
+    "cargo +1.88.0 check --workspace --all-targets --all-features --locked",
+    "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings",
+    "cargo test --workspace --all-features --locked",
+    "cargo fmt --all -- --check"
+  ],
+  "evidence": {
+    ".artifacts/per11-build-final.log": "281d9aba8056458e7d7e3cd7d0fb3251f6cbb0eaa441575863639b135fa7ff53",
+    ".artifacts/per11-msrv-final.log": "77494f40db7af488b7f35cb10340dbce412116f36117abc26a4da742bfe0c952",
+    ".artifacts/per11-clippy.log": "4014ec80300f2a7c87816de259f8a009e53b6e8b7ab205086b180a4557cf36fb",
+    ".artifacts/per11-rust-tests.log": "67cc1c5d04eed565a991e596fe9ba76c904ec5136fe5ccfe333ba860f8a2dd24",
+    ".artifacts/per11-smoke-arm64-final.json": "fc1c6154a0a9d75b6f43f28889d29034b838ec9db7e16f0328390e6261cf18e1",
+    ".artifacts/per11-smoke-x86_64-final.json": "df7aaeb58ccf916461a800081b77939982b8220c684090022ea5f043765e1448"
+  },
+  "limits": [
+    "Ad-hoc signature integrity passed; Developer ID signing, notarization and Gatekeeper assessment for public downloads remain separate release work.",
+    "Native Intel hardware and actual macOS13/macOS14 runtime qualification were not available in this local check; deployment metadata and Rosetta do not substitute for them.",
+    "No production MCP client configuration was activated and no live permission grant/AX mutation/image capture occurred; specific desktop-client privacy attribution remains an explicit live release check.",
+    "CI configuration was created and syntax checked but not pushed or run remotely.",
+    "Migration guide reflects a8bc611 behavior; integrated PER-10 capabilities require the parent branch migration update."
+  ],
+  "sideEffects": {
+    "mutations": 0,
+    "captures": 0,
+    "permissionRequests": 0,
+    "providerCalls": 0,
+    "credentialOperations": 0,
+    "pushes": 0,
+    "publications": 0,
+    "productionActivation": false
+  }
+}

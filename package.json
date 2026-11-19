@@ -25,6 +25,19 @@
     "test": "npm run build:ts && node --test test/*.test.mjs",
     "test:background": "npm run build:ts && node test/background-smoke.mjs",
     "test:live": "npm run build:ts && node test/live-smoke.mjs",
+    "test:foundations": "node --test test/baseline/*.test.mjs && cargo test --workspace && swift test --package-path protocol/swift",
+    "build:runtime": "sh scripts/build-runtime.sh",
+    "test:runtime": "cargo test --workspace && swift test && swift test --package-path protocol/swift && node --test test/runtime/*.test.mjs",
+    "test:foreground:live": "npm run build:runtime && sh test/fixtures/macos/build.sh && node test/runtime/foreground-live.mjs",
+    "test:visual:live": "npm run build:runtime && sh test/fixtures/macos/build.sh && node test/runtime/visual-live.mjs",
+    "test:semantic:live": "npm run build:runtime && sh test/fixtures/macos/build.sh && node test/runtime/semantic-live.mjs",
+    "test:evaluation": "node --test test/evaluation/*.test.mjs",
+    "test:composition:live": "npm run build:runtime && sh test/fixtures/macos/build.sh && node test/runtime/composition-live.mjs",
+    "evaluate:scripted": "node test/evaluation/run.mjs --mode scripted",
+    "start:rust": "./.artifacts/runtime-install/cua-host",
+    "baseline:build": "npm run build && sh test/fixtures/macos/build.sh",
+    "baseline:preflight": "node test/baseline/run.mjs --preflight",
+    "baseline": "node test/baseline/run.mjs",
     "prepack": "npm run build:release",
     "prepublishOnly": "npm test",
     "start": "node server.mjs"
@@ -65,6 +78,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
+    "ajv": "8.20.0",
     "typescript": "^7.0.2"
   }
 }

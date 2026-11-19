@@ -1,11 +1,13 @@
 name: Publish to npm
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
+      confirm_publish:
+        description: 'Publish the legacy npm package and GitHub release from main'
+        required: true
+        default: false
+        type: boolean
       bump:
         description: 'Version bump type (auto, patch, minor, major)'
         required: false
@@ -27,7 +29,8 @@ concurrency:
 
 jobs:
   publish:
-    runs-on: macos-14
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.confirm_publish == true
+    runs-on: macos-15
     timeout-minutes: 20
 
     steps:

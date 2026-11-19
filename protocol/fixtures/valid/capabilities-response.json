@@ -1,0 +1,1 @@
+{"kind":"response","message":{"version":1,"id":"request-1","epoch":"helper-epoch-1","body":{"result":"capabilities","data":{"permissions":{"accessibility":true,"screenRecording":false,"inputPosting":false},"mode":"backgroundRequired","actions":["press","setValue","typeText","key","scroll","click"]}}}}

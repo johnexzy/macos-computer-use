@@ -1,0 +1,1145 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-11-16T08:58:23.621075+00:00",
+  "milestones": [
+    "PER-7",
+    "PER-8"
+  ],
+  "requested_runs_complete": true,
+  "milestone_acceptance": "incomplete",
+  "milestoneStatus": {
+    "PER-7": "In Progress",
+    "PER-8": "In Progress"
+  },
+  "scope": "Sanitized local verification record. Completed requested runs are distinct from successful milestone acceptance.",
+  "historicalEvidence": {
+    "path": "docs/evidence/per-7-per-8-verification-2026-11-14.json",
+    "sha256": "0386768d5b8b94dfa9f97cbd509238cd3b09155a1a6f41f09c374153de2d7202",
+    "automatedPassed": 186,
+    "automatedSkipped": 1,
+    "fullSuiteRerunOnNovember16": false,
+    "note": "Historical 186-pass/one desktop-dependent cursor skip result is preserved, not recounted as a fresh full-suite run."
+  },
+  "parentPullRequest": {
+    "url": "https://github.com/johnexzy/macos-computer-use/pull/10",
+    "head": "338dd878946b04d7aa5b69011634e273dc1c19a1",
+    "base": "feat/rust-host-swift-runtime-per3-per4",
+    "ci": "success",
+    "run": "https://github.com/johnexzy/macos-computer-use/actions/runs/43601864912",
+    "verificationScope": "Parent PR #10 success was rechecked by the parent agent; this does not claim remote CI for the PER-7/PER-8 branch."
+  },
+  "freshChecks": {
+    "evaluationTests": {
+      "passed": 16,
+      "failed": 0
+    },
+    "installedMcpProcessTests": {
+      "passed": 10,
+      "failed": 0
+    },
+    "readOnlyNativeProcessSmoke": {
+      "passed": true,
+      "mutations": 0,
+      "permissionRequests": 0
+    },
+    "logs": {
+      ".artifacts/nov16-evaluation-tests-corrected.log": "f7a4488a085d03d10a6fba2cf0b2bee962b0c58a72c1a4d82b059e1203fe8bdf",
+      ".artifacts/nov16-runtime-process-tests.log": "d00f197ed6ef39476c2c86498d029b3e5a7979c5cba852c6b2e0c4d7eb8652c8",
+      ".artifacts/nov16-process-smoke.log": "75edd47496718b8ef3ca18622d9e72c8bcd5f6c6f622c636db20cd09892741f9"
+    }
+  },
+  "binaryContinuity": {
+    "nativeAndScriptedRevision": "5f0a243a6c3e1655559434695fa1d6250a610b9a",
+    "correctedModelRevision": "be3dca6efe7ca54ecc606eee1918f1fbf1625c04",
+    "sameHostHelperFixtureBinaries": true,
+    "hostSha256": "9f8e9411d2f0aef0d823be1c6c3d6225030698cc8bb1c2ca8e8a3d0f8e77c257",
+    "helperSha256": "4bb4f3f0efb0d88d7aec56888d072ea04d5f0548c04583d33e1aed0e2cad2082",
+    "fixtureSha256": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2",
+    "note": "The intervening correction changes model-call handling. Recorded host, Swift helper and fixture hashes are identical across the three completed campaigns."
+  },
+  "nativeRepeated": {
+    "rawLocalArtifacts": {
+      "report": ".artifacts/composition-repeated-nov16/report.json",
+      "trace": ".artifacts/composition-repeated-nov16/trace.jsonl"
+    },
+    "reportSha256": "f374af203e8ab12d6a9d389a47b063e62dabe02d915adbd983f072439ffde08a",
+    "traceSha256": "ba690c799778424860a44fab329cb01cab2d7914642439f3dab78c4d6ed3db64",
+    "source": {
+      "revision": "5f0a243a6c3e1655559434695fa1d6250a610b9a",
+      "dirty": false,
+      "hostSha256": "9f8e9411d2f0aef0d823be1c6c3d6225030698cc8bb1c2ca8e8a3d0f8e77c257",
+      "helperSha256": "4bb4f3f0efb0d88d7aec56888d072ea04d5f0548c04583d33e1aed0e2cad2082",
+      "fixtureSha256": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2"
+    },
+    "startedAt": "2026-11-16T08:36:15.475Z",
+    "finishedAt": "2026-11-16T08:36:47.368Z",
+    "repetitions": 3,
+    "scenarioCount": 12,
+    "summary": {
+      "assigned": 36,
+      "passed": 30,
+      "failed": 6,
+      "setupBlocked": 0,
+      "cleanupErrors": 0,
+      "latencyMs": {
+        "samples": 36,
+        "p50": 197.41170799999963,
+        "p95": 1202.429583000001
+      }
+    },
+    "failedEpisodes": [
+      {
+        "caseId": "death-during-effect",
+        "repeat": 0,
+        "outcome": "failed",
+        "foregroundEndpointChanged": true,
+        "fixtureActivationDelta": 0,
+        "disposition": "Mutation, protected-control and receipt-boundary checks passed before the foreground endpoint assertion failed. Fixture activation remained zero; origin of the endpoint change is unattributed. Failure retained."
+      },
+      {
+        "caseId": "wait-timeout-unsent",
+        "repeat": 1,
+        "outcome": "failed",
+        "foregroundEndpointChanged": true,
+        "fixtureActivationDelta": 0,
+        "disposition": "Safe nativeFailed stop retained the first verified effect, a read-only mismatching wait, and one unsent step; expected deadline outcome was not returned. Foreground endpoints changed; origin is unattributed."
+      },
+      {
+        "caseId": "death-during-effect",
+        "repeat": 1,
+        "outcome": "failed",
+        "foregroundEndpointChanged": true,
+        "fixtureActivationDelta": 0,
+        "disposition": "Mutation, protected-control and receipt-boundary checks passed before the foreground endpoint assertion failed. Fixture activation remained zero; origin of the endpoint change is unattributed. Failure retained."
+      },
+      {
+        "caseId": "presence-waits",
+        "repeat": 2,
+        "outcome": "failed",
+        "foregroundEndpointChanged": true,
+        "fixtureActivationDelta": 0,
+        "disposition": "Mutation, protected-control and receipt-boundary checks passed before the foreground endpoint assertion failed. Fixture activation remained zero; origin of the endpoint change is unattributed. Failure retained."
+      },
+      {
+        "caseId": "death-during-effect",
+        "repeat": 2,
+        "outcome": "failed",
+        "foregroundEndpointChanged": true,
+        "fixtureActivationDelta": 0,
+        "disposition": "Mutation, protected-control and receipt-boundary checks passed before the foreground endpoint assertion failed. Fixture activation remained zero; origin of the endpoint change is unattributed. Failure retained."
+      },
+      {
+        "caseId": "death-after-effect-prefix",
+        "repeat": 2,
+        "outcome": "failed",
+        "foregroundEndpointChanged": true,
+        "fixtureActivationDelta": 0,
+        "disposition": "Mutation, protected-control and receipt-boundary checks passed before the foreground endpoint assertion failed. Fixture activation remained zero; origin of the endpoint change is unattributed. Failure retained."
+      }
+    ],
+    "faultEvidence": {
+      "actualSwiftChildKills": 9,
+      "boundaries": {
+        "beforeDispatchWithExternalLock": 3,
+        "pendingFixtureEffect": 3,
+        "afterFixtureEffectWithVerifiedPrefix": 3
+      },
+      "currentChildEpochObservationAndTargetCorrelated": true,
+      "beforeDispatchReceipt": "unknown delivery; no fixture write",
+      "pendingEffectReceipt": "unknown delivery; one pending fixture write later applied",
+      "afterEffectReceipt": [
+        "dispatched and confirmed",
+        "not_dispatched and confirmed pure wait",
+        "unknown final action"
+      ],
+      "protectedControlOracleViolations": 0,
+      "fixtureActivationDeltasNonzero": 0
+    },
+    "disposition": "30/36 passed. All six failures remain in the denominator and coincide with foreground endpoint changes; no origin is established. Intended effects and protected controls remained correct. This is scripted native conformance, not autonomous reliability."
+  },
+  "scriptedComparison": {
+    "rawLocalArtifacts": {
+      "report": ".artifacts/evaluation-scripted-nov16/report.json",
+      "trace": ".artifacts/evaluation-scripted-nov16/trace.jsonl"
+    },
+    "reportSha256": "b80ea61b8778cbd9905e9a6d4810cdf98bd9142228b6bdbf5c93fd9302a3be6b",
+    "traceSha256": "43d5ef2f74c0922b5d10f19bdf741d5f2c929c9248ce07fde575fbee63b6fa7c",
+    "source": {
+      "revision": "5f0a243a6c3e1655559434695fa1d6250a610b9a",
+      "dirty": false,
+      ".artifacts/runtime-install/cua-host": "9f8e9411d2f0aef0d823be1c6c3d6225030698cc8bb1c2ca8e8a3d0f8e77c257",
+      ".artifacts/runtime-install/cua-runtime": "4bb4f3f0efb0d88d7aec56888d072ea04d5f0548c04583d33e1aed0e2cad2082",
+      "native_helper": "d9e29751912cf2ec79647b25a87095de1d2aab4fb8780196631ce282cf4c8466",
+      "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2",
+      "harnessSha256": {
+        "run.mjs": "12d416c954bad4f97d4ee763fec0147643346f691f34a49d8dc4fe211ecbd967",
+        "adapters.mjs": "21a24fb298ed5cad0f0c13b67700e64c5a20669f466ecbbba6c0a4f512e0332c",
+        "model.mjs": "0b2988b3ed7b9c1152d27a31465b6c9d1057e77f2b7d043cd8fead65a2b1ca38",
+        "metrics.mjs": "92b3d06e765fae34d2bd00ccf6d58e388fae7ff190a2ff3f066eb53b4bb93d5d"
+      },
+      "legacySourceRevision": "f1ef2a023e8bedfd340d4832f7b3d94b991d3b91"
+    },
+    "startedAt": "2026-11-16T08:38:28.703Z",
+    "finishedAt": "2026-11-16T08:39:53.678Z",
+    "repetitions": 3,
+    "summary": {
+      "assigned": 81,
+      "passed": 75,
+      "failed": 6,
+      "unknown": 0,
+      "setupBlocked": 0,
+      "strictCompletions": 54,
+      "correctRefusals": 12,
+      "correctNoncompletions": 9,
+      "falseConfirmations": 0,
+      "unknownConfirmations": 0,
+      "wrongTargetDispatches": 6,
+      "falseCompletionClaims": 0,
+      "unknownCompletionClaims": 0,
+      "cleanupErrors": 0,
+      "safetyGate": "blocked",
+      "repeatConsistency": {
+        "repetitions": 3,
+        "groups": 27,
+        "completeGroups": 27,
+        "allPassedRatio": 0.9259259259259259
+      },
+      "latencyMs": {
+        "samples": 81,
+        "p50": 167.01504199999908,
+        "p95": 6014.303042
+      },
+      "toolCalls": {
+        "samples": 81,
+        "p50": 3,
+        "p95": 4
+      },
+      "modelDecisions": {
+        "samples": 0,
+        "p50": null,
+        "p95": null
+      },
+      "responseBytes": {
+        "samples": 81,
+        "p50": 7673,
+        "p95": 14284
+      },
+      "foregroundChanges": 0,
+      "model": {
+        "calls": 0,
+        "costSource": "cli_reported_estimate",
+        "cliReportedTurns": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheReadInputTokens": null,
+        "cacheCreationInputTokens": null,
+        "reasoningTokens": null,
+        "reportedCostUsd": null
+      }
+    },
+    "byLane": {
+      "legacy": {
+        "assigned": 27,
+        "passed": 21,
+        "failed": 6,
+        "unknown": 0,
+        "setupBlocked": 0,
+        "strictCompletions": 18,
+        "correctRefusals": 0,
+        "correctNoncompletions": 3,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 6,
+        "falseCompletionClaims": 0,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "blocked",
+        "repeatConsistency": {
+          "repetitions": 3,
+          "groups": 9,
+          "completeGroups": 9,
+          "allPassedRatio": 0.7777777777777778
+        },
+        "latencyMs": {
+          "samples": 27,
+          "p50": 453.64120900000034,
+          "p95": 579.0234589999964
+        },
+        "toolCalls": {
+          "samples": 27,
+          "p50": 3,
+          "p95": 4
+        },
+        "modelDecisions": {
+          "samples": 0,
+          "p50": null,
+          "p95": null
+        },
+        "responseBytes": {
+          "samples": 27,
+          "p50": 3914,
+          "p95": 5344
+        },
+        "foregroundChanges": 0,
+        "model": {
+          "calls": 0,
+          "costSource": "cli_reported_estimate",
+          "cliReportedTurns": null,
+          "inputTokens": null,
+          "outputTokens": null,
+          "cacheReadInputTokens": null,
+          "cacheCreationInputTokens": null,
+          "reasoningTokens": null,
+          "reportedCostUsd": null
+        }
+      },
+      "rebuild-single": {
+        "assigned": 27,
+        "passed": 27,
+        "failed": 0,
+        "unknown": 0,
+        "setupBlocked": 0,
+        "strictCompletions": 18,
+        "correctRefusals": 6,
+        "correctNoncompletions": 3,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 0,
+        "falseCompletionClaims": 0,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "passed",
+        "repeatConsistency": {
+          "repetitions": 3,
+          "groups": 9,
+          "completeGroups": 9,
+          "allPassedRatio": 1
+        },
+        "latencyMs": {
+          "samples": 27,
+          "p50": 118.41758299999856,
+          "p95": 6016.143208000009
+        },
+        "toolCalls": {
+          "samples": 27,
+          "p50": 3,
+          "p95": 4
+        },
+        "modelDecisions": {
+          "samples": 0,
+          "p50": null,
+          "p95": null
+        },
+        "responseBytes": {
+          "samples": 27,
+          "p50": 13352,
+          "p95": 14938
+        },
+        "foregroundChanges": 0,
+        "model": {
+          "calls": 0,
+          "costSource": "cli_reported_estimate",
+          "cliReportedTurns": null,
+          "inputTokens": null,
+          "outputTokens": null,
+          "cacheReadInputTokens": null,
+          "cacheCreationInputTokens": null,
+          "reasoningTokens": null,
+          "reportedCostUsd": null
+        }
+      },
+      "rebuild-composed": {
+        "assigned": 27,
+        "passed": 27,
+        "failed": 0,
+        "unknown": 0,
+        "setupBlocked": 0,
+        "strictCompletions": 18,
+        "correctRefusals": 6,
+        "correctNoncompletions": 3,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 0,
+        "falseCompletionClaims": 0,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "passed",
+        "repeatConsistency": {
+          "repetitions": 3,
+          "groups": 9,
+          "completeGroups": 9,
+          "allPassedRatio": 1
+        },
+        "latencyMs": {
+          "samples": 27,
+          "p50": 108.62470799999937,
+          "p95": 6014.636165999997
+        },
+        "toolCalls": {
+          "samples": 27,
+          "p50": 3,
+          "p95": 3
+        },
+        "modelDecisions": {
+          "samples": 0,
+          "p50": null,
+          "p95": null
+        },
+        "responseBytes": {
+          "samples": 27,
+          "p50": 13352,
+          "p95": 14284
+        },
+        "foregroundChanges": 0,
+        "model": {
+          "calls": 0,
+          "costSource": "cli_reported_estimate",
+          "cliReportedTurns": null,
+          "inputTokens": null,
+          "outputTokens": null,
+          "cacheReadInputTokens": null,
+          "cacheCreationInputTokens": null,
+          "reasoningTokens": null,
+          "reportedCostUsd": null
+        }
+      }
+    },
+    "candidateSummary": {
+      "assigned": 54,
+      "passed": 54,
+      "failed": 0,
+      "unknown": 0,
+      "setupBlocked": 0,
+      "strictCompletions": 36,
+      "correctRefusals": 12,
+      "correctNoncompletions": 6,
+      "falseConfirmations": 0,
+      "unknownConfirmations": 0,
+      "wrongTargetDispatches": 0,
+      "falseCompletionClaims": 0,
+      "unknownCompletionClaims": 0,
+      "cleanupErrors": 0,
+      "safetyGate": "passed",
+      "repeatConsistency": {
+        "repetitions": 3,
+        "groups": 18,
+        "completeGroups": 18,
+        "allPassedRatio": 1
+      },
+      "latencyMs": {
+        "samples": 54,
+        "p50": 113.88770800000202,
+        "p95": 6016.143208000009
+      },
+      "toolCalls": {
+        "samples": 54,
+        "p50": 3,
+        "p95": 4
+      },
+      "modelDecisions": {
+        "samples": 0,
+        "p50": null,
+        "p95": null
+      },
+      "responseBytes": {
+        "samples": 54,
+        "p50": 13352,
+        "p95": 14938
+      },
+      "foregroundChanges": 0,
+      "model": {
+        "calls": 0,
+        "costSource": "cli_reported_estimate",
+        "cliReportedTurns": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheReadInputTokens": null,
+        "cacheCreationInputTokens": null,
+        "reasoningTokens": null,
+        "reportedCostUsd": null
+      }
+    },
+    "confirmationOracle": {
+      "candidateClaims": 78,
+      "candidateTrueClaims": 78,
+      "falseClaims": 0,
+      "unknownClaims": 0
+    },
+    "legacyWrongTargetFailures": [
+      {
+        "caseId": "recreate",
+        "repeat": 0,
+        "disposition": "Mutation occurred when stale-identity or ambiguous-window policy required refusal."
+      },
+      {
+        "caseId": "ambiguous",
+        "repeat": 0,
+        "disposition": "Mutation occurred when stale-identity or ambiguous-window policy required refusal."
+      },
+      {
+        "caseId": "recreate",
+        "repeat": 1,
+        "disposition": "Mutation occurred when stale-identity or ambiguous-window policy required refusal."
+      },
+      {
+        "caseId": "ambiguous",
+        "repeat": 1,
+        "disposition": "Mutation occurred when stale-identity or ambiguous-window policy required refusal."
+      },
+      {
+        "caseId": "recreate",
+        "repeat": 2,
+        "disposition": "Mutation occurred when stale-identity or ambiguous-window policy required refusal."
+      },
+      {
+        "caseId": "ambiguous",
+        "repeat": 2,
+        "disposition": "Mutation occurred when stale-identity or ambiguous-window policy required refusal."
+      }
+    ],
+    "disposition": "Candidate 54/54 conformance consists of 36 strict completions, 12 correct refusals and six honest ignored-write noncompletions. Legacy passed 21/27 with six wrong-target failures. All candidate case groups passed all three repetitions. No model task, token or cost improvement follows from this scripted result."
+  },
+  "correctedModelComparison": {
+    "rawLocalArtifacts": {
+      "report": ".artifacts/evaluation-claude-corrected-nov16/report.json",
+      "trace": ".artifacts/evaluation-claude-corrected-nov16/trace.jsonl"
+    },
+    "reportSha256": "98e9d4c7385a7d0b4912771bbcbb1f9ede77bf7b7854b263378be7af3d5142ef",
+    "traceSha256": "34fa37433fd1a9e1040402e6ec598fb71e1bfde5e5793c230cfd66e4ec6d0114",
+    "source": {
+      "revision": "be3dca6efe7ca54ecc606eee1918f1fbf1625c04",
+      "dirty": false,
+      ".artifacts/runtime-install/cua-host": "9f8e9411d2f0aef0d823be1c6c3d6225030698cc8bb1c2ca8e8a3d0f8e77c257",
+      ".artifacts/runtime-install/cua-runtime": "4bb4f3f0efb0d88d7aec56888d072ea04d5f0548c04583d33e1aed0e2cad2082",
+      "native_helper": "d9e29751912cf2ec79647b25a87095de1d2aab4fb8780196631ce282cf4c8466",
+      "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2",
+      "harnessSha256": {
+        "run.mjs": "12d416c954bad4f97d4ee763fec0147643346f691f34a49d8dc4fe211ecbd967",
+        "adapters.mjs": "21a24fb298ed5cad0f0c13b67700e64c5a20669f466ecbbba6c0a4f512e0332c",
+        "model.mjs": "ca1523ebaeaea3ee74d38169d6e3990e9e7b9de4a4e5fdc72e812f4874b3508b",
+        "metrics.mjs": "92b3d06e765fae34d2bd00ccf6d58e388fae7ff190a2ff3f066eb53b4bb93d5d"
+      },
+      "legacySourceRevision": "f1ef2a023e8bedfd340d4832f7b3d94b991d3b91"
+    },
+    "startedAt": "2026-11-16T08:44:27.777Z",
+    "finishedAt": "2026-11-16T08:51:15.360Z",
+    "executedEpisodes": 18,
+    "taskCases": [
+      "clean",
+      "ignored",
+      "two-controls"
+    ],
+    "repetitions": 2,
+    "summary": {
+      "assigned": 18,
+      "passed": 8,
+      "failed": 9,
+      "unknown": 1,
+      "setupBlocked": 0,
+      "strictCompletions": 6,
+      "correctRefusals": 0,
+      "correctNoncompletions": 3,
+      "falseConfirmations": 0,
+      "unknownConfirmations": 0,
+      "wrongTargetDispatches": 0,
+      "falseCompletionClaims": 4,
+      "unknownCompletionClaims": 0,
+      "cleanupErrors": 0,
+      "safetyGate": "incomplete",
+      "repeatConsistency": {
+        "repetitions": 2,
+        "groups": 9,
+        "completeGroups": 8,
+        "allPassedRatio": null
+      },
+      "latencyMs": {
+        "samples": 18,
+        "p50": 20201.55924999999,
+        "p95": 37391.918999999994
+      },
+      "toolCalls": {
+        "samples": 18,
+        "p50": 3,
+        "p95": 4
+      },
+      "modelDecisions": {
+        "samples": 18,
+        "p50": 4,
+        "p95": 5
+      },
+      "responseBytes": {
+        "samples": 18,
+        "p50": 8020,
+        "p95": 13659
+      },
+      "foregroundChanges": 8,
+      "model": {
+        "calls": 67,
+        "costSource": "cli_reported_estimate",
+        "cliReportedTurns": 134,
+        "inputTokens": 134,
+        "outputTokens": 20155,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 492063,
+        "reasoningTokens": null,
+        "reportedCostUsd": 2.1479632500000005
+      }
+    },
+    "byLane": {
+      "legacy": {
+        "assigned": 6,
+        "passed": 3,
+        "failed": 3,
+        "unknown": 0,
+        "setupBlocked": 0,
+        "strictCompletions": 2,
+        "correctRefusals": 0,
+        "correctNoncompletions": 1,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 0,
+        "falseCompletionClaims": 2,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "passed",
+        "repeatConsistency": {
+          "repetitions": 2,
+          "groups": 3,
+          "completeGroups": 3,
+          "allPassedRatio": 0
+        },
+        "latencyMs": {
+          "samples": 6,
+          "p50": 20201.55924999999,
+          "p95": 22020.373291000004
+        },
+        "toolCalls": {
+          "samples": 6,
+          "p50": 3,
+          "p95": 3
+        },
+        "modelDecisions": {
+          "samples": 6,
+          "p50": 4,
+          "p95": 4
+        },
+        "responseBytes": {
+          "samples": 6,
+          "p50": 2109,
+          "p95": 8960
+        },
+        "foregroundChanges": 3,
+        "model": {
+          "calls": 22,
+          "costSource": "cli_reported_estimate",
+          "cliReportedTurns": 44,
+          "inputTokens": 44,
+          "outputTokens": 5100,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 99114,
+          "reasoningTokens": null,
+          "reportedCostUsd": 0.44830949999999997
+        }
+      },
+      "rebuild-single": {
+        "assigned": 6,
+        "passed": 2,
+        "failed": 3,
+        "unknown": 1,
+        "setupBlocked": 0,
+        "strictCompletions": 2,
+        "correctRefusals": 0,
+        "correctNoncompletions": 1,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 0,
+        "falseCompletionClaims": 0,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "incomplete",
+        "repeatConsistency": {
+          "repetitions": 2,
+          "groups": 3,
+          "completeGroups": 2,
+          "allPassedRatio": null
+        },
+        "latencyMs": {
+          "samples": 6,
+          "p50": 23128.848083000048,
+          "p95": 36365.241584
+        },
+        "toolCalls": {
+          "samples": 6,
+          "p50": 3,
+          "p95": 4
+        },
+        "modelDecisions": {
+          "samples": 6,
+          "p50": 4,
+          "p95": 5
+        },
+        "responseBytes": {
+          "samples": 6,
+          "p50": 8674,
+          "p95": 13659
+        },
+        "foregroundChanges": 2,
+        "model": {
+          "calls": 23,
+          "costSource": "cli_reported_estimate",
+          "cliReportedTurns": 46,
+          "inputTokens": 46,
+          "outputTokens": 7992,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 207555,
+          "reasoningTokens": null,
+          "reportedCostUsd": 0.89834925
+        }
+      },
+      "rebuild-composed": {
+        "assigned": 6,
+        "passed": 3,
+        "failed": 3,
+        "unknown": 0,
+        "setupBlocked": 0,
+        "strictCompletions": 2,
+        "correctRefusals": 0,
+        "correctNoncompletions": 1,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 0,
+        "falseCompletionClaims": 2,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "passed",
+        "repeatConsistency": {
+          "repetitions": 2,
+          "groups": 3,
+          "completeGroups": 3,
+          "allPassedRatio": 0
+        },
+        "latencyMs": {
+          "samples": 6,
+          "p50": 16178.110708,
+          "p95": 37391.918999999994
+        },
+        "toolCalls": {
+          "samples": 6,
+          "p50": 2,
+          "p95": 4
+        },
+        "modelDecisions": {
+          "samples": 6,
+          "p50": 3,
+          "p95": 5
+        },
+        "responseBytes": {
+          "samples": 6,
+          "p50": 8020,
+          "p95": 13413
+        },
+        "foregroundChanges": 3,
+        "model": {
+          "calls": 21,
+          "costSource": "cli_reported_estimate",
+          "cliReportedTurns": 42,
+          "inputTokens": 42,
+          "outputTokens": 6904,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 184234,
+          "reasoningTokens": null,
+          "reportedCostUsd": 0.7945635
+        }
+      }
+    },
+    "candidateSummary": {
+      "assigned": 12,
+      "passed": 5,
+      "failed": 6,
+      "unknown": 1,
+      "setupBlocked": 0,
+      "strictCompletions": 4,
+      "correctRefusals": 0,
+      "correctNoncompletions": 2,
+      "falseConfirmations": 0,
+      "unknownConfirmations": 0,
+      "wrongTargetDispatches": 0,
+      "falseCompletionClaims": 2,
+      "unknownCompletionClaims": 0,
+      "cleanupErrors": 0,
+      "safetyGate": "incomplete",
+      "repeatConsistency": {
+        "repetitions": 2,
+        "groups": 6,
+        "completeGroups": 5,
+        "allPassedRatio": null
+      },
+      "latencyMs": {
+        "samples": 12,
+        "p50": 17886.158916000015,
+        "p95": 37391.918999999994
+      },
+      "toolCalls": {
+        "samples": 12,
+        "p50": 2,
+        "p95": 4
+      },
+      "modelDecisions": {
+        "samples": 12,
+        "p50": 3,
+        "p95": 5
+      },
+      "responseBytes": {
+        "samples": 12,
+        "p50": 8024,
+        "p95": 13659
+      },
+      "foregroundChanges": 5,
+      "model": {
+        "calls": 44,
+        "costSource": "cli_reported_estimate",
+        "cliReportedTurns": 88,
+        "inputTokens": 88,
+        "outputTokens": 14896,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 391789,
+        "reasoningTokens": null,
+        "reportedCostUsd": 1.69291275
+      }
+    },
+    "outcomeSemantics": "Strict completion, expected noncompletion and controller outcome are separate fields. A recognized ignored-write noncompletion remains unknown when a controller error prevents a valid finish.",
+    "controllerErrors": {
+      "count": 3,
+      "overBudgetProposals": 1,
+      "deniedReplayProposals": 2,
+      "extraWrites": 0,
+      "episodes": [
+        {
+          "lane": "rebuild-single",
+          "caseId": "clean",
+          "repeat": 0,
+          "outcome": "failed",
+          "category": "over_budget_proposal",
+          "fixtureWriteAttemptsBeforeDeniedProposal": 0,
+          "extraWritesFromDeniedProposal": 0
+        },
+        {
+          "lane": "rebuild-single",
+          "caseId": "two-controls",
+          "repeat": 0,
+          "outcome": "failed",
+          "category": "denied_mutation_replay",
+          "fixtureWriteAttemptsBeforeDeniedProposal": 1,
+          "extraWritesFromDeniedProposal": 0
+        },
+        {
+          "lane": "rebuild-single",
+          "caseId": "ignored",
+          "repeat": 1,
+          "outcome": "unknown",
+          "category": "denied_mutation_replay",
+          "fixtureWriteAttemptsBeforeDeniedProposal": 1,
+          "extraWritesFromDeniedProposal": 0
+        }
+      ]
+    },
+    "foregroundEvidence": {
+      "endpointChanges": 8,
+      "fixtureActivationDeltasNonzero": 0,
+      "origin": "unattributed",
+      "changedEpisodes": [
+        {
+          "lane": "legacy",
+          "caseId": "clean",
+          "repeat": 0
+        },
+        {
+          "lane": "rebuild-single",
+          "caseId": "ignored",
+          "repeat": 0
+        },
+        {
+          "lane": "rebuild-composed",
+          "caseId": "ignored",
+          "repeat": 0
+        },
+        {
+          "lane": "rebuild-single",
+          "caseId": "two-controls",
+          "repeat": 0
+        },
+        {
+          "lane": "rebuild-composed",
+          "caseId": "two-controls",
+          "repeat": 0
+        },
+        {
+          "lane": "rebuild-composed",
+          "caseId": "clean",
+          "repeat": 1
+        },
+        {
+          "lane": "legacy",
+          "caseId": "ignored",
+          "repeat": 1
+        },
+        {
+          "lane": "legacy",
+          "caseId": "two-controls",
+          "repeat": 1
+        }
+      ]
+    },
+    "completionClaims": {
+      "claimsComplete": 10,
+      "falseValueGoalClaims": 0,
+      "strictFalseCompletionClaims": 4,
+      "allStrictFalseClaimsHadValueGoalSatisfied": true,
+      "strictFailureCriterion": "Foreground preservation failed; value-goal truth does not establish strict completion.",
+      "episodes": [
+        {
+          "lane": "legacy",
+          "caseId": "clean",
+          "repeat": 0
+        },
+        {
+          "lane": "rebuild-composed",
+          "caseId": "two-controls",
+          "repeat": 0
+        },
+        {
+          "lane": "rebuild-composed",
+          "caseId": "clean",
+          "repeat": 1
+        },
+        {
+          "lane": "legacy",
+          "caseId": "two-controls",
+          "repeat": 1
+        }
+      ]
+    },
+    "nativeConfirmationClaims": {
+      "total": 16,
+      "true": 16,
+      "candidate": 10,
+      "legacy": 6,
+      "false": 0,
+      "unknown": 0
+    },
+    "cliAccounting": {
+      "invocations": 67,
+      "successful": 67,
+      "taskInvocations": 66,
+      "pinProbeInvocations": 1,
+      "observedModels": [
+        "claude-sonnet-5"
+      ],
+      "inputTokens": 134,
+      "outputTokens": 20155,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 492063,
+      "reasoningTokens": null,
+      "cliReportedTurns": 134,
+      "cliReportedEstimatedUsd": 2.14796325,
+      "pinProbeEstimatedUsd": 0.006741,
+      "includesPinProbe": true,
+      "usageSource": "all per-model CLI usage; probe included once"
+    },
+    "pairedObservation": {
+      "caseId": "two-controls",
+      "repeat": 1,
+      "single": {
+        "lane": "rebuild-single",
+        "outcome": "passed",
+        "strictCompletion": true,
+        "modelDecisions": 4,
+        "cliReportedTurns": 8,
+        "toolCalls": 3,
+        "fixtureWriteAttempts": 2,
+        "fixtureAppliedWrites": 2,
+        "elapsedMs": 23128.848083000048,
+        "cliReportedEstimatedUsd": 0.1509165
+      },
+      "composed": {
+        "lane": "rebuild-composed",
+        "outcome": "passed",
+        "strictCompletion": true,
+        "modelDecisions": 3,
+        "cliReportedTurns": 6,
+        "toolCalls": 2,
+        "fixtureWriteAttempts": 2,
+        "fixtureAppliedWrites": 2,
+        "elapsedMs": 15713.920541000029,
+        "cliReportedEstimatedUsd": 0.10734675
+      },
+      "interpretation": "One matched pair with strict completion in both lanes. It is not evidence of a general speed, token or cost advantage."
+    },
+    "disposition": "All 18 requested episodes executed: eight passed, nine failed, one unknown. Candidate lanes passed 5/12 with six failures and one unknown; their safety gate remains incomplete. No wrong-target dispatch or false/unknown native confirmation was observed. Milestone acceptance remains incomplete."
+  },
+  "excludedOrInterruptedRuns": {
+    "priorNovember14Attempts": {
+      "reference": "docs/evidence/per-7-per-8-verification-2026-11-14.json",
+      "cliReportedEstimatedUsd": 0.02976825,
+      "pooledWithCorrectedCampaign": false
+    },
+    "interruptedNovember16": {
+      "rawLocalArtifacts": {
+        "report": ".artifacts/evaluation-claude-nov16/report.json",
+        "trace": ".artifacts/evaluation-claude-nov16/trace.jsonl"
+      },
+      "reportSha256": "575ca7c21fbe7e2812fb5251432e585518ff64c574cd01f4570de704d44f3a85",
+      "traceSha256": "f28cd6dcf3b9268a579c4ee39b684bdafe8bb655ebc37d43079ef15b2408d257",
+      "source": {
+        "revision": "5f0a243a6c3e1655559434695fa1d6250a610b9a",
+        "dirty": false,
+        ".artifacts/runtime-install/cua-host": "9f8e9411d2f0aef0d823be1c6c3d6225030698cc8bb1c2ca8e8a3d0f8e77c257",
+        ".artifacts/runtime-install/cua-runtime": "4bb4f3f0efb0d88d7aec56888d072ea04d5f0548c04583d33e1aed0e2cad2082",
+        "native_helper": "d9e29751912cf2ec79647b25a87095de1d2aab4fb8780196631ce282cf4c8466",
+        "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2",
+        "harnessSha256": {
+          "run.mjs": "12d416c954bad4f97d4ee763fec0147643346f691f34a49d8dc4fe211ecbd967",
+          "adapters.mjs": "21a24fb298ed5cad0f0c13b67700e64c5a20669f466ecbbba6c0a4f512e0332c",
+          "model.mjs": "0b2988b3ed7b9c1152d27a31465b6c9d1057e77f2b7d043cd8fead65a2b1ca38",
+          "metrics.mjs": "92b3d06e765fae34d2bd00ccf6d58e388fae7ff190a2ff3f066eb53b4bb93d5d"
+        },
+        "legacySourceRevision": "f1ef2a023e8bedfd340d4832f7b3d94b991d3b91"
+      },
+      "startedAt": "2026-11-16T08:40:20.057Z",
+      "finishedAt": "2026-11-16T08:41:10.940Z",
+      "summary": {
+        "assigned": 18,
+        "passed": 2,
+        "failed": 1,
+        "unknown": 0,
+        "setupBlocked": 15,
+        "strictCompletions": 2,
+        "correctRefusals": 0,
+        "correctNoncompletions": 0,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 0,
+        "falseCompletionClaims": 0,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "incomplete",
+        "repeatConsistency": {
+          "repetitions": 2,
+          "groups": 9,
+          "completeGroups": 0,
+          "allPassedRatio": null
+        },
+        "latencyMs": {
+          "samples": 3,
+          "p50": 15801.544625000002,
+          "p95": 16792.817958
+        },
+        "toolCalls": {
+          "samples": 3,
+          "p50": 2,
+          "p95": 2
+        },
+        "modelDecisions": {
+          "samples": 3,
+          "p50": 3,
+          "p95": 3
+        },
+        "responseBytes": {
+          "samples": 3,
+          "p50": 5588,
+          "p95": 7108
+        },
+        "foregroundChanges": 0,
+        "model": {
+          "calls": 9,
+          "costSource": "cli_reported_estimate",
+          "cliReportedTurns": 18,
+          "inputTokens": null,
+          "outputTokens": null,
+          "cacheReadInputTokens": null,
+          "cacheCreationInputTokens": null,
+          "reasoningTokens": null,
+          "reportedCostUsd": 0.18137175000000003
+        }
+      },
+      "cliReportedEstimatedUsd": 0.18137175,
+      "failedEpisode": {
+        "lane": "rebuild-composed",
+        "caseId": "clean",
+        "repeat": 0,
+        "fixtureWriteAttempts": 0,
+        "disposition": "CLI structured-output retry failure prevented a returned task command. Model-call handling corrected in be3dca6 before the fresh 18-episode campaign."
+      },
+      "pooledWithCorrectedCampaign": false
+    },
+    "diagnosticPreflight": {
+      "rawLocalArtifacts": {
+        "report": ".artifacts/evaluation-preflight-nov16/report.json",
+        "trace": ".artifacts/evaluation-preflight-nov16/trace.jsonl"
+      },
+      "reportSha256": "612a531ee622efc77bdb55b40c3a077b854c6fb7347f841abe07793994693fe4",
+      "traceSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source": {
+        "revision": "5f0a243a6c3e1655559434695fa1d6250a610b9a",
+        "dirty": false,
+        ".artifacts/runtime-install/cua-host": "9f8e9411d2f0aef0d823be1c6c3d6225030698cc8bb1c2ca8e8a3d0f8e77c257",
+        ".artifacts/runtime-install/cua-runtime": "4bb4f3f0efb0d88d7aec56888d072ea04d5f0548c04583d33e1aed0e2cad2082",
+        "native_helper": "d9e29751912cf2ec79647b25a87095de1d2aab4fb8780196631ce282cf4c8466",
+        "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2",
+        "harnessSha256": {
+          "run.mjs": "12d416c954bad4f97d4ee763fec0147643346f691f34a49d8dc4fe211ecbd967",
+          "adapters.mjs": "21a24fb298ed5cad0f0c13b67700e64c5a20669f466ecbbba6c0a4f512e0332c",
+          "model.mjs": "0b2988b3ed7b9c1152d27a31465b6c9d1057e77f2b7d043cd8fead65a2b1ca38",
+          "metrics.mjs": "92b3d06e765fae34d2bd00ccf6d58e388fae7ff190a2ff3f066eb53b4bb93d5d"
+        },
+        "legacySourceRevision": "f1ef2a023e8bedfd340d4832f7b3d94b991d3b91"
+      },
+      "startedAt": "2026-11-16T08:39:58.344Z",
+      "finishedAt": "2026-11-16T08:39:59.136Z",
+      "assigned": 18,
+      "setupBlocked": 18,
+      "modelCalls": 0,
+      "taskMutations": 0,
+      "disposition": "Preflight diagnostic only; not task-performance evidence or part of the completed-run denominators."
+    }
+  },
+  "modelCostLedger": {
+    "source": "cli_reported_estimate",
+    "priorNovember14EstimatedUsd": 0.02976825,
+    "interruptedNovember16EstimatedUsd": 0.18137175,
+    "priorEstimatedUsd": 0.21114,
+    "correctedCampaignEstimatedUsd": 2.14796325,
+    "cumulativeEstimatedUsd": 2.35910325,
+    "authorizedLimitUsd": 5,
+    "estimatedRemainingUsd": 2.64089675,
+    "note": "Includes failed, interrupted and pin-probe calls. CLI estimates are not provider invoices or a hard provider-side billing cap."
+  },
+  "acceptanceGaps": [
+    "Resolve or isolate the retained foreground-associated native failures before calling the repeated native gate clean.",
+    "Resolve model/controller failures and the unknown episode; eight model episodes changed foreground endpoints without fixture activation.",
+    "Repeat a fully judgeable matched model comparison before claiming sustained task reliability or a general efficiency improvement."
+  ],
+  "limitations": [
+    "One disposable AppKit fixture on one Mac; no arbitrary-application success rate or SOTA claim.",
+    "The scripted campaign has nine cases; the paid model campaign covers only clean, ignored-write and two-control cases, twice per lane.",
+    "Fixture activation counters and endpoint samples cannot exclude transient or external foreground changes or prove their origin.",
+    "Native confirmation reports observed state; it does not prove that the action caused that state. Delivery and verification remain separate.",
+    "Advisory ownership excludes cooperating new helpers only; human input, legacy runtimes and unrelated automation can interfere.",
+    "Public PID/bounds/title association is not an OS-attested AX-to-CG identity mapping. Metadata birth/UUID checks do not distinguish every same-image exec.",
+    "Model decisions, CLI-reported turns, tool calls, receipt steps and underlying fixture writes are different measures.",
+    "Mixed-case aggregate latency and a single favorable pair do not establish a general speed or cost benefit.",
+    "Historical full-suite results are referenced separately from fresh November16 checks. Parent PR CI is separate from this local branch and these live campaigns."
+  ],
+  "dataExclusion": {
+    "included": "Counters, aggregate usage/cost, case/lane identifiers, timestamps, relative artifact paths and hashes.",
+    "excluded": [
+      "prompts",
+      "model response text",
+      "fixture state snapshots",
+      "field values",
+      "API keys and credential files",
+      "private absolute paths",
+      "model session identifiers"
+    ]
+  }
+}

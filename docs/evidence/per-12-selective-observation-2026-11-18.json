@@ -1,0 +1,133 @@
+{
+  "source": {
+    "revision": "5e970d5ad499018aa2c8a1f0870bf27ce209ae95",
+    "dirty": false,
+    "hostSha256": "0a9d9efcfa782da096d0234494c31dcf805ce65d293399d6cc8fd14e6a55c6c1",
+    "helperSha256": "0184656ef6a0ba9bbec64c5b0fa047bc41b574437d52240833159247ece44104",
+    "fixtureSha256": "3cc5e09a20067c844e2f090de434f175046211f53367e69a0fafcf265c6d7846",
+    "monitorSha256": "940bb3211b4f22af1efbbb971a11430261b9c6dc3768448b4bee977ee45ad791"
+  },
+  "repetitions": 3,
+  "summary": {
+    "full": {
+      "assigned": 3,
+      "strictPassed": 0,
+      "strictFailed": 3,
+      "unknown": 0,
+      "workflowCompleted": 3,
+      "missedToasts": 3,
+      "falseToastClaims": 0,
+      "unknownToastClaims": 0,
+      "responseBytes": 419411,
+      "historySamples": 0,
+      "measuredMs": {
+        "samples": 3,
+        "p50": 964.5162089999994,
+        "p95": 969.4415829999998
+      },
+      "observeMs": {
+        "samples": 9,
+        "p50": 35.90295800000058,
+        "p95": 49.86366700000053
+      },
+      "helperCpuMs": {
+        "samples": 3,
+        "p50": 40,
+        "p95": 50
+      },
+      "helperMaxObservedRssKiB": {
+        "samples": 3,
+        "p50": 27472,
+        "p95": 27536
+      },
+      "providerCalls": 0,
+      "actualTokens": null,
+      "actualCostUsd": null
+    },
+    "selected": {
+      "assigned": 3,
+      "strictPassed": 0,
+      "strictFailed": 3,
+      "unknown": 0,
+      "workflowCompleted": 3,
+      "missedToasts": 3,
+      "falseToastClaims": 0,
+      "unknownToastClaims": 0,
+      "responseBytes": 124467,
+      "historySamples": 0,
+      "measuredMs": {
+        "samples": 3,
+        "p50": 944.2859159999998,
+        "p95": 953.102667000001
+      },
+      "observeMs": {
+        "samples": 9,
+        "p50": 30.65166700000009,
+        "p95": 37.563083999999435
+      },
+      "helperCpuMs": {
+        "samples": 3,
+        "p50": 40,
+        "p95": 40
+      },
+      "helperMaxObservedRssKiB": {
+        "samples": 3,
+        "p50": 27264,
+        "p95": 27312
+      },
+      "providerCalls": 0,
+      "actualTokens": null,
+      "actualCostUsd": null
+    },
+    "retained": {
+      "assigned": 3,
+      "strictPassed": 3,
+      "strictFailed": 0,
+      "unknown": 0,
+      "workflowCompleted": 3,
+      "missedToasts": 0,
+      "falseToastClaims": 0,
+      "unknownToastClaims": 0,
+      "responseBytes": 147255,
+      "historySamples": 20,
+      "measuredMs": {
+        "samples": 3,
+        "p50": 924.8905,
+        "p95": 932.4389159999992
+      },
+      "observeMs": {
+        "samples": 9,
+        "p50": 16.251291000000492,
+        "p95": 32.93741600000067
+      },
+      "helperCpuMs": {
+        "samples": 3,
+        "p50": 50,
+        "p95": 60
+      },
+      "helperMaxObservedRssKiB": {
+        "samples": 3,
+        "p50": 27360,
+        "p95": 27376
+      },
+      "providerCalls": 0,
+      "actualTokens": null,
+      "actualCostUsd": null
+    }
+  },
+  "model": {
+    "providerCalls": 0,
+    "actualTokens": null,
+    "actualCostUsd": null
+  },
+  "notes": [
+    "Matched scripted evidence comparison, not autonomous model effectiveness or a provider token/cost comparison.",
+    "Fresh fixture/helper per trial; paired timing schedule per repetition. All assigned trials remain in the denominator.",
+    "Delayed dialog is an in-window native AppKit confirmation group, not an OS sheet or new modal window.",
+    "Toast timing oracle is native model journal, not AX readback. Reads wholly inside visibility are true, disjoint reads false, boundary-overlapping reads unknown.",
+    "Tool wire bytes include MCP response duplication, setup and requery calls. Fixed MCP initialization/notifications are excluded; no bytes/4 token estimate is reported.",
+    "ps CPU counters have centisecond resolution; RSS has KiB units. Two endpoint samples are not peak RSS. Fixture/monitor/helper/host CPU are separate.",
+    "Retention rereads share the serial action worker: long operations can delay and miss short transients. Notifications are wakeups, never event-state proof.",
+    "History sample counts are returned counters through the last history read; later samples before cleanup are not included in that count."
+  ]
+}

@@ -1,0 +1,1 @@
+{"kind":"request","message":{"version":1,"id":"request-1","epoch":"helper-epoch-1","budgetMs":5000,"body":{"method":"observe","params":{"target":{"pid":42,"windowId":7},"includeScreenshot":false,"includeValues":false,"includeOcr":true,"ocrQuery":"dispatch","cropWindow":{"x":100.25,"y":20.25,"width":300.5,"height":200.5},"maxImageDimensionPx":160}}}}

@@ -6,3 +6,7 @@ native_helper
 /tmp/
 dist/
 .env
+target/
+.artifacts/
+.build/
+**/.build/

@@ -1,10 +1,56 @@
-# 🍏 macOS Computer Use (MCP Server)
+<img src="brand/app-icon.svg" width="76" height="76" alt="">
+
+# macOS Computer Use
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20(Apple%20Silicon%20%26%20Intel)-lightgrey.svg)]()
 [![Model Context Protocol](https://img.shields.io/badge/MCP-Standard%20Compatible-green.svg)](https://modelcontextprotocol.io)
 
-An ultra-fast, native **Model Context Protocol (MCP)** server that gives LLMs and autonomous agents visual inspection and fail-closed desktop automation on macOS.
+A native **Model Context Protocol (MCP)** server for macOS inspection and desktop automation.
+
+The Rust + Swift rebuild runs alongside the existing Node/Swift server. It now supports semantic observations and a narrow background action path. The [native installation and migration guide](docs/native-delivery.md) covers the standalone universal archive, client configuration, compatibility gaps, rollback and release checks; its end-user binaries require no Node or local compiler.
+
+For a drag-and-drop local install, see the [native disk image and setup instructions](docs/native-delivery.md#install-from-a-disk-image). The [brand kit](brand/README.md) contains the logo and usage guide.
+
+- [Legacy baseline and measurement boundaries](docs/baseline.md) (PER-1)
+- [Disposable two-window macOS fixture](docs/fixture.md)
+- [Rust–Swift protocol and conformance contract](docs/protocol.md) (PER-2)
+- [Rust MCP host, semantic observations, and bounded composition](docs/runtime.md) (PER-3 through PER-8)
+- [Matched fixture and model evaluation](docs/evaluation.md)
+- [Selective AX reads and bounded transient retention](docs/selective-observation.md) (PER-12)
+
+| Rust runtime tool | Implemented scope |
+| --- | --- |
+| `capabilities` | Permission preflight and supported action kinds without permission prompts. |
+| `targets` | Exact process/window keys for visible application windows. |
+| `observe` | Bounded AX controls with retained refs, optional selected scope and bounded selected-state history; on-demand window capture/OCR. AX values are private by default. |
+| `act` | Up to 16 semantic actions or waits per request with separate delivery and verification receipts. An explicitly authorized foreground sequence can use keys or clicks with waits. |
+| `waitFor` | Wait for presence, absence, enabled state, exact value, or exact window-key absence; closed-window proof needs no new observation. |
+
+The runtime associates CG and AX windows through a unique PID, exact logical bounds, and available titles. Each action revalidates the retained AX object, owning window, observed role and subrole, and raw AX identifier. On macOS 14+, opt-in screenshots and Vision OCR return mapped visual evidence. macOS 13 supports the semantic route. Foreground keys and clicks require an operator grant and explicit per-sequence selection.
+
+Sequences use one target, one original observation, and one whole-request deadline. Settled progress is written before the next input step. References keep their original 60-second expiry. Optional feedback reports bounded changes to requested public projections using the same refs; `feedback: null` means unavailable, not unchanged. Values require explicit inclusion. Read-only waits never claim input dispatch.
+
+```sh
+npm run build:runtime
+npm run start:rust
+```
+
+Set `CUA_VISUAL_FEEDBACK=1` to show a window marker, agent pointer, and writing cues while the native server works. Set `CUA_LIVE_PREVIEW=1` to watch the selected window and its attached sheet in a local floating panel. See [on-screen feedback](docs/runtime.md#on-screen-feedback) and [live preview](docs/runtime.md#live-preview) for MCP setup.
+
+For automated checks, run `npm run test:runtime`. To exercise the installed pair against only the disposable fixture:
+
+```sh
+sh test/fixtures/macos/build.sh
+node test/runtime/semantic-live.mjs --repetitions 3
+node test/runtime/composition-live.mjs --repetitions 3
+```
+
+The live runners record setup separately from graded scenario latency. The composition campaign covers bounded sequences and fault handling; [evaluation.md](docs/evaluation.md) describes the separate matched scripted/model comparison. See [runtime.md](docs/runtime.md) for execution, privacy, locking, and evidence boundaries. `npm run test:foundations` and the `baseline:*` commands remain available for the legacy comparison.
+
+## Existing Node/Swift server
+
+The npm entry point (`server.mjs`, including `npx macos-computer-use-mcp`) still starts the existing server described below. The new Rust pair is launched explicitly with `npm run start:rust` or its installed executable.
 
 Built with a compiled Swift core leveraging Apple's native **CoreGraphics**, **Vision OCR (`VNRecognizeTextRequest`)**, and **Accessibility APIs** for semantic background actions. Untargeted input remains an explicit global CoreGraphics fallback.
 

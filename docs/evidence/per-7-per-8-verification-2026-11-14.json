@@ -1,0 +1,637 @@
+{
+  "schemaVersion": 1,
+  "milestones": [
+    "PER-7",
+    "PER-8"
+  ],
+  "status": "implementation_complete_validation_pending",
+  "recordedAt": "2026-11-14T15:09:44.466701+00:00",
+  "branch": "feat/verified-loop-composition-per7-per8",
+  "source": {
+    "revision": "d954e6e4e89bb9edc0354c038bae3ec0fab3fea4",
+    "dirtyBeforeEvidence": false,
+    "hostSha256": "9f8e9411d2f0aef0d823be1c6c3d6225030698cc8bb1c2ca8e8a3d0f8e77c257",
+    "helperSha256": "4bb4f3f0efb0d88d7aec56888d072ea04d5f0548c04583d33e1aed0e2cad2082",
+    "fixtureSha256": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2"
+  },
+  "parentPullRequest": {
+    "url": "https://github.com/johnexzy/macos-computer-use/pull/10",
+    "head": "338dd878946b04d7aa5b69011634e273dc1c19a1",
+    "base": "feat/rust-host-swift-runtime-per3-per4",
+    "ci": "success",
+    "run": "https://github.com/johnexzy/macos-computer-use/actions/runs/43601864912"
+  },
+  "automated": {
+    "passed": 186,
+    "failed": 0,
+    "skipped": 1,
+    "suites": {
+      "rustWorkspace": {
+        "passed": 36
+      },
+      "swiftRuntime": {
+        "passed": 90
+      },
+      "swiftProtocol": {
+        "passed": 12
+      },
+      "installedMcpProcesses": {
+        "passed": 10
+      },
+      "legacyServer": {
+        "passed": 11,
+        "skipped": 1,
+        "skipReason": "Live cursor overlay requires an unlocked interactive desktop session"
+      },
+      "baselineMetrics": {
+        "passed": 11
+      },
+      "evaluation": {
+        "passed": 16
+      }
+    },
+    "checks": [
+      "cargo fmt --all -- --check",
+      "cargo clippy --workspace --all-targets -- -D warnings"
+    ],
+    "localLogSha256": {
+      ".artifacts/final-node-tests.log": "a34647a6ead833b1e2a347e6da71ca2997f5106541fac65a6770005514f34db0",
+      ".artifacts/final-rust-tests.log": "2ecca635a468870097016df1fd24954239099aef54a1cbfc542a91c5ef7224d8",
+      ".artifacts/final-clippy.log": "59639588a6f1826f129cbcd121edc07279dab94786f5fa5bde6b3439b2e845cc",
+      ".artifacts/final-swift-tests.log": "b068aa89c5f184ad0aa2e17b0b672983205593efd6f0825a7dfc3ccc60a4cc61",
+      ".artifacts/final-swift-protocol-tests.log": "c162a9347274fbb48638ed6ae604e6a2fcb4cb8c3c9e1f5a491cbd11f1a4bcf4"
+    }
+  },
+  "latestNativeSmoke": {
+    "rawLocalArtifacts": ".artifacts/composition-generation-smoke/{report.json,trace.jsonl}",
+    "reportSha256": "0588ba34feaec7d0bc244963604ec8d67f7a5480f71e964fbeffccd055bbe601",
+    "traceSha256": "418c4ba44033b11142870e983b5ecc2468aa879e7b91dadcdbbd421f8ff940f9",
+    "source": {
+      "revision": "6a86248fc6fea37b0a41812a14a69462ea9f3525",
+      "dirty": false,
+      "hostSha256": "9f8e9411d2f0aef0d823be1c6c3d6225030698cc8bb1c2ca8e8a3d0f8e77c257",
+      "helperSha256": "4bb4f3f0efb0d88d7aec56888d072ea04d5f0548c04583d33e1aed0e2cad2082",
+      "fixtureSha256": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2"
+    },
+    "startedAt": "2026-11-14T14:49:13.304Z",
+    "finishedAt": "2026-11-14T14:49:26.728Z",
+    "summary": {
+      "assigned": 12,
+      "passed": 12,
+      "failed": 0,
+      "setupBlocked": 0,
+      "cleanupErrors": 0,
+      "latencyMs": {
+        "samples": 12,
+        "p50": 267.86087499999985,
+        "p95": 1332.3815830000003
+      }
+    },
+    "disposition": "All twelve native scenarios passed once after the metadata and wait-outcome corrections. The three fault cases kill the actual Swift child using causal gates. Repeated confirmation on the corrected binary remains pending."
+  },
+  "earlierRepeatedNativeCampaign": {
+    "rawLocalArtifacts": ".artifacts/composition-final/{report.json,trace.jsonl}",
+    "reportSha256": "06974c5e913129b7044659871b64878f8015574a7be69736f552dc32c276251a",
+    "traceSha256": "ff78d91a7b156a35ef3f0d756e485c85a87e2ff71802a0a9e6bf82f3f5992662",
+    "source": {
+      "revision": "2d8c01f97435686b7a3cfdbd9546b65478d344c2",
+      "dirty": false,
+      "hostSha256": "3161c059737fb9ec315b34a300eebab84fbe1f6ec5fdfb32bb2db5ac051cfeb2",
+      "helperSha256": "c0de276623538d14645749cb66052ff43433c8d966448860ce7b8ea08814b776",
+      "fixtureSha256": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2"
+    },
+    "startedAt": "2026-11-14T14:20:45.078Z",
+    "finishedAt": "2026-11-14T14:21:16.809Z",
+    "summary": {
+      "assigned": 36,
+      "passed": 30,
+      "failed": 6,
+      "setupBlocked": 0,
+      "cleanupErrors": 0,
+      "latencyMs": {
+        "samples": 36,
+        "p50": 227.9350000000013,
+        "p95": 1218.0966660000013
+      }
+    },
+    "disposition": "Six failures retained: one negative wait final was lost at the host deadline; two graded observations lost process metadata; two safe sequence failures occurred before the expected remainder or deadline; one foreground endpoint changed with fixture activation count zero. Metadata lookup and negative wait reconciliation were corrected in6a86248. The endpoint change is unattributed, not evidence of fixture activation. This campaign is superseded for code correctness, not erased."
+  },
+  "earlierScriptedComparison": {
+    "rawLocalArtifacts": ".artifacts/evaluation-scripted-final/{report.json,trace.jsonl}",
+    "reportSha256": "8badf040d060a002c435c175dda68d9de7214f4acc99ec60eabd9b246b7d45d6",
+    "traceSha256": "42f261d10e43934c473f9c8719c88ee42954f241447da858e1ef251a127ca216",
+    "source": {
+      "revision": "2d8c01f97435686b7a3cfdbd9546b65478d344c2",
+      "dirty": false,
+      ".artifacts/runtime-install/cua-host": "3161c059737fb9ec315b34a300eebab84fbe1f6ec5fdfb32bb2db5ac051cfeb2",
+      ".artifacts/runtime-install/cua-runtime": "c0de276623538d14645749cb66052ff43433c8d966448860ce7b8ea08814b776",
+      "native_helper": "d9e29751912cf2ec79647b25a87095de1d2aab4fb8780196631ce282cf4c8466",
+      "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2",
+      "harnessSha256": {
+        "run.mjs": "123c0628aeff05866bb96c3786da886799435e4f2bf4a30747f0570f76919434",
+        "adapters.mjs": "21a24fb298ed5cad0f0c13b67700e64c5a20669f466ecbbba6c0a4f512e0332c",
+        "model.mjs": "a06ac6ed3434bc5c22eec2d5d3329935b20def22afd2a9089f3b95a20f2aec5e",
+        "metrics.mjs": "8dc7d3f4eea83869cccb00bbafd182d30290c2e323db685e8f92f4b32f1b72c7"
+      },
+      "legacySourceRevision": "f1ef2a023e8bedfd340d4832f7b3d94b991d3b91"
+    },
+    "startedAt": "2026-11-14T14:21:16.847Z",
+    "finishedAt": "2026-11-14T14:22:36.055Z",
+    "summary": {
+      "assigned": 81,
+      "passed": 73,
+      "failed": 8,
+      "unknown": 0,
+      "setupBlocked": 0,
+      "strictCompletions": 53,
+      "correctRefusals": 12,
+      "correctNoncompletions": 8,
+      "falseConfirmations": 0,
+      "unknownConfirmations": 0,
+      "wrongTargetDispatches": 6,
+      "falseCompletionClaims": 0,
+      "unknownCompletionClaims": 0,
+      "cleanupErrors": 0,
+      "safetyGate": "blocked",
+      "repeatConsistency": {
+        "repetitions": 3,
+        "groups": 27,
+        "completeGroups": 27,
+        "allPassedRatio": 0.8518518518518519
+      },
+      "latencyMs": {
+        "samples": 81,
+        "p50": 164.2495839999974,
+        "p95": 6016.801749999999
+      },
+      "toolCalls": {
+        "samples": 81,
+        "p50": 3,
+        "p95": 4
+      },
+      "modelDecisions": {
+        "samples": 0,
+        "p50": null,
+        "p95": null
+      },
+      "responseBytes": {
+        "samples": 81,
+        "p50": 7693,
+        "p95": 14324
+      },
+      "foregroundChanges": 2,
+      "model": {
+        "calls": 0,
+        "cliReportedTurns": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheReadInputTokens": null,
+        "cacheCreationInputTokens": null,
+        "reasoningTokens": null,
+        "reportedCostUsd": null
+      }
+    },
+    "byLane": {
+      "legacy": {
+        "assigned": 27,
+        "passed": 20,
+        "failed": 7,
+        "unknown": 0,
+        "setupBlocked": 0,
+        "strictCompletions": 17,
+        "correctRefusals": 0,
+        "correctNoncompletions": 3,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 6,
+        "falseCompletionClaims": 0,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "blocked",
+        "repeatConsistency": {
+          "repetitions": 3,
+          "groups": 9,
+          "completeGroups": 9,
+          "allPassedRatio": 0.6666666666666666
+        },
+        "latencyMs": {
+          "samples": 27,
+          "p50": 389.98020800000086,
+          "p95": 605.3874159999978
+        },
+        "toolCalls": {
+          "samples": 27,
+          "p50": 3,
+          "p95": 5
+        },
+        "modelDecisions": {
+          "samples": 0,
+          "p50": null,
+          "p95": null
+        },
+        "responseBytes": {
+          "samples": 27,
+          "p50": 3920,
+          "p95": 5372
+        },
+        "foregroundChanges": 1,
+        "model": {
+          "calls": 0,
+          "cliReportedTurns": null,
+          "inputTokens": null,
+          "outputTokens": null,
+          "cacheReadInputTokens": null,
+          "cacheCreationInputTokens": null,
+          "reasoningTokens": null,
+          "reportedCostUsd": null
+        }
+      },
+      "rebuild-single": {
+        "assigned": 27,
+        "passed": 27,
+        "failed": 0,
+        "unknown": 0,
+        "setupBlocked": 0,
+        "strictCompletions": 18,
+        "correctRefusals": 6,
+        "correctNoncompletions": 3,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 0,
+        "falseCompletionClaims": 0,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "passed",
+        "repeatConsistency": {
+          "repetitions": 3,
+          "groups": 9,
+          "completeGroups": 9,
+          "allPassedRatio": 1
+        },
+        "latencyMs": {
+          "samples": 27,
+          "p50": 115.57308400000329,
+          "p95": 6019.762624999996
+        },
+        "toolCalls": {
+          "samples": 27,
+          "p50": 3,
+          "p95": 4
+        },
+        "modelDecisions": {
+          "samples": 0,
+          "p50": null,
+          "p95": null
+        },
+        "responseBytes": {
+          "samples": 27,
+          "p50": 13392,
+          "p95": 14978
+        },
+        "foregroundChanges": 0,
+        "model": {
+          "calls": 0,
+          "cliReportedTurns": null,
+          "inputTokens": null,
+          "outputTokens": null,
+          "cacheReadInputTokens": null,
+          "cacheCreationInputTokens": null,
+          "reasoningTokens": null,
+          "reportedCostUsd": null
+        }
+      },
+      "rebuild-composed": {
+        "assigned": 27,
+        "passed": 26,
+        "failed": 1,
+        "unknown": 0,
+        "setupBlocked": 0,
+        "strictCompletions": 18,
+        "correctRefusals": 6,
+        "correctNoncompletions": 2,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 0,
+        "falseCompletionClaims": 0,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "passed",
+        "repeatConsistency": {
+          "repetitions": 3,
+          "groups": 9,
+          "completeGroups": 9,
+          "allPassedRatio": 0.8888888888888888
+        },
+        "latencyMs": {
+          "samples": 27,
+          "p50": 110.08350000000064,
+          "p95": 6016.801749999999
+        },
+        "toolCalls": {
+          "samples": 27,
+          "p50": 3,
+          "p95": 3
+        },
+        "modelDecisions": {
+          "samples": 0,
+          "p50": null,
+          "p95": null
+        },
+        "responseBytes": {
+          "samples": 27,
+          "p50": 13392,
+          "p95": 14324
+        },
+        "foregroundChanges": 1,
+        "model": {
+          "calls": 0,
+          "cliReportedTurns": null,
+          "inputTokens": null,
+          "outputTokens": null,
+          "cacheReadInputTokens": null,
+          "cacheCreationInputTokens": null,
+          "reasoningTokens": null,
+          "reportedCostUsd": null
+        }
+      }
+    },
+    "candidateSummary": {
+      "assigned": 54,
+      "passed": 53,
+      "failed": 1,
+      "unknown": 0,
+      "setupBlocked": 0,
+      "strictCompletions": 36,
+      "correctRefusals": 12,
+      "correctNoncompletions": 5,
+      "falseConfirmations": 0,
+      "unknownConfirmations": 0,
+      "wrongTargetDispatches": 0,
+      "falseCompletionClaims": 0,
+      "unknownCompletionClaims": 0,
+      "cleanupErrors": 0,
+      "safetyGate": "passed",
+      "repeatConsistency": {
+        "repetitions": 3,
+        "groups": 18,
+        "completeGroups": 18,
+        "allPassedRatio": 0.9444444444444444
+      },
+      "latencyMs": {
+        "samples": 54,
+        "p50": 112.44966700000077,
+        "p95": 6019.355500000005
+      },
+      "toolCalls": {
+        "samples": 54,
+        "p50": 3,
+        "p95": 4
+      },
+      "modelDecisions": {
+        "samples": 0,
+        "p50": null,
+        "p95": null
+      },
+      "responseBytes": {
+        "samples": 54,
+        "p50": 13392,
+        "p95": 14978
+      },
+      "foregroundChanges": 1,
+      "model": {
+        "calls": 0,
+        "cliReportedTurns": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheReadInputTokens": null,
+        "cacheCreationInputTokens": null,
+        "reasoningTokens": null,
+        "reportedCostUsd": null
+      }
+    },
+    "disposition": "Pre-correction diagnostic campaign. Candidate lanes had no observed wrong-target dispatch or false confirmation. One candidate ignored-write episode had foreground interference and no dispatched input. Legacy had six wrong-target dispatches. This is scripted fixture conformance, not model task performance. Repeat on corrected binaries pending."
+  },
+  "modelAttempts": [
+    {
+      "rawLocalArtifacts": ".artifacts/evaluation-claude-final/{report.json,trace.jsonl}",
+      "reportSha256": "ed34b10a4f61bf85934d9c64c3a21d99ffe12eefcdff998317f5f512b69e3031",
+      "traceSha256": "78bc52baaf1959e978824bd25f2a6c491e49715dd30762976998711d93803a10",
+      "source": {
+        "revision": "6a86248fc6fea37b0a41812a14a69462ea9f3525",
+        "dirty": false,
+        ".artifacts/runtime-install/cua-host": "9f8e9411d2f0aef0d823be1c6c3d6225030698cc8bb1c2ca8e8a3d0f8e77c257",
+        ".artifacts/runtime-install/cua-runtime": "4bb4f3f0efb0d88d7aec56888d072ea04d5f0548c04583d33e1aed0e2cad2082",
+        "native_helper": "d9e29751912cf2ec79647b25a87095de1d2aab4fb8780196631ce282cf4c8466",
+        "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2",
+        "harnessSha256": {
+          "run.mjs": "123c0628aeff05866bb96c3786da886799435e4f2bf4a30747f0570f76919434",
+          "adapters.mjs": "21a24fb298ed5cad0f0c13b67700e64c5a20669f466ecbbba6c0a4f512e0332c",
+          "model.mjs": "a06ac6ed3434bc5c22eec2d5d3329935b20def22afd2a9089f3b95a20f2aec5e",
+          "metrics.mjs": "8dc7d3f4eea83869cccb00bbafd182d30290c2e323db685e8f92f4b32f1b72c7"
+        },
+        "legacySourceRevision": "f1ef2a023e8bedfd340d4832f7b3d94b991d3b91"
+      },
+      "startedAt": "2026-11-14T14:50:26.984Z",
+      "finishedAt": "2026-11-14T14:50:38.643Z",
+      "summary": {
+        "assigned": 18,
+        "passed": 0,
+        "failed": 1,
+        "unknown": 0,
+        "setupBlocked": 17,
+        "strictCompletions": 0,
+        "correctRefusals": 0,
+        "correctNoncompletions": 0,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 0,
+        "falseCompletionClaims": 0,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "incomplete",
+        "repeatConsistency": {
+          "repetitions": 2,
+          "groups": 9,
+          "completeGroups": 0,
+          "allPassedRatio": null
+        },
+        "latencyMs": {
+          "samples": 1,
+          "p50": 5070.555917,
+          "p95": 5070.555917
+        },
+        "toolCalls": {
+          "samples": 1,
+          "p50": 0,
+          "p95": 0
+        },
+        "modelDecisions": {
+          "samples": 1,
+          "p50": 1,
+          "p95": 1
+        },
+        "responseBytes": {
+          "samples": 1,
+          "p50": 0,
+          "p95": 0
+        },
+        "foregroundChanges": 0,
+        "model": {
+          "calls": 2,
+          "cliReportedTurns": 4,
+          "inputTokens": 4,
+          "outputTokens": 384,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 4123,
+          "reasoningTokens": null,
+          "reportedCostUsd": 0.02304225
+        }
+      },
+      "requestedModel": "sonnet",
+      "resolvedModel": "claude-sonnet-5",
+      "observedModels": [
+        "claude-haiku-4-5-20251001",
+        "claude-sonnet-5"
+      ],
+      "cliInvocations": 2,
+      "allModelUsageRecomputed": {
+        "inputTokens": 1743,
+        "outputTokens": 398,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 4123
+      },
+      "cliReportedEstimatedCostUsd": 0.02304225,
+      "disposition": "Stopped before any task tool call because a task CLI invocation used auxiliary Haiku alongside the pinned Sonnet model. Roles and complete per-model usage accounting were corrected in d954e6e."
+    },
+    {
+      "rawLocalArtifacts": ".artifacts/evaluation-claude-verified/{report.json,trace.jsonl}",
+      "reportSha256": "b9c776f349efc8cb4f25dc9d165c65aad8e30637a007e1922a71c35492877590",
+      "traceSha256": "11dd5694e892cf239e32724b1587d6ec14bcc53b63f6cf5f06d90dff421fcae9",
+      "source": {
+        "revision": "d954e6e4e89bb9edc0354c038bae3ec0fab3fea4",
+        "dirty": false,
+        ".artifacts/runtime-install/cua-host": "9f8e9411d2f0aef0d823be1c6c3d6225030698cc8bb1c2ca8e8a3d0f8e77c257",
+        ".artifacts/runtime-install/cua-runtime": "4bb4f3f0efb0d88d7aec56888d072ea04d5f0548c04583d33e1aed0e2cad2082",
+        "native_helper": "d9e29751912cf2ec79647b25a87095de1d2aab4fb8780196631ce282cf4c8466",
+        "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture": "6dd3105bfac54ae520038270836657b422fc54177620868e6985cfd6081b46d2",
+        "harnessSha256": {
+          "run.mjs": "12d416c954bad4f97d4ee763fec0147643346f691f34a49d8dc4fe211ecbd967",
+          "adapters.mjs": "21a24fb298ed5cad0f0c13b67700e64c5a20669f466ecbbba6c0a4f512e0332c",
+          "model.mjs": "0b2988b3ed7b9c1152d27a31465b6c9d1057e77f2b7d043cd8fead65a2b1ca38",
+          "metrics.mjs": "92b3d06e765fae34d2bd00ccf6d58e388fae7ff190a2ff3f066eb53b4bb93d5d"
+        },
+        "legacySourceRevision": "f1ef2a023e8bedfd340d4832f7b3d94b991d3b91"
+      },
+      "startedAt": "2026-11-14T15:00:30.717Z",
+      "finishedAt": "2026-11-14T15:02:10.881Z",
+      "summary": {
+        "assigned": 18,
+        "passed": 0,
+        "failed": 0,
+        "unknown": 0,
+        "setupBlocked": 18,
+        "strictCompletions": 0,
+        "correctRefusals": 0,
+        "correctNoncompletions": 0,
+        "falseConfirmations": 0,
+        "unknownConfirmations": 0,
+        "wrongTargetDispatches": 0,
+        "falseCompletionClaims": 0,
+        "unknownCompletionClaims": 0,
+        "cleanupErrors": 0,
+        "safetyGate": "incomplete",
+        "repeatConsistency": {
+          "repetitions": 2,
+          "groups": 9,
+          "completeGroups": 0,
+          "allPassedRatio": null
+        },
+        "latencyMs": {
+          "samples": 0,
+          "p50": null,
+          "p95": null
+        },
+        "toolCalls": {
+          "samples": 0,
+          "p50": null,
+          "p95": null
+        },
+        "modelDecisions": {
+          "samples": 0,
+          "p50": null,
+          "p95": null
+        },
+        "responseBytes": {
+          "samples": 0,
+          "p50": null,
+          "p95": null
+        },
+        "foregroundChanges": 0,
+        "model": {
+          "calls": 1,
+          "costSource": "cli_reported_estimate",
+          "cliReportedTurns": 2,
+          "inputTokens": 2,
+          "outputTokens": 158,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 1160,
+          "reasoningTokens": null,
+          "reportedCostUsd": 0.006725999999999999
+        }
+      },
+      "requestedModel": "claude-sonnet-5",
+      "resolvedModel": "claude-sonnet-5",
+      "observedModels": [
+        "claude-sonnet-5"
+      ],
+      "cliInvocations": 1,
+      "allModelUsageRecomputed": {
+        "inputTokens": 2,
+        "outputTokens": 158,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 1160
+      },
+      "cliReportedEstimatedCostUsd": 0.006725999999999999,
+      "disposition": "Exact Sonnet5-only probe succeeded, but all eighteen tasks were blocked at AX setup. A subsequent read-only IOConsoleUsers inspection confirmed the desktop was locked. No task model invocation or mutation occurred. Awaiting user unlock."
+    }
+  ],
+  "modelCostLedger": {
+    "source": "cli_reported_estimate",
+    "knownEstimatedUsd": 0.02976825,
+    "authorizedLimitUsd": 5,
+    "nextCampaignLimitUsd": 4.96,
+    "note": "CLI estimates are not provider invoices or a hard provider-side billing cap. Failed and pin-probe calls are included. No completed model comparison is available."
+  },
+  "excludedDevelopmentCampaigns": [
+    {
+      "path": ".artifacts/composition-smoke",
+      "disposition": "Initial crash harness killed the relay, not the actual Swift child; excluded as proof of native-crash behavior."
+    },
+    {
+      "path": ".artifacts/composition-native-crash-smoke",
+      "disposition": "Dirty-tree diagnostic:11/12 passed; one graded metadata lookup failed. Followed by committed repeated run and correction."
+    },
+    {
+      "path": ".artifacts/evaluation-scripted-smoke",
+      "disposition": "Dirty-tree diagnostic. Confirmation oracle identity semantics and final-witness overwrite handling were corrected before the clean81-episode campaign. Not pooled with later denominators."
+    },
+    {
+      "path": ".artifacts/evaluation-auth-preflight",
+      "disposition": "Local auth preflight only; zero API calls or task episodes."
+    }
+  ],
+  "acceptanceGaps": [
+    "Repeat the36 native scenarios on the corrected binaries while the desktop is unlocked.",
+    "Repeat the81 scripted episodes on the corrected binaries.",
+    "Complete the18 matched Claude episodes across legacy, single-step and composed lanes within the remaining budget.",
+    "Report per-lane model turns, underlying actions, strict completion, latency, all input/output/cache token usage and estimated cost from completed matched episodes."
+  ],
+  "limitations": [
+    "One disposable AppKit fixture on one Mac; no arbitrary-app success rate or SOTA claim.",
+    "Public PID/bounds/title association is not an OS-attested AX-to-CG window identity mapping.",
+    "Kernel process birth and executable UUID protect the metadata cache against observed process/image changes, but do not distinguish every same-image exec.",
+    "Advisory mutation ownership excludes cooperating new helpers only. Human input, legacy runtimes and unrelated automation can interfere. Foreground endpoints do not rule out transient changes.",
+    "No performance gain follows from the language choice alone. Mixed scenario latency distributions and scripted tool counts do not establish lower model cost.",
+    "PER-7/PER-8 remain local and opt-in, with no PR, remote CI, default entry migration or deployment claimed."
+  ]
+}

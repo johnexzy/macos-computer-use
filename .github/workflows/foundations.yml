@@ -1,0 +1,41 @@
+name: Rust and Swift foundations
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  foundations:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Install development dependencies
+        run: npm ci --ignore-scripts
+      - name: Install Rust checks
+        run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - name: Check Rust contract
+        run: |
+          cargo +stable fmt --all -- --check
+          cargo +stable clippy --workspace --all-targets -- -D warnings
+          cargo +stable test --workspace
+      - name: Check Swift conformance
+        run: |
+          swift test --package-path protocol/swift
+          swift test
+      - name: Build and verify installed native runtime
+        run: |
+          sh scripts/build-runtime.sh
+          python3 runtime/Tests/process-smoke.py
+          node --test test/runtime/*.test.mjs
+      - name: Check baseline metrics and fixture build
+        run: |
+          node --test test/baseline/*.test.mjs test/evaluation/*.test.mjs
+          npm run build
+          sh test/fixtures/macos/build.sh
