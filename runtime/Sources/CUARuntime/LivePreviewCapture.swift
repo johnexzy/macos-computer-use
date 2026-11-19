@@ -51,12 +51,21 @@ struct LivePreviewTarget: Equatable, Sendable {
             let output = PreviewStreamOutput(continuation: continuation)
             let stream = SCStream(filter: scope.filter, configuration: scope.configuration, delegate: output)
             try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: output.queue)
-            try await stream.startCapture()
+            // Keep SCStream on the main actor across SDK versions.
+            try await withCheckedThrowingContinuation { (reply: CheckedContinuation<Void, any Error>) in
+                stream.startCapture { @Sendable error in
+                    reply.resume(with: error.map(Result.failure) ?? .success(()))
+                }
+            }
             for await image in frames {
                 guard !Task.isCancelled else { break }
                 onFrame(image, scope.viewport)
             }
-            try await stream.stopCapture()
+            try await withCheckedThrowingContinuation { (reply: CheckedContinuation<Void, any Error>) in
+                stream.stopCapture { @Sendable error in
+                    reply.resume(with: error.map(Result.failure) ?? .success(()))
+                }
+            }
         } catch {
             // A stopped, cancelled, or unavailable preview never affects the native action.
         }
