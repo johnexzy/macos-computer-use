@@ -132,7 +132,8 @@ final class ForegroundControl {
               target.backend.same(focused, target.retainedWindow) else { throw stop(.windowChanged) }
     }
 
-    func post(_ operation: CUAProtocol.Operation, observation: Observation, checkGuard: () throws -> Void, willDispatch: () throws -> Void) throws {
+    func post(_ operation: CUAProtocol.Operation, observation: Observation, checkGuard: () throws -> Void,
+              beforeClick: ((Point) throws -> Void)? = nil, willDispatch: () throws -> Void) throws {
         try checkContext()
         guard platform.permissionAvailable() else { throw stop(.permissionUnavailable) }
         // Resolve coordinates from the original image before making any activation request.
@@ -153,6 +154,10 @@ final class ForegroundControl {
             input = .key(value.key)
         case .click:
             guard let click else { throw stop(.frameChanged) }
+            if let beforeClick {
+                try beforeClick(click.screen)
+                try checkFocused()
+            }
             do { try click.validate(capture: capture, target: target.target, context: context) }
             catch is ForegroundStopped { throw stop(.frameChanged) }
             catch is VisualCaptureFailure { throw stop(.frameChanged) }

@@ -249,10 +249,13 @@ public final class RuntimeSession: @unchecked Sendable {
                     try ticket.wait(context: context)
                 }
             } else { progress = nil }
-            let result = actions.act(act, entry: retained, context: context, state: execution, progress: progress)
-            return NativeResult(.act(result), activity: activityOverlay.flatMap { _ in
+            let result = actions.act(act, entry: retained, context: context, state: execution,
+                                     progress: progress, activityOverlay: activityOverlay)
+            let activity = activityOverlay.flatMap { _ in
                 DesktopActivity.action(act, result: result, observation: retained.observation)
-            })
+            }
+            if activity == nil || context.interruption != nil { activityOverlay?.discardApproach() }
+            return NativeResult(.act(result), activity: activity)
         case .waitFor(let wait):
             let retained = try observations.lookup(wait.observationId, epoch: epoch, target: wait.target)
             let started = unixMilliseconds()

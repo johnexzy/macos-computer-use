@@ -51,6 +51,11 @@ public struct BackgroundActions: Sendable {
 
     public func act(_ request: ActRequest, entry: RetainedObservation, context: OperationContext,
                     state: ActionExecutionState, progress: ProgressSink? = nil) -> ActResult {
+        act(request, entry: entry, context: context, state: state, progress: progress, activityOverlay: nil)
+    }
+
+    func act(_ request: ActRequest, entry: RetainedObservation, context: OperationContext,
+             state: ActionExecutionState, progress: ProgressSink?, activityOverlay: DesktopActivityOverlay?) -> ActResult {
         let hasMutation = request.steps.contains { if case .waitFor = $0.operation { return false }; return true }
         if hasMutation && request.steps.count > 1 && progress == nil {
             state.finish(reason: .unsupported, stop: .unsupported); return state.snapshot()
@@ -82,10 +87,12 @@ public struct BackgroundActions: Sendable {
                     reason = try waitStep(wait.condition, entry: entry, handle: handle, context: context,
                                           state: state, foreground: foreground)
                 } else if let foreground {
-                    let already = try executeForeground(step, entry: entry, handle: handle, context: context, state: state, control: foreground)
+                    let already = try executeForeground(step, entry: entry, handle: handle, context: context,
+                                                        state: state, control: foreground, activityOverlay: activityOverlay)
                     reason = already ? .alreadySatisfied : nil
                 } else {
-                    let already = try execute(step, entry: entry, handle: handle, context: context, state: state, before: before)
+                    let already = try execute(step, entry: entry, handle: handle, context: context,
+                                              state: state, before: before, activityOverlay: activityOverlay)
                     reason = already ? .alreadySatisfied : nil
                 }
                 try foreground?.checkContext()
@@ -152,7 +159,8 @@ public struct BackgroundActions: Sendable {
     }
 
     private func executeForeground(_ step: ActionStep, entry: RetainedObservation, handle: SemanticObservationHandle,
-                                   context: OperationContext, state: ActionExecutionState, control: ForegroundControl) throws -> Bool {
+                                   context: OperationContext, state: ActionExecutionState, control: ForegroundControl,
+                                   activityOverlay: DesktopActivityOverlay?) throws -> Bool {
         let route: DeliveryRoute
         switch step.operation {
         case .click: route = .foregroundClick
@@ -176,7 +184,13 @@ public struct BackgroundActions: Sendable {
             return true
         }
 
-        try control.post(step.operation, observation: entry.observation, checkGuard: checkGuard) {
+        let approach: ((Point) throws -> Void)? = activityOverlay.map { overlay in
+            { point in
+                _ = try overlay.approach(.approaching(handle.target, screenPoint: point), context: context)
+                try checkLifetime(entry)
+            }
+        }
+        try control.post(step.operation, observation: entry.observation, checkGuard: checkGuard, beforeClick: approach) {
             try checkLifetime(entry)
             try state.beginDispatch(context: context, route: route)
         }
@@ -195,7 +209,7 @@ public struct BackgroundActions: Sendable {
     }
 
     private func execute(_ step: ActionStep, entry: RetainedObservation, handle: SemanticObservationHandle, context: OperationContext,
-                         state: ActionExecutionState, before: UInt32?) throws -> Bool {
+                         state: ActionExecutionState, before: UInt32?, activityOverlay: DesktopActivityOverlay?) throws -> Bool {
         try context.check()
         guard let writer = handle.backend as? any AXMutating else { throw NativeFailure(.unsupported, "semantic mutation backend unavailable") }
         let reference: String
@@ -252,12 +266,19 @@ public struct BackgroundActions: Sendable {
         }
         try checkForeground(before, targetPID: handle.target.key.pid)
         try context.check()
+        let writing = route == .axSelectedText || (route == .axSetValue && DesktopActivity.textRole(resolved.snapshot.role))
+        let approached = try activityOverlay?.approach(.approaching(handle.target, control: resolved.snapshot.bounds, writing: writing),
+                                                       context: context) ?? false
+        if approached { try checkLifetime(entry) }
         // Resolve again inside the shared mutation boundary; never reselect by a label.
         let typing: Bool
         if case .typeText = step.operation { typing = true } else { typing = false }
         let live = try handle.resolve(reference, includeValue: typing, context: context)
         guard handle.backend.same(live.object, resolved.object) else {
             throw NativeFailure(.staleElement, "target changed before dispatch")
+        }
+        if approached && live.snapshot.bounds != resolved.snapshot.bounds {
+            throw NativeFailure(.staleElement, "control moved during visual approach")
         }
         try requireEnabledSnapshot(live.snapshot, allowUnsupported: route != .axPress)
         if typing && (live.snapshot.value != resolved.snapshot.value || live.snapshot.selectedRange != resolved.snapshot.selectedRange) {
