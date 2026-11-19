@@ -13,6 +13,8 @@ struct DesktopActivity: Sendable {
         case writingSent = "Text sent"
         case updated = "Control updated"
         case sent = "Action sent"
+        case skipped = "Input skipped"
+        case rechecking = "Rechecking target"
         case check = "Check result"
 
         var badgeLabel: String {
@@ -21,12 +23,15 @@ struct DesktopActivity: Sendable {
             case .movingToControl, .movingToText: "Moving"
             case .pressed: "Pressed"
             case .updated: "Updated"
+            case .skipped: "Skipped"
+            case .rechecking: "Rechecking"
             case .written, .writingSent, .sent, .check: rawValue
             }
         }
 
         var showsWriting: Bool { self == .written || self == .writingSent }
         var isApproach: Bool { self == .movingToControl || self == .movingToText }
+        var needsReadback: Bool { self == .skipped || self == .check }
     }
 
     let target: TargetKey
@@ -36,6 +41,10 @@ struct DesktopActivity: Sendable {
 
     static func observing(_ observation: Observation) -> Self {
         Self(target: observation.target, bounds: observation.windowBounds, phase: .observing, point: nil)
+    }
+
+    func withPhase(_ phase: Phase) -> Self {
+        Self(target: target, bounds: bounds, phase: phase, point: nil)
     }
 
     static func approaching(_ target: Target, control: Rect, writing: Bool) -> Self {
@@ -61,13 +70,31 @@ struct DesktopActivity: Sendable {
         return CGPoint(x: bounds.midX, y: bounds.midY)
     }
 
+    private static func lastMutation(_ request: ActRequest, result: ActResult) -> (ActionStep, StepReceipt)? {
+        for (step, receipt) in Array(zip(request.steps, result.steps)).reversed() {
+            guard step.actionId == receipt.actionId else { return nil }
+            if case .waitFor = step.operation { continue }
+            if receipt.delivery == .notDispatched && (receipt.reason == nil || receipt.reason == .alreadySatisfied) { continue }
+            return (step, receipt)
+        }
+        return nil
+    }
+
+    private static func recoveryPhase(for receipt: StepReceipt) -> Phase? {
+        if receipt.delivery == .notDispatched { return .skipped }
+        if receipt.delivery == .unknown || receipt.verification == .mismatch ||
+            (receipt.verification == .unverified && receipt.reason != nil) { return .check }
+        return nil
+    }
+
+    static func recoveryPhase(_ request: ActRequest, result: ActResult) -> Phase? {
+        guard let (_, receipt) = lastMutation(request, result: result) else { return nil }
+        return recoveryPhase(for: receipt)
+    }
+
     static func action(_ request: ActRequest, result: ActResult, observation: Observation) -> Self? {
-        // In a batch, show the most recent dispatch or uncertain outcome.
-        guard let index = result.steps.lastIndex(where: { $0.delivery != .notDispatched }),
-              request.steps.indices.contains(index) else { return nil }
-        let step = request.steps[index]
-        let receipt = result.steps[index]
-        guard step.actionId == receipt.actionId else { return nil }
+        guard let (step, receipt) = lastMutation(request, result: result) else { return nil }
+        if let recovery = recoveryPhase(for: receipt) { return observing(observation).withPhase(recovery) }
 
         var phase: Phase = .updated
         var elementRef: String?
@@ -94,10 +121,7 @@ struct DesktopActivity: Sendable {
             point = anchor(control: element.bounds, window: observation.windowBounds, writing: phase.showsWriting)
         }
 
-        if receipt.delivery == .unknown || receipt.verification == .mismatch {
-            phase = .check
-            point = nil
-        } else if receipt.verification == .unverified {
+        if receipt.verification == .unverified {
             phase = phase.showsWriting ? .writingSent : .sent
         }
         return Self(target: observation.target, bounds: observation.windowBounds, phase: phase, point: point)
@@ -114,13 +138,49 @@ final class DesktopActivityOverlay {
     private lazy var panel = ActivityPanel()
     private lazy var view = DesktopActivityView()
     private var activity: DesktopActivity?
+    private var lastObservation: DesktopActivity?
+    private var recoveryTarget: TargetKey?
     private var timer: Timer?
     private var expiresAt: TimeInterval = 0
 
     nonisolated init() {}
 
     nonisolated func submit(_ activity: DesktopActivity) {
-        DispatchQueue.main.async { self.show(activity) }
+        DispatchQueue.main.async { self.present(activity) }
+    }
+
+    nonisolated func showRecovery(_ phase: DesktopActivity.Phase, target: TargetKey) {
+        DispatchQueue.main.async {
+            // An expired reference or interrupted request may lack geometry.
+            // Reuse only a matching observation from this session.
+            guard let anchor = self.lastObservation, anchor.target == target else { return }
+            self.present(anchor.withPhase(phase))
+        }
+    }
+
+    nonisolated func beginObservation(_ target: TargetKey) {
+        DispatchQueue.main.async {
+            guard self.recoveryTarget == target, let anchor = self.lastObservation, anchor.target == target else { return }
+            self.show(anchor.withPhase(.rechecking))
+        }
+    }
+
+    private func present(_ event: DesktopActivity) {
+        if event.phase == .observing {
+            lastObservation = event
+            if recoveryTarget == event.target {
+                recoveryTarget = nil
+                if activity?.phase != .rechecking || activity?.target != event.target || activity?.bounds != event.bounds {
+                    show(event.withPhase(.rechecking))
+                }
+                return
+            }
+        } else if event.phase.needsReadback {
+            recoveryTarget = event.target
+        } else if recoveryTarget == event.target {
+            recoveryTarget = nil
+        }
+        show(event)
     }
 
     /// Wait on the native worker only. A late main queue or tight action budget can skip the cue.
@@ -153,9 +213,9 @@ final class DesktopActivityOverlay {
         return presented.withLock { $0 }
     }
 
-    nonisolated func discardApproach() {
+    nonisolated func discardApproach(for target: TargetKey) {
         DispatchQueue.main.async {
-            if self.activity?.phase.isApproach == true { self.hide() }
+            if self.activity?.target == target && self.activity?.phase.isApproach == true { self.hide() }
         }
     }
 

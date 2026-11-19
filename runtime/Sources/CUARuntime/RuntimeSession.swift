@@ -92,7 +92,18 @@ public final class RuntimeSession: @unchecked Sendable {
         didShutdown()
     }
 
-    private func respond(_ request: Request, _ body: ResponseBody) {
+    private func respond(_ request: Request, _ body: ResponseBody, activity: DesktopActivity? = nil) {
+        if !closed, let activityOverlay {
+            if let activity {
+                activityOverlay.submit(activity)
+            } else if case .act(let act) = request.body, case .act(let result) = body {
+                if let recovery = DesktopActivity.recoveryPhase(act, result: result) {
+                    activityOverlay.showRecovery(recovery, target: act.target)
+                } else {
+                    activityOverlay.discardApproach(for: act.target)
+                }
+            }
+        }
         emit(Response(version: Limits.version, id: request.id, epoch: epoch, body: body))
     }
     private func reject(_ request: Request, code: ErrorCode, _ message: String) {
@@ -168,8 +179,7 @@ public final class RuntimeSession: @unchecked Sendable {
                     if case .waitFor(let wait) = result.body, let observation = wait.observation {
                         try self.observations.insert(observation, handle: result.handle)
                     }
-                    self.respond(request, result.body)
-                    if let activity = result.activity { self.activityOverlay?.submit(activity) }
+                    self.respond(request, result.body, activity: result.activity)
                 } catch {
                     self.reject(request, code: .staleObservation, "session closed before observation publication")
                 }
@@ -220,6 +230,7 @@ public final class RuntimeSession: @unchecked Sendable {
         case .targets(let params):
             return NativeResult(.targets(try system.targets(bundleId: params.bundleId, context: context)))
         case .observe(let params):
+            activityOverlay?.beginObservation(params.target)
             let native = try system.observe(params: params, observationId: nextObservationID(), context: context)
             return NativeResult(.observe(native.observation), handle: native.handle,
                 activity: activityOverlay.map { _ in .observing(native.observation) })
@@ -254,7 +265,6 @@ public final class RuntimeSession: @unchecked Sendable {
             let activity = activityOverlay.flatMap { _ in
                 DesktopActivity.action(act, result: result, observation: retained.observation)
             }
-            if activity == nil || context.interruption != nil { activityOverlay?.discardApproach() }
             return NativeResult(.act(result), activity: activity)
         case .waitFor(let wait):
             let retained = try observations.lookup(wait.observationId, epoch: epoch, target: wait.target)

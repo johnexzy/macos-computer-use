@@ -120,6 +120,10 @@ and can be skipped when the action budget is tight. Text updates still use one
 atomic native mutation. The feedback is click-through and leaves app focus and
 the system pointer alone.
 
+**Skipped** records a refused action before input dispatch. **Check result**
+means delivery or the app effect needs verification. A subsequent observation
+of that same window shows **Rechecking**.
+
 Feedback follows macOS Reduce Motion and Increase Contrast preferences and
 announces meaningful state changes through accessibility. Remove the environment
 entry and reconnect to turn feedback off.

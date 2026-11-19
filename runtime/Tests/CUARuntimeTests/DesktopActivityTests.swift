@@ -22,16 +22,29 @@ final class DesktopActivityTests: XCTestCase {
             return DesktopActivity.action(request, result: result, observation: observation)
         }
 
-        XCTAssertNil(activity(.notDispatched, .unverified, reason: .targetStale))
+        let skipped = try XCTUnwrap(activity(.notDispatched, .unverified, reason: .targetStale))
+        XCTAssertEqual(skipped.phase.badgeLabel, "Skipped")
+        XCTAssertNil(skipped.point)
         XCTAssertNil(activity(.notDispatched, .confirmed, reason: .alreadySatisfied))
         let written = try XCTUnwrap(activity(.dispatched, .confirmed))
         XCTAssertEqual(written.phase, .written)
         XCTAssertEqual(written.target, target)
         XCTAssertEqual(written.point, CGPoint(x: 132, y: 264))
         XCTAssertEqual(activity(.dispatched, .unverified)?.phase, .writingSent)
-        for outcome in [activity(.unknown, .unverified), activity(.dispatched, .mismatch)] {
+        for outcome in [activity(.unknown, .unverified), activity(.dispatched, .mismatch),
+                        activity(.dispatched, .unverified, reason: .deadlineExceeded)] {
             XCTAssertEqual(outcome?.phase, .check)
             XCTAssertNil(outcome?.point)
         }
+
+        let batch = ActRequest(grantId: "grant", observationId: "obs", target: target, steps: request.steps + [
+            ActionStep(actionId: "second", operation: .press(.init(elementRef: "field")), precondition: nil, expect: nil)
+        ])
+        let partial = ActResult(observationId: "obs", steps: [
+            StepReceipt(actionId: "edit", delivery: .dispatched, verification: .confirmed, reason: nil, evidence: []),
+            StepReceipt(actionId: "second", delivery: .notDispatched, verification: .unverified, reason: .targetStale, evidence: [])
+        ], remainingSteps: 0, stopReason: .targetStale)
+        XCTAssertEqual(DesktopActivity.action(batch, result: partial, observation: observation)?.phase, .skipped)
+        XCTAssertEqual(DesktopActivity.recoveryPhase(batch, result: partial), .skipped)
     }
 }
