@@ -7,7 +7,18 @@ public final class NativeAXObject: AXObject, @unchecked Sendable {
     public init(_ element: AXUIElement) { self.element = element }
 }
 
-public struct MacOSAXBackend: AXReading {
+struct AXScrollbar: Sendable {
+    let object: any AXObject
+    let position: Double
+}
+
+protocol AXScrolling: AXMutating {
+    func scrollbar(in area: any AXObject, axis: Axis, context: OperationContext) throws -> AXScrollbar?
+    func setScrollPosition(_ position: Double, on scrollbar: any AXObject, context: OperationContext,
+                           willDispatch: @Sendable () throws -> Void) throws
+}
+
+public struct MacOSAXBackend: AXReading, AXScrolling {
     public init() {}
     public func application(pid: UInt32, context: OperationContext) throws -> any AXObject {
         try context.check()
@@ -38,6 +49,24 @@ public struct MacOSAXBackend: AXReading {
     public func same(_ lhs: any AXObject, _ rhs: any AXObject) -> Bool {
         guard let lhs = lhs as? NativeAXObject, let rhs = rhs as? NativeAXObject else { return false }
         return CFEqual(lhs.element, rhs.element)
+    }
+    func scrollbar(in area: any AXObject, axis: Axis, context: OperationContext) throws -> AXScrollbar? {
+        let name = axis == .vertical ? kAXVerticalScrollBarAttribute : kAXHorizontalScrollBarAttribute
+        let value = kAXValueAttribute as CFString
+        guard let bar = try objectAttribute(area, name as CFString, context: context),
+              try string(bar, kAXRoleAttribute as CFString, context: context) == kAXScrollBarRole as String,
+              try isSettable(bar, value, context: context),
+              let raw = try attribute(bar, value, context: context), CFGetTypeID(raw) == CFNumberGetTypeID(),
+              let number = raw as? NSNumber, (0...1).contains(number.doubleValue) else { return nil }
+        return AXScrollbar(object: bar, position: number.doubleValue)
+    }
+    func setScrollPosition(_ position: Double, on scrollbar: any AXObject, context: OperationContext,
+                           willDispatch: @Sendable () throws -> Void) throws {
+        let bar = try prepared(scrollbar, context: context)
+        try willDispatch()
+        guard AXUIElementSetAttributeValue(bar, kAXValueAttribute as CFString, NSNumber(value: position)) == .success else {
+            throw NativeFailure(.nativeFailed, "AX scrollbar setter returned an error")
+        }
     }
     public func identity(of element: any AXObject, context: OperationContext) throws -> AXElementIdentity? {
         guard let role = try string(element, kAXRoleAttribute as CFString, context: context) else { return nil }

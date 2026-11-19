@@ -218,10 +218,18 @@ public struct BackgroundActions: Sendable {
         case .setValue(let value): reference = value.elementRef; route = .axSetValue
         case .press(let value): reference = value.elementRef; route = .axPress
         case .typeText(let value): reference = value.elementRef; route = .axSelectedText
+        case .scroll(let value): reference = value.elementRef; route = .axScroll
         default: throw NativeFailure(.unsupported, "background operation is not implemented")
         }
-        let resolved = try handle.resolve(reference, includeValue: true, context: context)
-        try requireEnabledSnapshot(resolved.snapshot, allowUnsupported: route != .axPress)
+        let resolved = try handle.resolve(reference, includeValue: route != .axScroll, context: context)
+        if route == .axScroll {
+            guard resolved.snapshot.availableActions(backend: handle.backend).contains(.scroll),
+                  !resolved.snapshot.enabledKnown || resolved.snapshot.enabled else {
+                throw NativeFailure(.unsupported, "scroll requires a live AX scroll area")
+            }
+        } else {
+            try requireEnabledSnapshot(resolved.snapshot, allowUnsupported: route != .axPress)
+        }
         switch step.operation {
         case .setValue: guard resolved.snapshot.valueSettable else { throw NativeFailure(.unsupported, "AXValue is not settable") }
         case .press: guard resolved.snapshot.actions.contains("AXPress") else { throw NativeFailure(.unsupported, "AXPress is not advertised") }
@@ -280,7 +288,13 @@ public struct BackgroundActions: Sendable {
         if approached && live.snapshot.bounds != resolved.snapshot.bounds {
             throw NativeFailure(.staleElement, "control moved during visual approach")
         }
-        try requireEnabledSnapshot(live.snapshot, allowUnsupported: route != .axPress)
+        if route == .axScroll {
+            if live.snapshot.enabledKnown && !live.snapshot.enabled {
+                throw NativeFailure(.unsupported, "scroll area is disabled")
+            }
+        } else {
+            try requireEnabledSnapshot(live.snapshot, allowUnsupported: route != .axPress)
+        }
         if typing && (live.snapshot.value != resolved.snapshot.value || live.snapshot.selectedRange != resolved.snapshot.selectedRange) {
             throw NativeFailure(.staleElement, "text value or selection changed before dispatch")
         }
@@ -309,9 +323,16 @@ public struct BackgroundActions: Sendable {
                 try writer.press(resolved.object, context: context, willDispatch: handoff)
             case .typeText(let value):
                 try writer.replaceSelectedText(value.text, on: resolved.object, context: context, willDispatch: handoff)
+            case .scroll(let value):
+                let moved = try scroll(value, area: live.object, handle: handle, entry: entry, state: state,
+                                       context: context, before: before, willDispatch: handoff)
+                if !moved {
+                    state.finish(reason: .verificationFailed, stop: .verificationFailed)
+                    return false
+                }
             default: break
             }
-            state.returnedSuccessfully()
+            if route != .axScroll { state.returnedSuccessfully() }
         } catch let error as NativeFailure { mutationFailure = error }
         catch { mutationFailure = NativeFailure(.nativeFailed, "native action returned an error") }
         if !state.hasEnteredDispatch, let mutationFailure { throw mutationFailure }
@@ -339,6 +360,37 @@ public struct BackgroundActions: Sendable {
                 if let mutationFailure { throw mutationFailure }
                 try checkForeground(before, targetPID: handle.target.key.pid)
             }
+            try pause(context)
+        }
+    }
+
+    private func scroll(_ operation: ScrollOperation, area: any AXObject, handle: SemanticObservationHandle,
+                        entry: RetainedObservation, state: ActionExecutionState, context: OperationContext, before: UInt32?,
+                        willDispatch: @Sendable () throws -> Void) throws -> Bool {
+        guard let scroller = handle.backend as? any AXScrolling,
+              let initial = try scroller.scrollbar(in: area, axis: operation.axis, context: context) else {
+            throw NativeFailure(.unsupported, "axis has no readable, writable scrollbar")
+        }
+        let requested = min(1, max(0, initial.position + Double(operation.amount) / 1000))
+        guard requested != initial.position else { return false }
+        try handle.validateOwner(of: initial.object, context: context)
+        try handle.validateWindow(context: context)
+        try scroller.setScrollPosition(requested, on: initial.object, context: context, willDispatch: willDispatch)
+        state.returnedSuccessfully()
+        while true {
+            try context.check()
+            try checkLifetime(entry)
+            try checkForeground(before, targetPID: handle.target.key.pid)
+            do {
+                guard let current = try scroller.scrollbar(in: area, axis: operation.axis, context: context),
+                      handle.backend.same(current.object, initial.object) else {
+                    throw NativeFailure(.staleElement, "scrollbar changed before readback")
+                }
+                if operation.amount > 0 ? current.position > initial.position : current.position < initial.position {
+                    try handle.validateWindow(context: context)
+                    return true
+                }
+            } catch is AXReadUnavailable { /* A transient AX read can be repeated. */ }
             try pause(context)
         }
     }

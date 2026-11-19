@@ -139,7 +139,7 @@ points still start v3; installing an archive does not migrate them automatically
 | `type_text` | `act` → `typeText` only on an explicit live AXSelectedText-settable element; no global typing or whole-value substitution. |
 | `mouse_click`, `click_text` | A foreground `click` step sends a left click after fresh pixel, window and focus checks. For text, obtain the point from an observation that includes OCR and its matching screenshot. |
 | `press_key` | A foreground `key` step on the exact focused AX reference. Supported keys are Return, Tab, Escape, Backspace and arrows. |
-| `scroll` | Unsupported. |
+| `scroll` | `act` → `scroll` on an observed `AXScrollArea` that advertises it. Select `vertical` or `horizontal` and a signed amount in thousandths of the full range. Positive moves down or right. Background delivery requires a readable, writable AX scrollbar and verifies movement. Observe again to locate newly revealed content. |
 | `launch_app`, `open_url`, `run_applescript` | Unsupported; use separate explicitly authorized setup when required. |
 | Cursor overlay | [On-screen feedback](runtime.md#on-screen-feedback) is built into the runtime and enabled per MCP connection with `CUA_VISUAL_FEEDBACK=1`. |
 

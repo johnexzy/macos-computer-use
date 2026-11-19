@@ -33,7 +33,7 @@ private func channelInterval(_ channel: CollectionInterval, within total: Collec
 private func expectation(_ step: ActionStep, _ receipt: StepReceipt, settled: Bool, foreground: Bool) throws {
     if let route = receipt.route {
         switch (step.operation, route) {
-        case (.setValue, .axSetValue), (.typeText, .axSelectedText), (.press, .axPress),
+        case (.setValue, .axSetValue), (.typeText, .axSelectedText), (.press, .axPress), (.scroll, .axScroll),
              (.key, .foregroundKey), (.click, .foregroundClick): break
         default: throw ContractError("receipt route does not match operation")
         }

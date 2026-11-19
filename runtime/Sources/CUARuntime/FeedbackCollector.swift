@@ -49,12 +49,7 @@ public struct FeedbackCollector: Sendable {
                     if !snapshot.complete || !snapshot.enabledKnown || label != snapshot.label || identifier != snapshot.identifier
                         || subrole != snapshot.subrole
                         || (request.includeValues && value != snapshot.value) { truncated = true }
-                    var actions: [ElementAction] = []
-                    if handle.backend is any AXMutating {
-                        if snapshot.valueSettable { actions.append(.setValue) }
-                        if snapshot.actions.contains("AXPress") { actions.append(.press) }
-                        if snapshot.selectedTextSettable { actions.append(.typeText) }
-                    }
+                    let actions = snapshot.availableActions(backend: handle.backend)
                     let current = Element(reference: reference, role: snapshot.role, label: label, value: value,
                         bounds: snapshot.bounds, enabled: snapshot.enabledKnown ? snapshot.enabled : nil, actions: actions,
                         identifier: identifier, subrole: subrole)

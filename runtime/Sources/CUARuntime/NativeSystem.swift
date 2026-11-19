@@ -62,7 +62,10 @@ public struct MacOSSystem: NativeSystem {
         return value
     }
     public func supportedActions(permissions: Permissions) -> [ActionKind] {
-        permissions.accessibility && backend is any AXMutating ? [.setValue, .press, .typeText] : []
+        guard permissions.accessibility else { return [] }
+        var supported: [ActionKind] = backend is any AXMutating ? [.setValue, .press, .typeText] : []
+        if backend is any AXScrolling { supported.append(.scroll) }
+        return supported
     }
     public func shutdownObservations() { eventRegistry.shutdown() }
     public func configureObservationWorker(_ queue: DispatchQueue) { eventRegistry.configure(worker: queue) }

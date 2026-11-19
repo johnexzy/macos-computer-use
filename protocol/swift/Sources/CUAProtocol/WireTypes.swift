@@ -70,7 +70,7 @@ public enum Verification: String, Codable, Equatable, Sendable {
 }
 
 public enum DeliveryRoute: String, Codable, Equatable, Sendable {
-    case axSetValue, axSelectedText, axPress, foregroundKey, foregroundClick
+    case axSetValue, axSelectedText, axPress, axScroll, foregroundKey, foregroundClick
 }
 
 public enum Coverage: String, Codable, Equatable, Sendable {

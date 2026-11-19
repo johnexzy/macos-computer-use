@@ -442,6 +442,8 @@ MainActor.assumeIsolated {
     if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--workflow" {
         let config = try! JSONDecoder().decode(WorkflowConfig.self, from: Data(CommandLine.arguments[2].utf8))
         fixture = WorkflowFixture(config)
+    } else if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--scroll" {
+        fixture = ScrollFixture()
     } else {
         fixture = FixtureController()
     }

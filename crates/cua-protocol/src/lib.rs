@@ -61,6 +61,7 @@ choices!(DeliveryRoute {
     AxSetValue,
     AxSelectedText,
     AxPress,
+    AxScroll,
     ForegroundKey,
     ForegroundClick
 });
@@ -639,6 +640,7 @@ fn expectation(
                 (Operation::SetValue(_), DeliveryRoute::AxSetValue)
                     | (Operation::TypeText(_), DeliveryRoute::AxSelectedText)
                     | (Operation::Press(_), DeliveryRoute::AxPress)
+                    | (Operation::Scroll(_), DeliveryRoute::AxScroll)
                     | (Operation::Key(_), DeliveryRoute::ForegroundKey)
                     | (Operation::Click(_), DeliveryRoute::ForegroundClick)
             ),

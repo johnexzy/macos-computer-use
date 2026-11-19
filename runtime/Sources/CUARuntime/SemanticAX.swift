@@ -52,6 +52,16 @@ public struct AXNodeSnapshot: Sendable {
         self.valueSettable = valueSettable; self.selectedTextSettable = selectedTextSettable
         self.selectedRange = selectedRange; self.actions = actions; self.complete = complete
     }
+
+    func availableActions(backend: any AXReading) -> [ElementAction] {
+        guard backend is any AXMutating else { return [] }
+        var available: [ElementAction] = []
+        if valueSettable { available.append(.setValue) }
+        if actions.contains("AXPress") { available.append(.press) }
+        if selectedTextSettable { available.append(.typeText) }
+        if role == "AXScrollArea", backend is any AXScrolling { available.append(.scroll) }
+        return available
+    }
 }
 
 /// This seam represents native reads; actions use retained objects, never selectors.
@@ -146,11 +156,15 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
         guard backend.same(live, retainedWindow) else { throw NativeFailure(.staleElement, "observed AX window was replaced") }
     }
 
+    func validateOwner(of object: any AXObject, context: OperationContext) throws {
+        try requireOwningWindow(object, window: retainedWindow, pid: target.key.pid, backend: backend, context: context)
+    }
+
     public func resolve(_ reference: String, includeValue: Bool = false, context: OperationContext) throws -> ResolvedAXElement {
         guard let retained = references[reference] else { throw NativeFailure(.staleElement, "reference does not belong to this observation") }
         let object = retained.object
         try validateWindow(context: context)
-        try requireOwningWindow(object, window: retainedWindow, pid: target.key.pid, backend: backend, context: context)
+        try validateOwner(of: object, context: context)
         guard try containsRetainedObject(object, window: retainedWindow, backend: backend, context: context) else {
             throw NativeFailure(.staleElement, "retained control is not in the current bounded window tree")
         }
@@ -163,7 +177,7 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
         guard snapshot.identity == retained.identity else {
             throw NativeFailure(.staleElement, "retained control role, subrole or identifier changed")
         }
-        try requireOwningWindow(object, window: retainedWindow, pid: target.key.pid, backend: backend, context: context)
+        try validateOwner(of: object, context: context)
         try validateWindow(context: context)
         return ResolvedAXElement(object: object, snapshot: snapshot)
     }
@@ -222,12 +236,7 @@ public struct SemanticAXObserver: Sendable {
             let subrole = bounded(s.subrole, bytes: 1024)
             let value = params.includeValues ? bounded(s.value, bytes: 65_536) : nil
             if label != s.label || identifier != s.identifier || subrole != s.subrole || (params.includeValues && value != s.value) { complete = false }
-            var actions: [ElementAction] = []
-            if backend is any AXMutating {
-                if s.valueSettable { actions.append(.setValue) }
-                if s.actions.contains("AXPress") { actions.append(.press) }
-                if s.selectedTextSettable { actions.append(.typeText) }
-            }
+            let actions = s.availableActions(backend: backend)
             let element = Element(reference: reference, role: s.role, label: label, value: value,
                                   bounds: s.bounds, enabled: s.enabledKnown ? s.enabled : nil, actions: actions,
                                   identifier: identifier, subrole: subrole)

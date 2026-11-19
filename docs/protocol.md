@@ -113,9 +113,9 @@ sends no input; mixed sequences preserve the same boundary before later mutation
 | `waitFor` | Evaluate a typed condition for the same exact target within the request deadline. It never mutates. |
 
 The current runtime implements AX and opt-in visual `observe` and bounded linear
-`act` sequences combining `setValue`, `typeText`, `press`, and a read-only `waitFor`
-operation. Every step shares the exact target, original observation/refs, and
-whole-request budget. There are no branches, nested sequences, or target switches.
+`act` sequences combining `setValue`, `typeText`, `press`, `scroll`, and a read-only
+`waitFor` operation. Every step shares the exact target, original observation/refs,
+and whole-request budget. There are no branches, nested sequences, or target switches.
 Presence checks do not create new action refs inside a sequence.
 
 `axSelectors` contains 1–16 unique selectors. Selected observations keep window
@@ -134,17 +134,24 @@ and `expect` must be omitted or null. Standalone waits, mutation guards, and
 mutation expectations support `elementExists`, `elementAbsent`, `valueEquals`,
 `enabled`, and `windowAbsent`.
 
-The action enum also represents supported keys, semantic scroll, and coordinate
-click. Coordinate click carries an explicit coordinate
-space. It does not authorize global pointer input: background delivery still needs
-an exact semantic target; unsupported targeting must fail without silent fallback.
-The foreground key set includes return/tab/escape/backspace/arrows and `saveAs`
-(⌥⇧⌘S). Scroll amounts
-are signed nonzero units in `[-1000,1000]`; runtime determines support and delivery.
+`ScrollOperation` is `{elementRef, axis, amount}`. Use a live `AXScrollArea`
+reference that advertises `scroll`. `axis` is `vertical` or `horizontal`, and
+`amount` is a nonzero integer in `[-1000,1000]`. Positive values move down or
+right. An amount of `250` requests 25% of the scrollbar's full range, capped at
+the available movement. The background route requires a readable, writable AX
+scrollbar for the requested axis. It reads back the scrollbar position to verify
+movement in the requested direction. An unavailable scrollbar returns
+`unsupported`. A scrollbar already at the requested boundary returns
+`verificationFailed` with `not_dispatched`. Observe again after scrolling to get
+fresh content and geometry.
+
+Coordinate click carries an explicit coordinate space. The foreground key set
+includes return/tab/escape/backspace/arrows and `saveAs` (⌥⇧⌘S).
 The `key` and `click` paths are explicitly selected via `act.foreground: true`.
 The host and helper enforce the installed foreground grant. The opt-in sequence
-must contain at least one key or click and may include predicate waits. Semantic
-scroll remains unavailable. Background action requests omit the foreground flag.
+must contain at least one key or click and may include predicate waits. Scroll
+uses the background route exclusively, without wheel or keyboard fallback.
+Background action requests omit the foreground flag.
 Overall `ActionKind` discovery is separate from each element's `ElementAction`
 affordances. Coordinate click capability requires an operator-authorized session and the
 necessary permissions. A click also needs fresh relevant mapped image evidence
@@ -293,8 +300,8 @@ are fabricated for the closed window. `alreadySatisfied` on standalone waits use
 the same first-check meaning.
 
 `StepReceipt.route` is optional. The current executor records `axSetValue`,
-`axSelectedText`, or `axPress` at the dispatch boundary; an absent route does not
-invent a native method. `typeText` uses targeted `AXSelectedText` replacement of
+`axSelectedText`, `axPress`, or `axScroll` for semantic dispatch. `typeText` uses
+targeted `AXSelectedText` replacement of
 the current UTF-16 selection, not a whole-value rewrite, keyboard fallback, or
 selection-changing operation. It requires the advertised settable attribute.
 
@@ -306,6 +313,9 @@ An exact resulting value can be exposed as evidence only if values were included
 in the originating observation or the caller supplied that exact expectation.
 Otherwise delivery can succeed with unverified public evidence even when internal
 readback matches. A press with no expectation likewise does not prove its effect.
+`scroll` requires intrinsic directional readback and evaluates any caller-supplied
+`expect` using the normal step verification rules. Without an `expect`, a completed
+scroll has an `unverified` public receipt because the position check is internal.
 
 `ActResult.steps` is the processed prefix, including a rejected final step when
 applicable. `remainingSteps` counts steps never processed. Correlation checks require
