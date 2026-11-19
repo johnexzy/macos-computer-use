@@ -74,27 +74,46 @@ public struct BackgroundActions: Sendable {
                     }
                 }
             }
-            let handle = try semanticHandle(entry, observationId: request.observationId, target: request.target)
-            let foreground = request.foreground ? try ForegroundControl(platform: foregroundPlatform, capture: coordinateCapture,
-                target: handle, context: context, state: state) : nil
+            let handle: SemanticObservationHandle?
+            let foreground: ForegroundControl?
+            if request.foreground, let visual = entry.handle as? VisualObservationHandle {
+                guard visual.observationId == request.observationId, visual.target.key == request.target,
+                      entry.observation.target == request.target else {
+                    throw NativeFailure(.staleObservation, "visual observation does not belong to this request")
+                }
+                guard request.steps.allSatisfy({ step in
+                    if case .click = step.operation { return step.precondition == nil && step.expect == nil }
+                    return false
+                }) else {
+                    throw NativeFailure(.unsupported, "visual observations support only foreground clicks without AX conditions")
+                }
+                handle = nil
+                foreground = try ForegroundControl(platform: foregroundPlatform, capture: coordinateCapture,
+                    target: .visual(visual), context: context, state: state)
+            } else {
+                let semantic = try semanticHandle(entry, observationId: request.observationId, target: request.target)
+                handle = semantic
+                foreground = request.foreground ? try ForegroundControl(platform: foregroundPlatform, capture: coordinateCapture,
+                    target: .semantic(semantic), context: context, state: state) : nil
+            }
             defer { foreground?.restore() }
             for step in request.steps {
                 try state.checkActive(context: context)
                 try checkLifetime(entry)
                 try foreground?.checkContext()
                 let reason: ReceiptReason?
-                if case .waitFor(let wait) = step.operation {
+                if case .waitFor(let wait) = step.operation, let handle {
                     reason = try waitStep(wait.condition, entry: entry, handle: handle, context: context,
                                           state: state, foreground: foreground)
                 } else if let foreground {
                     let already = try executeForeground(step, entry: entry, handle: handle, context: context,
                                                         state: state, control: foreground, activityOverlay: activityOverlay)
                     reason = already ? .alreadySatisfied : nil
-                } else {
+                } else if let handle {
                     let already = try execute(step, entry: entry, handle: handle, context: context,
                                               state: state, before: before, activityOverlay: activityOverlay)
                     reason = already ? .alreadySatisfied : nil
-                }
+                } else { throw NativeFailure(.unsupported, "action requires a semantic observation") }
                 try foreground?.checkContext()
                 if before != nil { try checkForeground(before, targetPID: request.target.pid) }
                 if let prefix = try state.settle(context: context, reason: reason), let progress {
@@ -158,7 +177,7 @@ public struct BackgroundActions: Sendable {
         }
     }
 
-    private func executeForeground(_ step: ActionStep, entry: RetainedObservation, handle: SemanticObservationHandle,
+    private func executeForeground(_ step: ActionStep, entry: RetainedObservation, handle: SemanticObservationHandle?,
                                    context: OperationContext, state: ActionExecutionState, control: ForegroundControl,
                                    activityOverlay: DesktopActivityOverlay?) throws -> Bool {
         let route: DeliveryRoute
@@ -169,7 +188,7 @@ public struct BackgroundActions: Sendable {
         }
         func checkGuard() throws {
             guard let condition = step.precondition else { return }
-            guard let check = try evaluate(condition, handle: handle, context: context) else {
+            guard let handle, let check = try evaluate(condition, handle: handle, context: context) else {
                 throw NativeFailure(.unsupported, "foreground precondition cannot be read")
             }
             if !check.matched {
@@ -179,14 +198,14 @@ public struct BackgroundActions: Sendable {
             }
         }
         try checkGuard()
-        if let expected = step.expect, let check = try evaluate(expected, handle: handle, context: context), check.matched {
+        if let expected = step.expect, let handle, let check = try evaluate(expected, handle: handle, context: context), check.matched {
             state.checked([check], verification: .confirmed)
             return true
         }
 
         let approach: ((Point) throws -> Void)? = activityOverlay.map { overlay in
             { point in
-                _ = try overlay.approach(.approaching(handle.target, screenPoint: point), context: context)
+                _ = try overlay.approach(.approaching(control.window, screenPoint: point), context: context)
                 try checkLifetime(entry)
             }
         }
@@ -195,7 +214,7 @@ public struct BackgroundActions: Sendable {
             try state.beginDispatch(context: context, route: route)
         }
         state.returnedSuccessfully()
-        guard let expected = step.expect else { return false }
+        guard let expected = step.expect, let handle else { return false }
         while true {
             try context.check()
             try checkLifetime(entry)
@@ -232,7 +251,7 @@ public struct BackgroundActions: Sendable {
         }
         switch step.operation {
         case .setValue: guard resolved.snapshot.valueSettable else { throw NativeFailure(.unsupported, "AXValue is not settable") }
-        case .press: guard resolved.snapshot.actions.contains("AXPress") else { throw NativeFailure(.unsupported, "AXPress is not advertised") }
+        case .press: guard resolved.snapshot.actions.contains(kAXPressAction as String) else { throw NativeFailure(.unsupported, "AXPress is not advertised") }
         case .typeText: guard resolved.snapshot.selectedTextSettable else { throw NativeFailure(.unsupported, "AXSelectedText is not settable") }
         default: break
         }
@@ -477,9 +496,7 @@ extension MacOSAXBackend: AXMutating {
         let element = try nativeElement(object, context: context)
         try requireEnabled(element, allowUnsupported: false, context: context)
         try installTimeout(element, context: context)
-        var names: CFArray?
-        guard AXUIElementCopyActionNames(element, &names) == .success,
-              (names as? [String])?.contains(kAXPressAction as String) == true else {
+        guard try readAXActionNames(element, context: context).contains(kAXPressAction as String) else {
             throw NativeFailure(.unsupported, "AXPress is not currently advertised")
         }
         try installTimeout(element, context: context)

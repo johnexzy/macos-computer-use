@@ -18,6 +18,23 @@ protocol AXScrolling: AXMutating {
                            willDispatch: @Sendable () throws -> Void) throws
 }
 
+func readAXActionNames(_ element: AXUIElement, context: OperationContext) throws -> [String] {
+    var names: CFArray?
+    let result = AXUIElementCopyActionNames(element, &names)
+    try checkAXRead(result, context: context, allowMissing: true)
+    return result == .success ? (names as? [String] ?? []) : []
+}
+
+func boundedAXActionNames(_ actions: [String]) -> [String] {
+    let limit = 32
+    let press = kAXPressAction as String
+    let prefix = actions.prefix(limit)
+    if actions.count > limit, actions.contains(press), !prefix.contains(press) {
+        return [press] + actions.prefix(limit - 1)
+    }
+    return Array(prefix)
+}
+
 public struct MacOSAXBackend: AXReading, AXScrolling {
     public init() {}
     public func application(pid: UInt32, context: OperationContext) throws -> any AXObject {
@@ -35,6 +52,9 @@ public struct MacOSAXBackend: AXReading, AXScrolling {
     }
     public func parent(of element: any AXObject, context: OperationContext) throws -> (any AXObject)? {
         try objectAttribute(element, kAXParentAttribute as CFString, context: context)
+    }
+    public func focusedElement(of application: any AXObject, context: OperationContext) throws -> (any AXObject)? {
+        try objectAttribute(application, kAXFocusedUIElementAttribute as CFString, context: context)
     }
     public func window(of element: any AXObject, context: OperationContext) throws -> (any AXObject)? {
         try objectAttribute(element, kAXWindowAttribute as CFString, context: context)
@@ -107,10 +127,7 @@ public struct MacOSAXBackend: AXReading, AXScrolling {
                 range = AXTextRange(location: selected.location, length: selected.length)
             }
         }
-        var actionNames: CFArray?
-        let result = AXUIElementCopyActionNames(try prepared(element, context: context), &actionNames)
-        try checkAXRead(result, context: context, allowMissing: true)
-        let actions = actionNames as? [String] ?? []
+        let actions = try readAXActionNames(prepared(element, context: context), context: context)
         let rawLabel = [title, description.value].compactMap { $0 }.first { !$0.isEmpty }
         let label = rawLabel.flatMap { $0.utf8.count <= 1024 ? $0 : nil }
         let boundedValue = value.flatMap { $0.utf8.count <= 65_536 ? $0 : nil }
@@ -118,7 +135,7 @@ public struct MacOSAXBackend: AXReading, AXScrolling {
             bounds: Rect(x: point.x, y: point.y, width: dimensions.width, height: dimensions.height),
             enabled: enabled.value ?? false, enabledKnown: enabled.value != nil, value: boundedValue,
             valueSettable: settable, selectedTextSettable: textSettable, selectedRange: range,
-            actions: Array(actions.prefix(32)),
+            actions: boundedAXActionNames(actions),
             complete: description.complete && enabled.completeForTraversal && rawLabel == label
                 && (rawIdentifier?.utf8.count ?? 0) <= 1024 && (subrole?.utf8.count ?? 0) <= 1024
                 && value == boundedValue && actions.count <= 32,

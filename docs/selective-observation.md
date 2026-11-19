@@ -21,6 +21,9 @@ observation collection; it grants no additional input authority.
 identifier are optional exact constraints. Collection discovers current objects
 through a bounded owning-window tree. It reads identity before control metadata
 and requests AX values only for matching controls when `includeValues` is true.
+The initial selected observation prioritizes the focused branch when it leads
+to the same window. This helps discover nearby controls before large sibling
+subtrees use the node budget. Selected scans can reach depth 48.
 This still traverses identities/children: it is not an app-maintained index or a
 constant-time query. Selected controls receive new opaque retained references;
 actions continue to use exact object, role, subrole and raw identifier checks.

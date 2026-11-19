@@ -107,7 +107,7 @@ sends no input; mixed sequences preserve the same boundary before later mutation
 | Method | Contract |
 | --- | --- |
 | `capabilities` | Read-only permission booleans, installed mode, and actual supported action kinds. It does not request permission. |
-| `targets` | Return exact window/process keys, titles, logical bounds, and bundle ID and owner name when available. A bundle ID filter matches only that exact ID. `truncated` makes the bound visible. |
+| `targets` | Return exact window/process keys, titles, logical bounds, and bundle ID and owner name when available. Optional filters are exact `bundleId`, case-insensitive `titleContains` and `ownerContains`, and `unbundledOnly`. All supplied filters must match before the result cap applies. `truncated` makes the bound visible. |
 | `observe` | Exact target; explicit value, screenshot, and OCR inclusion flags; optional exact `axSelectors` and `eventHistory` cursor. Visual collection accepts a window-local crop and image dimension limit. |
 | `act` | Installed grant, observation, exact target, and 1–16 ordered steps. No arbitrary scripts or execution-mode override. |
 | `waitFor` | Evaluate a typed condition for the same exact target within the request deadline. It never mutates. |
@@ -156,6 +156,12 @@ Overall `ActionKind` discovery is separate from each element's `ElementAction`
 affordances. Coordinate click capability requires an operator-authorized session and the
 necessary permissions. A click also needs fresh relevant mapped image evidence
 and exact focused-window validation.
+When AX is unavailable, a captured screenshot can authorize coordinate clicks
+on the exact already-foreground window. This route binds the process generation,
+PID, window ID, bounds, and pixels, and checks the window is topmost at the
+destination immediately before dispatch. Keys and AX conditions still require
+a semantic observation. A frame that disagrees with known AX geometry is stale
+for coordinate input.
 
 Existence selectors require a role and may constrain label
 or identifier. They are conditions, not action locators. Actions use retained refs

@@ -59,20 +59,62 @@ final class ActivationWatch: @unchecked Sendable {
 
 protocol ForegroundPlatform: Sendable {
     func permissionAvailable() -> Bool
+    func visualPermissionAvailable() -> Bool
     func sample() -> ForegroundSample
     func watch(expecting pid: UInt32) -> ActivationWatch
     func focusedWindow(pid: UInt32, context: OperationContext) throws -> (any AXObject)?
     func focusedElement(pid: UInt32, context: OperationContext) throws -> (any AXObject)?
     func activate(pid: UInt32, window: any AXObject, context: OperationContext, willChangeFocus: () throws -> Void) throws
     func hitTest(_ point: Point, in target: SemanticObservationHandle, context: OperationContext) throws -> Bool
+    func visualHitTest(_ point: Point, in target: Target, context: OperationContext) throws -> Bool
     func post(_ input: ForegroundInput, willDispatch: () throws -> Void) throws
+}
+
+final class VisualObservationHandle: RetainedNativeHandle {
+    private let window: WindowSnapshot
+    private let catalog: any WindowCatalog
+    let observationId: String
+    var target: Target { window.target }
+
+    init(window: WindowSnapshot, catalog: any WindowCatalog, observationId: String) {
+        self.window = window; self.catalog = catalog; self.observationId = observationId
+    }
+
+    func validateWindow(context: OperationContext) throws {
+        let current = try catalog.windowSnapshot(target.key, context: context)
+        guard let generation = window.generation, current.generation == generation,
+              current.target.key == target.key, current.target.bounds == target.bounds,
+              current.target.bundleId == target.bundleId else {
+            throw NativeFailure(.staleObservation, "observed visual window changed")
+        }
+    }
+}
+
+enum ForegroundTarget {
+    case semantic(SemanticObservationHandle)
+    case visual(VisualObservationHandle)
+
+    var window: Target {
+        switch self {
+        case .semantic(let handle): handle.target
+        case .visual(let handle): handle.target
+        }
+    }
+
+    func validateWindow(context: OperationContext) throws {
+        switch self {
+        case .semantic(let handle): try handle.validateWindow(context: context)
+        case .visual(let handle): try handle.validateWindow(context: context)
+        }
+    }
 }
 
 /// Owns one temporary foreground route under the runtime's shared mutation lock.
 final class ForegroundControl {
     private let platform: any ForegroundPlatform
     private let capture: any VisualCapturing
-    private let target: SemanticObservationHandle
+    private let target: ForegroundTarget
+    var window: Target { target.window }
     private let context: OperationContext
     private let state: ActionExecutionState
     private let watch: ActivationWatch
@@ -86,14 +128,21 @@ final class ForegroundControl {
     private var interruption: ForegroundInterruption?
     private var restoration: FocusRestoration = .notNeeded
 
-    init(platform: any ForegroundPlatform, capture: any VisualCapturing, target: SemanticObservationHandle,
+    private func permissionAvailable() -> Bool {
+        switch target {
+        case .semantic: platform.permissionAvailable()
+        case .visual: platform.visualPermissionAvailable()
+        }
+    }
+
+    init(platform: any ForegroundPlatform, capture: any VisualCapturing, target: ForegroundTarget,
          context: OperationContext, state: ActionExecutionState) throws {
         self.platform = platform; self.capture = capture; self.target = target; self.context = context; self.state = state
         let first = platform.sample()
         initial = first
         last = first
-        watch = platform.watch(expecting: target.target.key.pid)
-        priorWindow = if let pid = first.pid, platform.permissionAvailable() {
+        watch = platform.watch(expecting: target.window.key.pid)
+        priorWindow = if case .semantic = target, let pid = first.pid, platform.permissionAvailable() {
             try? platform.focusedWindow(pid: pid, context: context)
         } else { nil }
         publish()
@@ -105,7 +154,7 @@ final class ForegroundControl {
         last = platform.sample()
         inputActivity = inputActivity || last.hardwareCounters != initial.hardwareCounters || last.inputHeld
         externalActivation = externalActivation || watch.sawExternalActivation
-            || (activationRequested ? last.pid != initial.pid && last.pid != target.target.key.pid : last.pid != initial.pid)
+            || (activationRequested ? last.pid != initial.pid && last.pid != window.key.pid : last.pid != initial.pid)
         if inputActivity { throw stop(.inputActivity) }
         if initial.pid == nil || externalActivation { throw stop(.focusChanged) }
         publish()
@@ -118,29 +167,35 @@ final class ForegroundControl {
 
     private func checkFocused(checkingState: Bool = true) throws {
         try checkInterference(checkingState: checkingState)
-        guard last.pid == target.target.key.pid else {
+        guard last.pid == window.key.pid else {
             externalActivation = true
             throw stop(.focusChanged)
         }
-        guard platform.permissionAvailable() else { throw stop(.permissionUnavailable) }
+        guard permissionAvailable() else { throw stop(.permissionUnavailable) }
         do { try target.validateWindow(context: context) }
         catch let failure as NativeFailure where failure.code == .staleObservation || failure.code == .staleElement
             || failure.code == .targetNotFound || failure.code == .ambiguousTarget {
             throw stop(.windowChanged)
         }
-        guard let focused = try platform.focusedWindow(pid: target.target.key.pid, context: context),
-              target.backend.same(focused, target.retainedWindow) else { throw stop(.windowChanged) }
+        if case .semantic(let handle) = target {
+            guard let focused = try platform.focusedWindow(pid: window.key.pid, context: context),
+                  handle.backend.same(focused, handle.retainedWindow) else { throw stop(.windowChanged) }
+        }
     }
 
     func post(_ operation: CUAProtocol.Operation, observation: Observation, checkGuard: () throws -> Void,
               beforeClick: ((Point) throws -> Void)? = nil, willDispatch: () throws -> Void) throws {
         try checkContext()
-        guard platform.permissionAvailable() else { throw stop(.permissionUnavailable) }
+        guard permissionAvailable() else { throw stop(.permissionUnavailable) }
         // Resolve coordinates from the original image before making any activation request.
         let click: ClickWitness?
         switch operation {
         case .click(let value):
-            guard let value = ClickWitness(operation: value, observation: observation) else { throw stop(.frameChanged) }
+            let visualOnly: Bool
+            if case .visual = target { visualOnly = true } else { visualOnly = false }
+            guard let value = ClickWitness(operation: value, observation: observation, visualOnly: visualOnly) else {
+                throw stop(.frameChanged)
+            }
             click = value
         case .key: click = nil
         default: throw NativeFailure(.unsupported, "foreground operation is not implemented")
@@ -158,7 +213,7 @@ final class ForegroundControl {
                 try beforeClick(click.screen)
                 try checkFocused()
             }
-            do { try click.validate(capture: capture, target: target.target, context: context) }
+            do { try click.validate(capture: capture, target: window, context: context) }
             catch is ForegroundStopped { throw stop(.frameChanged) }
             catch is VisualCaptureFailure { throw stop(.frameChanged) }
             input = .click(click.screen)
@@ -167,30 +222,45 @@ final class ForegroundControl {
         try platform.post(input) {
             try checkGuard()
             try checkFocused()
-            if let click, try !platform.hitTest(click.screen, in: target, context: context) { throw stop(.windowChanged) }
+            if let click {
+                let hits: Bool
+                switch target {
+                case .semantic(let handle): hits = try platform.hitTest(click.screen, in: handle, context: context)
+                case .visual: hits = try platform.visualHitTest(click.screen, in: window, context: context)
+                }
+                guard hits else { throw stop(.windowChanged) }
+            }
             if case .key(let value) = operation { try checkKeyTarget(value) }
             // Final lightweight sample follows window/element reads. macOS does not offer atomic validate-and-post.
             try checkInterference()
-            guard last.pid == target.target.key.pid else { throw stop(.focusChanged) }
+            guard last.pid == window.key.pid else { throw stop(.focusChanged) }
             try willDispatch()
         }
     }
 
     private func checkKeyTarget(_ operation: KeyOperation) throws {
-        let resolved = try target.resolve(operation.elementRef, context: context)
+        guard case .semantic(let handle) = target else { throw stop(.windowChanged) }
+        let resolved = try handle.resolve(operation.elementRef, context: context)
         let snapshot = resolved.snapshot
         // A document editor can expose focus and writable text while declaring AXEnabled unsupported.
         let writableEditor = operation.key == .saveAs && snapshot.role == "AXTextArea"
             && snapshot.valueSettable && snapshot.enabledUnsupported
         guard (snapshot.enabledKnown && snapshot.enabled) || writableEditor,
-              let focused = try platform.focusedElement(pid: target.target.key.pid, context: context),
-              target.backend.same(focused, resolved.object) else { throw stop(.windowChanged) }
+              let focused = try platform.focusedElement(pid: window.key.pid, context: context),
+              handle.backend.same(focused, resolved.object) else { throw stop(.windowChanged) }
     }
 
     private func focus() throws {
         if ownsFocus { try checkFocused(); return }
+        let pid = window.key.pid
+        guard case .semantic(let target) = target else {
+            // Without an AX window, raising the application could select a different window.
+            guard last.pid == pid else { throw stop(.activationFailed) }
+            try checkFocused()
+            ownsFocus = true
+            return
+        }
         try target.validateWindow(context: context)
-        let pid = target.target.key.pid
         if last.pid == pid,
            let focused = try platform.focusedWindow(pid: pid, context: context),
            target.backend.same(focused, target.retainedWindow) { ownsFocus = true; return }
@@ -217,6 +287,7 @@ final class ForegroundControl {
     /// Restore only while the original route still owns focus and the original hardware baseline.
     func restore() {
         guard activationRequested, restoration == .pending else { return }
+        guard case .semantic(let target) = target else { return }
         defer { publish() }
         if context.interruption != nil || inputActivity || externalActivation || interruption == .windowChanged {
             restoration = .skipped; return
@@ -283,6 +354,7 @@ final class ForegroundControl {
 
 struct NativeForegroundPlatform: ForegroundPlatform {
     func permissionAvailable() -> Bool { AXIsProcessTrusted() && CGPreflightPostEventAccess() }
+    func visualPermissionAvailable() -> Bool { CGPreflightPostEventAccess() && CGPreflightScreenCaptureAccess() }
 
     func sample() -> ForegroundSample {
         let events: [CGEventType] = [.keyDown, .keyUp, .flagsChanged, .mouseMoved, .leftMouseDown, .leftMouseUp,
@@ -324,23 +396,7 @@ struct NativeForegroundPlatform: ForegroundPlatform {
 
     func hitTest(_ point: Point, in target: SemanticObservationHandle, context: OperationContext) throws -> Bool {
         try context.check()
-        let runtimePID = UInt32(getpid())
-        let previewID = LivePreviewPanel.interactiveWindowID.withLock { $0 }
-        var displayCount: UInt32 = 0
-        var display: CGDirectDisplayID = 0
-        guard CGGetDisplaysWithPoint(CGPoint(x: point.x, y: point.y), 1, &display, &displayCount) == .success, displayCount > 0,
-              let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]],
-              let frontWindow = windows.first(where: { row in
-                  let owner = row[kCGWindowOwnerPID as String] as? UInt32
-                  let interactivePreview = previewID != nil && row[kCGWindowNumber as String] as? UInt32 == previewID && owner == runtimePID
-                  guard interactivePreview || (row[kCGWindowLayer as String] as? Int == 0 && owner != runtimePID),
-                        let alpha = row[kCGWindowAlpha as String] as? Double, alpha > 0,
-                        let bounds = row[kCGWindowBounds as String] as? [String: Double],
-                        let x = bounds["X"], let y = bounds["Y"], let w = bounds["Width"], let h = bounds["Height"] else { return false }
-                  return point.x >= x && point.x < x + w && point.y >= y && point.y < y + h
-              }),
-              frontWindow[kCGWindowNumber as String] as? UInt32 == target.target.key.windowId,
-              frontWindow[kCGWindowOwnerPID as String] as? UInt32 == target.target.key.pid else { return false }
+        guard screenHit(point, target: target.target, includeOverlaySurfaces: false) else { return false }
 
         // Compositor-only surfaces can cover the screen in the window list. Use the system-wide AX hit for input context.
         let system = AXUIElementCreateSystemWide()
@@ -353,6 +409,36 @@ struct NativeForegroundPlatform: ForegroundPlatform {
         if target.backend.same(object, target.retainedWindow) { return true }
         guard let owning = try target.backend.window(of: object, context: context) else { return false }
         return target.backend.same(owning, target.retainedWindow)
+    }
+
+    func visualHitTest(_ point: Point, in target: Target, context: OperationContext) throws -> Bool {
+        try context.check()
+        return screenHit(point, target: target, includeOverlaySurfaces: true)
+    }
+
+    private func screenHit(_ point: Point, target: Target, includeOverlaySurfaces: Bool) -> Bool {
+        let runtimePID = UInt32(getpid())
+        let previewID = LivePreviewPanel.interactiveWindowID.withLock { $0 }
+        var displayCount: UInt32 = 0
+        var display: CGDirectDisplayID = 0
+        guard CGGetDisplaysWithPoint(CGPoint(x: point.x, y: point.y), 1, &display, &displayCount) == .success, displayCount > 0,
+              let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]],
+              let frontWindow = windows.first(where: { row in
+                  let owner = row[kCGWindowOwnerPID as String] as? UInt32
+                  let interactivePreview = previewID != nil && row[kCGWindowNumber as String] as? UInt32 == previewID && owner == runtimePID
+                  guard let layer = row[kCGWindowLayer as String] as? Int,
+                        interactivePreview || (owner != runtimePID && (includeOverlaySurfaces ? layer >= 0 : layer == 0)),
+                        let alpha = row[kCGWindowAlpha as String] as? Double, alpha > 0,
+                        let bounds = row[kCGWindowBounds as String] as? [String: Double],
+                        let x = bounds["X"], let y = bounds["Y"], let w = bounds["Width"], let h = bounds["Height"] else { return false }
+                  return point.x >= x && point.x < x + w && point.y >= y && point.y < y + h
+              }),
+              frontWindow[kCGWindowNumber as String] as? UInt32 == target.key.windowId,
+              frontWindow[kCGWindowOwnerPID as String] as? UInt32 == target.key.pid,
+              let bounds = frontWindow[kCGWindowBounds as String] as? [String: Double],
+              bounds["X"] == target.bounds.x, bounds["Y"] == target.bounds.y,
+              bounds["Width"] == target.bounds.width, bounds["Height"] == target.bounds.height else { return false }
+        return true
     }
 
     func post(_ input: ForegroundInput, willDispatch: () throws -> Void) throws {
@@ -412,9 +498,14 @@ struct ClickWitness {
     private let original: CGImage
     private let region: CGRect
 
-    init?(operation: ClickOperation, observation: Observation) {
+    init?(operation: ClickOperation, observation: Observation, visualOnly: Bool) {
         guard let frame = observation.visual?.frame, let screenshot = observation.screenshot,
-              observation.visual?.geometryMatchesAX == true, let data = Data(base64Encoded: screenshot.dataBase64),
+              observation.visual?.captureStatus == .captured,
+              visualOnly
+                ? observation.accessibility == .unavailable && observation.visual?.geometryMatchesAX == nil
+                    && observation.windowBounds == frame.captureWindowBounds
+                : observation.visual?.geometryMatchesAX == true,
+              let data = Data(base64Encoded: screenshot.dataBase64),
               let original = Self.decode(data), original.width == frame.widthPx, original.height == frame.heightPx else { return nil }
         let image: Point
         switch operation.space {

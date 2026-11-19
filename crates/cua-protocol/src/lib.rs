@@ -214,7 +214,18 @@ pub struct Target {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner_name: Option<String>,
 }
-record!(TargetsRequest { bundle_id: Option<String> });
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TargetsRequest {
+    pub bundle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_contains: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_contains: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unbundled_only: bool,
+}
 record!(TargetsResult { targets: Vec<Target>, truncated: bool });
 record!(CollectionInterval {
     started_unix_ms: u64,
@@ -1560,6 +1571,20 @@ impl Frame {
                     id(request.epoch.as_deref().ok_or("epoch required")?)?;
                 }
                 match &request.body {
+                    RequestBody::Targets(v) => {
+                        if let Some(title) = &v.title_contains {
+                            require(
+                                !title.trim().is_empty() && title.len() <= 1024,
+                                "invalid title filter",
+                            )?;
+                        }
+                        if let Some(owner) = &v.owner_contains {
+                            require(
+                                !owner.trim().is_empty() && owner.len() <= 1024,
+                                "invalid owner filter",
+                            )?;
+                        }
+                    }
                     RequestBody::Observe(v) => v.validate()?,
                     RequestBody::Act(v) => v.validate()?,
                     RequestBody::WaitFor(v) => {

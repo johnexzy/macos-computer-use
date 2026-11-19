@@ -432,19 +432,31 @@ public struct Target: Codable, Equatable, Sendable {
 
 public struct TargetsRequest: Codable, Equatable, Sendable {
     public let bundleId: String?
-    public init(bundleId: String?) {
+    public let titleContains: String?
+    public let ownerContains: String?
+    public let unbundledOnly: Bool
+    public init(bundleId: String? = nil, titleContains: String? = nil, ownerContains: String? = nil, unbundledOnly: Bool = false) {
         self.bundleId = bundleId
+        self.titleContains = titleContains
+        self.ownerContains = ownerContains
+        self.unbundledOnly = unbundledOnly
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case bundleId
+        case bundleId, titleContains, ownerContains, unbundledOnly
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
         bundleId = try c.decodeIfPresent(String.self, forKey: .bundleId)
+        titleContains = try c.decodeIfPresent(String.self, forKey: .titleContains)
+        ownerContains = try c.decodeIfPresent(String.self, forKey: .ownerContains)
+        unbundledOnly = c.contains(.unbundledOnly) ? try c.decode(Bool.self, forKey: .unbundledOnly) : false
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(bundleId, forKey: .bundleId)
+        try c.encodeIfPresent(titleContains, forKey: .titleContains)
+        try c.encodeIfPresent(ownerContains, forKey: .ownerContains)
+        if unbundledOnly { try c.encode(unbundledOnly, forKey: .unbundledOnly) }
     }
 }
 

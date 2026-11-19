@@ -203,14 +203,17 @@ Each issued reference retains the actual AX control, its observed role/subrole,
 and its raw AX identifier. Before a read or action, the runtime rechecks the exact CG target
 and metadata, the retained window's `CFEqual` membership in current AX windows,
 the control's PID and owning-window link or parent chain, bounded live-tree
-membership, and its role/subrole/identifier. Recreated objects, changed identity metadata,
+membership, and its role/subrole/identifier. A live parent chain whose child
+edges still contain the exact retained objects can prove membership without
+traversing unrelated sibling subtrees. Recreated objects, changed identity metadata,
 wrong-window refs, and stale session refs are refused. A genuine in-place reorder
 may move a control without invalidating it; mutable labels, values, and control
 bounds are not treated as identity. Same-role reuse with no changed identifier is
 not an observable native generation guarantee.
 
-Collection is bounded to 1,024 tree nodes and depth 32, with at most 256 returned
-elements. Unreadable metadata, unknown enabled states, traversal limits, and
+Collection is bounded to 1,024 tree nodes and at most 256 returned elements.
+The depth limit is 32 for full observations and 48 for selected scans.
+Unreadable metadata, unknown enabled states, traversal limits, and
 export limits produce partial coverage. Enabled state is a required nullable field:
 `null` means unavailable, rather than observed disabled. Optional `subrole` identifies
 controls such as an unlabelled `AXCloseButton`. Exported labels, identifiers and subroles are capped

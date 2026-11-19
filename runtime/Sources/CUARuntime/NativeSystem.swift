@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 public protocol NativeSystem: Sendable {
     func permissions(context: OperationContext) throws -> Permissions
     func supportedActions(permissions: Permissions) -> [ActionKind]
-    func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult
+    func targets(_ request: TargetsRequest, context: OperationContext) throws -> TargetsResult
     func window(_ key: TargetKey, context: OperationContext) throws -> Target
     func retainApplication(pid: UInt32, timeoutSeconds: Float, context: OperationContext) throws -> (any RetainedNativeHandle)?
     func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation
@@ -69,7 +69,7 @@ public struct MacOSSystem: NativeSystem {
     }
     public func shutdownObservations() { eventRegistry.shutdown() }
     public func configureObservationWorker(_ queue: DispatchQueue) { eventRegistry.configure(worker: queue) }
-    public func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult { try catalog.targets(bundleId: bundleId, context: context) }
+    public func targets(_ request: TargetsRequest, context: OperationContext) throws -> TargetsResult { try catalog.targets(request, context: context) }
     public func window(_ key: TargetKey, context: OperationContext) throws -> Target { try catalog.window(key, context: context) }
     public func retainApplication(pid: UInt32, timeoutSeconds: Float, context: OperationContext) throws -> (any RetainedNativeHandle)? {
         guard AXIsProcessTrusted() else { return nil }
@@ -80,12 +80,13 @@ public struct MacOSSystem: NativeSystem {
         let started = nativeMilliseconds()
         let window = try catalog.windowSnapshot(params.target, context: context)
         let semantic: NativeObservation
-        if window.target.bundleId != nil && isAXTrusted() {
+        if isAXTrusted() {
             let ax = ObserveRequest(target: params.target, includeScreenshot: false, includeValues: params.includeValues, axSelectors: params.axSelectors)
             do {
                 semantic = try SemanticAXObserver(backend: backend, catalog: catalog).observe(
-                    params: ax, observationId: observationId, target: window.target, context: context)
-            } catch let failure where wantsVisual && axUnavailable(failure) {
+                    params: ax, observationId: observationId, target: window.target,
+                    generation: window.generation, context: context)
+            } catch let failure where (wantsVisual || window.target.bundleId == nil) && axUnavailable(failure) {
                 let attempted = CollectionInterval(startedUnixMs: started, finishedUnixMs: max(started, nativeMilliseconds()))
                 semantic = observeWindowOnly(window.target, id: observationId, started: started,
                                              accessibilityCollected: attempted, selectors: params.axSelectors)
@@ -108,7 +109,14 @@ public struct MacOSSystem: NativeSystem {
             windowBounds: ax.windowBounds, accessibility: ax.accessibility, accessibilityCollected: ax.accessibilityCollected,
             elements: ax.elements, screenshot: screenshot, visual: evidence, axSelection: ax.axSelection, events: ax.events)
         try context.check()
-        return NativeObservation(observation: observation, handle: observed.handle)
+        let visualHandle: VisualObservationHandle?
+        if observed.handle == nil, observation.accessibility == .unavailable, screenshot != nil,
+           evidence.frame?.captureWindowBounds == window.target.bounds, window.generation != nil {
+            visualHandle = VisualObservationHandle(window: window, catalog: catalog, observationId: observationId)
+        } else {
+            visualHandle = nil
+        }
+        return NativeObservation(observation: observation, handle: observed.handle ?? visualHandle)
     }
 
     private func retainingEvents(params: ObserveRequest, native: NativeObservation, context: OperationContext) throws -> NativeObservation {
@@ -335,20 +343,28 @@ public struct MacOSWindowCatalog: WindowCatalog {
         readWindows = windowRecords; readProcessOwners = processOwners
     }
 
-    public func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult {
+    public func targets(_ request: TargetsRequest, context: OperationContext) throws -> TargetsResult {
         let (windows, owners) = try snapshot(context: context)
         var result: [Target] = []
         var truncated = false
         for record in windows {
             try context.check()
             guard let pid = record[kCGWindowOwnerPID as String] as? UInt32,
-                  let owner = owners[pid], bundleId == nil || owner.bundleId == bundleId,
-                  let target = target(record, bundleId: owner.bundleId) else { continue }
+                  let owner = owners[pid],
+                  request.bundleId == nil || owner.bundleId == request.bundleId,
+                  !request.unbundledOnly || owner.bundleId == nil,
+                  let target = target(record, bundleId: owner.bundleId),
+                  contains(request.titleContains, in: target.title),
+                  contains(request.ownerContains, in: record[kCGWindowOwnerName as String] as? String) else { continue }
             if result.count == Limits.maxTargets { truncated = true; break }
             result.append(target)
         }
         try context.check()
         return TargetsResult(targets: result, truncated: truncated)
+    }
+    private func contains(_ query: String?, in value: String?) -> Bool {
+        guard let query else { return true }
+        return value?.range(of: query, options: .caseInsensitive) != nil
     }
     public func window(_ key: TargetKey, context: OperationContext) throws -> Target {
         try windowSnapshot(key, context: context).target

@@ -132,7 +132,7 @@ private final class ActionBackend: AXReading, AXMutating, AXScrolling, WindowCat
             selectedRange: isField ? selectedRange : nil,
             actions: role == "AXButton" && pressAdvertised ? ["AXPress"] : [], enabledUnsupported: enabledUnsupported)
     }
-    func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult { try context.check(); return TargetsResult(targets: [actionTarget], truncated: false) }
+    func targets(_ request: TargetsRequest, context: OperationContext) throws -> TargetsResult { try context.check(); return TargetsResult(targets: [actionTarget], truncated: false) }
     func window(_ key: TargetKey, context: OperationContext) throws -> Target { try context.check(); return actionTarget }
     func processWindows(pid: UInt32, context: OperationContext) throws -> [Target] { try context.check(); return [actionTarget] }
     private func mutate(_ expected: String?, context: OperationContext, willDispatch: @Sendable () throws -> Void) throws {
@@ -614,6 +614,15 @@ final class BackgroundActionTests: XCTestCase {
         backend.pressAdvertised = false
         let (unsupported, _) = try perform(backend, request(.press(ElementOperation(elementRef: "button"))))
         XCTAssertEqual(unsupported.steps[0].delivery, .notDispatched)
+        XCTAssertEqual(unsupported.steps[0].reason, .unsupported)
+        XCTAssertNil(unsupported.steps[0].route)
+        XCTAssertEqual(backend.calls, 1)
+
+        backend.pressAdvertised = true
+        backend.behavior = .refuse
+        let (withdrawn, _) = try perform(backend, request(.press(ElementOperation(elementRef: "button"))))
+        XCTAssertEqual(withdrawn.steps[0].delivery, .notDispatched)
+        XCTAssertEqual(withdrawn.steps[0].reason, .unsupported)
         XCTAssertEqual(backend.calls, 1)
     }
     func testScrollDispatchesOnceOnRequestedAxisAndConfirmsDirectionalMovement() throws {

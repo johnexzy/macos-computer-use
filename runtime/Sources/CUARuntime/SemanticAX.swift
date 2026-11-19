@@ -67,6 +67,7 @@ public struct AXNodeSnapshot: Sendable {
 /// This seam represents native reads; actions use retained objects, never selectors.
 public protocol AXReading: Sendable {
     func application(pid: UInt32, context: OperationContext) throws -> any AXObject
+    func focusedElement(of application: any AXObject, context: OperationContext) throws -> (any AXObject)?
     func windows(of application: any AXObject, context: OperationContext) throws -> AXChildren
     func children(of element: any AXObject, limit: Int, context: OperationContext) throws -> AXChildren
     func parent(of element: any AXObject, context: OperationContext) throws -> (any AXObject)?
@@ -78,13 +79,15 @@ public protocol AXReading: Sendable {
 }
 
 public extension AXReading {
+    func focusedElement(of application: any AXObject, context: OperationContext) throws -> (any AXObject)? { nil }
+
     func identity(of element: any AXObject, context: OperationContext) throws -> AXElementIdentity? {
         try snapshot(of: element, includeValue: false, context: context)?.identity
     }
 }
 
 public protocol WindowCatalog: Sendable {
-    func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult
+    func targets(_ request: TargetsRequest, context: OperationContext) throws -> TargetsResult
     func window(_ key: TargetKey, context: OperationContext) throws -> Target
     func windowSnapshot(_ key: TargetKey, context: OperationContext) throws -> WindowSnapshot
     func processWindows(pid: UInt32, context: OperationContext) throws -> [Target]
@@ -126,6 +129,7 @@ public struct AXTreeSnapshot: Sendable {
 
 private let maxTreeNodes = 1024
 private let maxTreeDepth = 32
+private let maxSelectiveTreeDepth = 48
 
 struct RetainedAXElement: Sendable {
     let object: any AXObject
@@ -144,6 +148,7 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
     public let includeValues: Bool
     private let application: any AXObject
     private let catalog: any WindowCatalog
+    private let generation: ProcessGeneration?
     private let references: [String: RetainedAXElement]
     var eventTracker: TargetWindowEvents?
 
@@ -151,16 +156,19 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
 
     init(backend: any AXReading, catalog: any WindowCatalog, application: any AXObject,
          target: Target, window: any AXObject, observationId: String, includeValues: Bool,
-         references: [String: RetainedAXElement]) {
+         references: [String: RetainedAXElement], generation: ProcessGeneration? = nil) {
         self.backend = backend; self.catalog = catalog; self.application = application
         self.target = target; retainedWindow = window; self.observationId = observationId
         self.includeValues = includeValues; self.references = references
+        self.generation = generation
     }
 
     public func validateWindow(context: OperationContext) throws {
         try context.check()
-        let current = try catalog.window(target.key, context: context)
-        guard current.bounds == target.bounds, current.bundleId == target.bundleId,
+        let snapshot = try catalog.windowSnapshot(target.key, context: context)
+        let current = snapshot.target
+        guard (generation == nil || snapshot.generation == generation),
+              current.bounds == target.bounds, current.bundleId == target.bundleId,
               titlesCompatible(current.title, target.title) else {
             throw NativeFailure(.staleObservation, "observed window metadata changed")
         }
@@ -211,7 +219,8 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
     }
     func eventReadSource() -> SemanticObservationHandle {
         SemanticObservationHandle(backend: backend, catalog: catalog, application: application, target: target,
-            window: retainedWindow, observationId: observationId, includeValues: includeValues, references: references)
+            window: retainedWindow, observationId: observationId, includeValues: includeValues,
+            references: references, generation: generation)
     }
     func notificationObjects() -> [any AXObject] { [retainedWindow] + references.values.prefix(Limits.maxEventControls).map(\.object) }
 }
@@ -222,19 +231,25 @@ public struct SemanticAXObserver: Sendable {
     public init(backend: any AXReading, catalog: any WindowCatalog) { self.backend = backend; self.catalog = catalog }
 
     public func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation {
-        let target = try catalog.window(params.target, context: context)
-        return try observe(params: params, observationId: observationId, target: target, context: context)
+        let snapshot = try catalog.windowSnapshot(params.target, context: context)
+        return try observe(params: params, observationId: observationId, target: snapshot.target,
+                           generation: snapshot.generation, context: context)
     }
 
-    func observe(params: ObserveRequest, observationId: String, target: Target, context: OperationContext) throws -> NativeObservation {
+    func observe(params: ObserveRequest, observationId: String, target: Target,
+                 generation: ProcessGeneration?, context: OperationContext) throws -> NativeObservation {
         guard !params.includeScreenshot && !params.includeOcr else { throw NativeFailure(.unsupported, "semantic observer only accepts AX requests") }
-        guard target.bundleId != nil else { throw NativeFailure(.unsupported, "unbundled windows support visual reads only") }
         let started = milliseconds()
         let axStarted = milliseconds()
         let application = try backend.application(pid: target.key.pid, context: context)
         let window = try associatedWindow(target: target, application: application, backend: backend, catalog: catalog, context: context)
         let scan = try collectTree(window: window, pid: target.key.pid, backend: backend,
-                                   includeValues: params.includeValues, selectors: params.axSelectors, context: context)
+                                   includeValues: params.includeValues, selectors: params.axSelectors, application: application,
+                                   context: context)
+        if target.bundleId == nil, params.axSelectors == nil,
+           !scan.nodes.contains(where: { $0.snapshot.role != "AXWindow" && $0.snapshot.role != "AXGroup" }) {
+            throw AXReadUnavailable()
+        }
         var references: [String: RetainedAXElement] = [:]
         var elements: [Element] = []
         var complete = scan.complete
@@ -265,7 +280,7 @@ public struct SemanticAXObserver: Sendable {
         }
         let handle = SemanticObservationHandle(backend: backend, catalog: catalog, application: application,
             target: target, window: window, observationId: observationId,
-            includeValues: params.includeValues, references: references)
+            includeValues: params.includeValues, references: references, generation: generation)
         try handle.validateWindow(context: context)
         let axFinished = max(axStarted, milliseconds())
         let selection = params.axSelectors.map { selectors in
@@ -327,7 +342,7 @@ private func requireOwningWindow(_ object: any AXObject, window: any AXObject, p
     }
     var ancestors: [any AXObject] = [object]
     var current = object
-    for _ in 0..<maxTreeDepth {
+    for _ in 0..<maxSelectiveTreeDepth {
         guard let parent = try backend.parent(of: current, context: context),
               !ancestors.contains(where: { backend.same($0, parent) }) else { break }
         if backend.same(parent, window) { return }
@@ -337,11 +352,38 @@ private func requireOwningWindow(_ object: any AXObject, window: any AXObject, p
 }
 
 private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReading,
-                         includeValues: Bool, selectors: [CUAProtocol.Selector]? = nil, context: OperationContext) throws -> AXTreeSnapshot {
+                         includeValues: Bool, selectors: [CUAProtocol.Selector]? = nil, application: (any AXObject)? = nil,
+                         context: OperationContext) throws -> AXTreeSnapshot {
+    let depthLimit = selectors == nil ? maxTreeDepth : maxSelectiveTreeDepth
+    let focusPath: [any AXObject]
+    if selectors != nil, let application {
+        focusPath = try optionalTopologyRead {
+            guard let focus = try backend.focusedElement(of: application, context: context) else { return [] }
+            return try parentPath(from: focus, to: window, backend: backend, context: context)
+        } ?? []
+    } else {
+        focusPath = []
+    }
     var pending: [(any AXObject, Int)] = [(window, 0)]
     var seen: [any AXObject] = []
     var nodes: [ResolvedAXElement] = []
     var complete = true
+    func enqueueChildren(of object: any AXObject, depth: Int) throws {
+        let children = try backend.children(of: object, limit: max(0, maxTreeNodes - seen.count - pending.count), context: context)
+        if !children.complete { complete = false }
+        guard depth < depthLimit else {
+            if !children.elements.isEmpty { complete = false }
+            return
+        }
+        // The focus is only a traversal hint. All refs still come from walking the exact window tree.
+        var ordered = children.elements
+        if let parent = focusPath.firstIndex(where: { backend.same($0, object) }), parent > 0,
+           let branch = ordered.firstIndex(where: { backend.same($0, focusPath[parent - 1]) }), branch > 0 {
+            let preferred = ordered.remove(at: branch)
+            ordered.insert(preferred, at: 0)
+        }
+        for child in ordered.reversed() { pending.append((child, depth + 1)) }
+    }
     while let (object, depth) = pending.popLast() {
         try context.check()
         if seen.contains(where: { backend.same($0, object) }) { complete = false; continue }
@@ -352,9 +394,7 @@ private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReadi
             if let selectors {
                 guard let identity = try backend.identity(of: object, context: context) else {
                     complete = false
-                    let children = try backend.children(of: object, limit: max(0, maxTreeNodes - seen.count - pending.count), context: context)
-                    if !children.complete || (depth >= maxTreeDepth && !children.elements.isEmpty) { complete = false }
-                    if depth < maxTreeDepth { for child in children.elements.reversed() { pending.append((child, depth + 1)) } }
+                    try enqueueChildren(of: object, depth: depth)
                     continue
                 }
                 let candidates = selectors.filter { $0.role == identity.role && ($0.identifier == nil || $0.identifier == identity.identifier) }
@@ -381,13 +421,7 @@ private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReadi
                 nodes.append(ResolvedAXElement(object: object, snapshot: snapshot))
                 if !snapshot.complete { complete = false }
             } else { complete = false }
-            let children = try backend.children(of: object, limit: max(0, maxTreeNodes - seen.count - pending.count), context: context)
-            if !children.complete { complete = false }
-            if depth >= maxTreeDepth {
-                if !children.elements.isEmpty { complete = false }
-            } else {
-                for child in children.elements.reversed() { pending.append((child, depth + 1)) }
-            }
+            try enqueueChildren(of: object, depth: depth)
         } catch is AXReadUnavailable {
             // Keep readable siblings without claiming that the unreadable subtree is absent.
             complete = false
@@ -406,6 +440,17 @@ func matches(_ snapshot: AXNodeSnapshot, selector: CUAProtocol.Selector) -> Bool
 /// Membership needs current identities/children, not a second full attribute read of every sibling.
 private func containsRetainedObject(_ sought: any AXObject, window: any AXObject, backend: any AXReading,
                                     context: OperationContext) throws -> Bool {
+    if let connected = try optionalTopologyRead({
+        guard let path = try parentPath(from: sought, to: window, backend: backend, context: context) else { return false }
+        var remaining = maxTreeNodes
+        for (child, parent) in zip(path, path.dropFirst()) {
+            let children = try backend.children(of: parent, limit: remaining, context: context)
+            guard children.elements.contains(where: { backend.same($0, child) }) else { return false }
+            remaining -= children.elements.count
+        }
+        return true
+    }), connected { return true }
+
     var pending: [(any AXObject, Int)] = [(window, 0)]
     var seen: [any AXObject] = []
     while let (object, depth) = pending.popLast() {
@@ -414,11 +459,31 @@ private func containsRetainedObject(_ sought: any AXObject, window: any AXObject
         guard seen.count < maxTreeNodes else { return false }
         seen.append(object)
         if backend.same(object, sought) { return true }
-        if depth >= maxTreeDepth { continue }
+        if depth >= maxSelectiveTreeDepth { continue }
         let children = try backend.children(of: object, limit: max(0, maxTreeNodes - seen.count - pending.count), context: context)
         for child in children.elements.reversed() { pending.append((child, depth + 1)) }
     }
     return false
+}
+
+private func parentPath(from object: any AXObject, to window: any AXObject, backend: any AXReading,
+                        context: OperationContext) throws -> [any AXObject]? {
+    var path = [object]
+    var current = object
+    for _ in 0..<maxSelectiveTreeDepth {
+        if backend.same(current, window) { return path }
+        guard let parent = try backend.parent(of: current, context: context),
+              !path.contains(where: { backend.same($0, parent) }) else { return nil }
+        path.append(parent)
+        current = parent
+    }
+    return backend.same(current, window) ? path : nil
+}
+
+private func optionalTopologyRead<T>(_ read: () throws -> T?) throws -> T? {
+    do { return try read() }
+    catch is AXReadUnavailable { return nil }
+    catch let error as NativeFailure where error.code == .staleElement || error.code == .nativeFailed { return nil }
 }
 
 private func milliseconds() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }

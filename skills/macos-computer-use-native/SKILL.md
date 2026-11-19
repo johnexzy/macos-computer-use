@@ -10,10 +10,10 @@ Use the connected server's `capabilities`, `targets`, `observe`, `act`, and `wai
 ## Find and observe
 
 1. Check `capabilities` for available permissions, actions, and the installed execution mode.
-2. Use `targets`, optionally with `bundleId`, to find the intended open window. If filtering by bundle ID misses an open app, call `targets` without the filter. A launcher child process may own the window without its own bundle ID. Match the available `ownerName` and window title, then pass the returned `key` as `target` with its exact `pid` and `windowId`. Resolve any target ambiguity before observing or acting.
+2. Use `targets` to find the intended open window. Filter by exact `bundleId` when known. If that misses an open app, use `titleContains` or `ownerContains` instead. A launcher child process may own the window without its own bundle ID. For that case, combine a title or owner filter with `unbundledOnly: true`. Pass the returned `key` as `target` with its exact `pid` and `windowId`. Resolve any target ambiguity before observing or acting.
 3. Observe that target close to the action. Use `includeValues: true` when you need to read or verify field values. Use `axSelectors` for known controls when a narrower read suffices. Partial coverage, an omitted value, or `enabled: null` gives incomplete evidence.
 4. Use `includeOcr: true` for visible text that Accessibility omits, such as PDF content. Request `includeScreenshot: true` when layout or image evidence is needed. The live preview and pointer are operator feedback. Use tool results as task evidence.
-5. For windows without a bundle ID, use window-only screenshot or OCR with `observe`. These windows have unavailable AX coverage and no actionable references. Treat their observations as read-only.
+5. For windows without a bundle ID, use `observe` as usual. It probes the actual window owner's AX tree. Add window screenshot or OCR when the app omits controls or reports unavailable AX coverage.
 
 ## Act and verify
 
@@ -21,7 +21,7 @@ Use the connected server's `capabilities`, `targets`, `observe`, `act`, and `wai
 - To scroll, use `operation: {"kind":"scroll","params":{"elementRef":"<scroll area reference>","axis":"vertical","amount":250}}` with a live `AXScrollArea` that advertises `scroll`. Choose `vertical` or `horizontal`. `amount` is a nonzero integer from -1000 to 1000. Positive moves down or right. `250` requests 25% of the scrollbar's full range. Scroll runs in the background and verifies movement. Observe again to find newly revealed content.
 - Each step has an `actionId` and an `operation` with `kind` and `params`. Group up to 16 compatible steps on one target and observation within one `budgetMs`. Observe again after any change that introduces new controls, including an attached sheet. A wait inside `act` uses the original refs. Use standalone `waitFor` for an expected state change.
 - Check each receipt's `delivery` and `verification`, plus `stopReason` and `remainingSteps` for a sequence. Use an observable `expect`, such as `valueEquals`, or read back the intended result. A confirmed field edit verifies its value. When the task requires a saved file, also verify the save through the app.
-- Use foreground input only when the operator permits it and the connection reports `foregroundAllowed`. Request `foreground: true` on that `act` call. A `key` needs the exact focused control. The `saveAs` key sends the macOS Save As shortcut where supported. A `click` needs a fresh screenshot-backed observation with matching AX geometry.
+- Use foreground input only when the operator permits it and the connection reports `foregroundAllowed`. Request `foreground: true` on that `act` call. A `key` needs the exact focused control. The `saveAs` key sends the macOS Save As shortcut where supported. A `click` needs a fresh screenshot-backed observation. When AX is unavailable, the exact window must already be in the foreground with the destination unobscured. Use a coordinate click without AX conditions and observe again to verify the result.
 
 ## Recover from interrupted input
 

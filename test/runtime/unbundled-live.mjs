@@ -69,8 +69,9 @@ async function run() {
   const observation = data(result, "observe");
   assert.deepEqual(observation.target, target);
   assert.deepEqual(observation.windowBounds, found.bounds);
-  assert.equal(observation.accessibility, "unavailable");
-  assert.deepEqual(observation.elements, []);
+  assert.ok(["complete", "partial"].includes(observation.accessibility));
+  assert.ok(observation.elements.some(({ identifier, actions }) => identifier === "primary.first" && actions.includes("setValue")),
+    "A real unbundled AppKit window should expose the same writable field through AX");
   assert.equal(observation.visual.captureStatus, "captured");
   assert.deepEqual(observation.visual.frame.captureWindowBounds, found.bounds);
   assert.equal(observation.visual.ocr.status, "complete");

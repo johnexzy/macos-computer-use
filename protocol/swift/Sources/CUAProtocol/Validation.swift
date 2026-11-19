@@ -473,6 +473,15 @@ extension Frame {
                 try identifier(epoch)
             }
             switch request.body {
+            case .targets(let value):
+                if let title = value.titleContains {
+                    try require(!title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && title.utf8.count <= 1024,
+                                "invalid title filter")
+                }
+                if let owner = value.ownerContains {
+                    try require(!owner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && owner.utf8.count <= 1024,
+                                "invalid owner filter")
+                }
             case .observe(let value): try value.validate()
             case .act(let value): try value.validate()
             case .waitFor(let value):

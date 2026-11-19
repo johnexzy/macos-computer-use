@@ -38,10 +38,11 @@ private final class ResolverInputs: @unchecked Sendable {
 final class WindowCatalogTests: XCTestCase {
     private let imageA = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
     private let imageB = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
-    private func row(_ windowId: UInt32, pid: UInt32 = 42, width: Double = 440, layer: Int = 0) -> [String: Any] {
+    private func row(_ windowId: UInt32, pid: UInt32 = 42, width: Double = 440, layer: Int = 0,
+                     title: String = "Same title", ownerName: String = "Window Fixture") -> [String: Any] {
         [kCGWindowNumber as String: windowId, kCGWindowOwnerPID as String: pid,
-         kCGWindowLayer as String: layer, kCGWindowName as String: "Same title",
-         kCGWindowOwnerName as String: "Window Fixture",
+         kCGWindowLayer as String: layer, kCGWindowName as String: title,
+         kCGWindowOwnerName as String: ownerName,
          kCGWindowBounds as String: ["X": -10.0, "Y": 20.0, "Width": width, "Height": 230.0]]
     }
     private func context() -> OperationContext { OperationContext(budgetMs: 1000) }
@@ -90,9 +91,9 @@ final class WindowCatalogTests: XCTestCase {
         let records = WindowRows(values: [row(7), row(8), row(9, pid: 43)])
         let snapshots = ProcessSnapshots([[42: owner(bundleId: "test.fixture")], [43: owner(bundleId: "test.other", start: 11)]])
         let catalog = MacOSWindowCatalog(windowRecords: records.read, processOwners: snapshots.read)
-        XCTAssertEqual(try catalog.targets(bundleId: nil, context: context()).targets.map(\.key.windowId), [7, 8])
+        XCTAssertEqual(try catalog.targets(TargetsRequest(), context: context()).targets.map(\.key.windowId), [7, 8])
         XCTAssertEqual(snapshots.calls, 1)
-        XCTAssertEqual(try catalog.targets(bundleId: nil, context: context()).targets.map(\.key.windowId), [9])
+        XCTAssertEqual(try catalog.targets(TargetsRequest(), context: context()).targets.map(\.key.windowId), [9])
         XCTAssertEqual(snapshots.calls, 2)
         XCTAssertEqual(snapshots.requestedPids, [[42, 43], [42, 43]])
     }
@@ -102,8 +103,8 @@ final class WindowCatalogTests: XCTestCase {
         let unbundled = owner(bundleId: nil, start: 11)
         let owners: [UInt32: WindowProcessOwner] = [42: owner(bundleId: "test.fixture"), 43: unbundled]
         let catalog = MacOSWindowCatalog(windowRecords: records.read, processOwners: { _ in owners })
-        XCTAssertEqual(try catalog.targets(bundleId: nil, context: context()).targets.map(\.key.windowId), [7, 8])
-        XCTAssertEqual(try catalog.targets(bundleId: "test.fixture", context: context()).targets.map(\.key.windowId), [7])
+        XCTAssertEqual(try catalog.targets(TargetsRequest(), context: context()).targets.map(\.key.windowId), [7, 8])
+        XCTAssertEqual(try catalog.targets(TargetsRequest(bundleId: "test.fixture"), context: context()).targets.map(\.key.windowId), [7])
         let exact = try catalog.windowSnapshot(TargetKey(pid: 43, windowId: 8), context: context())
         XCTAssertEqual(exact.generation, unbundled.generation)
         XCTAssertNil(exact.target.bundleId)
@@ -111,6 +112,33 @@ final class WindowCatalogTests: XCTestCase {
         XCTAssertThrowsError(try catalog.window(TargetKey(pid: 44, windowId: 9), context: context())) {
             XCTAssertEqual(($0 as? NativeFailure)?.code, .nativeFailed)
         }
+    }
+
+    func testTargetFiltersCombineBeforeBoundingTheResult() throws {
+        let earlierWindows = (1...Limits.maxTargets).map { row(UInt32($0)) }
+        let records = WindowRows(values: earlierWindows + [
+            row(1001, pid: 43, title: "EURUSD - MetaTrader 5", ownerName: "Wine"),
+            row(1002, pid: 44, title: "MetaTrader 5 wrapper", ownerName: "Launcher"),
+            row(1003, pid: 43, title: "Other title", ownerName: "Wine"),
+            row(1004, pid: 45, title: "MetaTrader 5", ownerName: "Wine"),
+        ])
+        let owners: [UInt32: WindowProcessOwner] = [
+            42: owner(bundleId: "test.fixture"),
+            43: owner(bundleId: nil, start: 11),
+            44: owner(bundleId: "test.launcher", start: 12),
+        ]
+        let catalog = MacOSWindowCatalog(windowRecords: records.read, processOwners: { _ in owners })
+
+        let filtered = try catalog.targets(TargetsRequest(titleContains: "metatrader", ownerContains: "wiNE",
+                                                          unbundledOnly: true), context: context())
+        XCTAssertEqual(filtered.targets.map(\.key.windowId), [1001])
+        XCTAssertFalse(filtered.truncated)
+        XCTAssertEqual(try catalog.targets(TargetsRequest(ownerContains: "launch"), context: context())
+            .targets.map(\.key.windowId), [1002])
+        XCTAssertEqual(try catalog.targets(TargetsRequest(unbundledOnly: true), context: context())
+            .targets.map(\.key.windowId), [1001, 1003])
+        XCTAssertTrue(try catalog.targets(TargetsRequest(bundleId: "test.launcher", unbundledOnly: true),
+                                          context: context()).targets.isEmpty)
     }
 
     func testWindowProcessResolverReusesImmutableMetadataOnlyAfterFreshGenerationChecks() {

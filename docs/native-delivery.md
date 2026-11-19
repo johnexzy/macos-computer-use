@@ -43,10 +43,11 @@ Application identity and [Apple notarization](https://developer.apple.com/docume
 
 The deployment target remains **macOS 13.0**, on **Apple Silicon and Intel**.
 Semantic AX observations/actions work within the app's advertised capabilities.
-Unfiltered `targets` also lists visible windows owned by verified live processes
-without a bundle ID. Match the owner name and window title, then use the returned
-PID and window ID for read-only screenshot and OCR. These targets have unavailable
-AX coverage and no actionable references.
+`targets` also lists visible windows owned by verified live processes without a
+bundle ID. Narrow these results with `unbundledOnly`, `ownerContains`, or
+`titleContains`. Use the exact returned PID and window ID. The runtime attempts AX
+on the owner process and exposes only controls it can bind to that window.
+Screenshot and OCR remain available when AX cannot describe the window.
 Screenshot/OCR capture requires macOS 14+ and Screen Recording permission; on
 macOS 13 the visual channel reports `unsupported` while AX can remain available.
 The build produces and checks both `arm64` and `x86_64` slices in each executable.
@@ -108,6 +109,10 @@ production client configuration should omit it. Background authority is the
 default. With the operator's `--allow-foreground` grant, an individual
 `act` request can select foreground input with `foreground: true`. The
 background route remains the default for other calls.
+Visual-only coordinate clicks require the exact window to be foreground and
+unobscured at the click point. The runtime rechecks the selected pixels and
+window identity before dispatch. AX-backed input can raise its retained window
+and restore the previous focus under the existing foreground checks.
 
 Connect the client and call `capabilities` before protected operations. It uses
 preflight APIs and does not request permissions. Permission booleans are evidence

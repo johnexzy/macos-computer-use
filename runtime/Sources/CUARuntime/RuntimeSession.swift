@@ -231,13 +231,13 @@ public final class RuntimeSession: @unchecked Sendable {
         case .capabilities:
             let permissions = try system.permissions(context: context)
             var supported = system.supportedActions(permissions: permissions)
-            if mode == .foregroundAllowed && permissions.accessibility && permissions.inputPosting {
-                supported.append(.key)
+            if mode == .foregroundAllowed && permissions.inputPosting {
+                if permissions.accessibility { supported.append(.key) }
                 if #available(macOS 14.0, *), permissions.screenRecording { supported.append(.click) }
             }
             return NativeResult(.capabilities(Capabilities(permissions: permissions, mode: mode, actions: supported)))
         case .targets(let params):
-            return NativeResult(.targets(try system.targets(bundleId: params.bundleId, context: context)))
+            return NativeResult(.targets(try system.targets(params, context: context)))
         case .observe(let params):
             activityOverlay?.beginObservation(params.target)
             let native = try system.observe(params: params, observationId: nextObservationID(), context: context)

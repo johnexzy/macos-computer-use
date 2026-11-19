@@ -36,6 +36,12 @@ pub struct CapabilitiesArgs {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TargetsArgs {
     pub bundle_id: Option<String>,
+    #[schemars(length(min = 1, max = 1024))]
+    pub title_contains: Option<String>,
+    #[schemars(length(min = 1, max = 1024))]
+    pub owner_contains: Option<String>,
+    #[serde(default)]
+    pub unbundled_only: bool,
     #[serde(default = "default_budget")]
     #[schemars(range(min = 1, max = 60000))]
     pub budget_ms: u32,
@@ -286,7 +292,7 @@ impl Host {
     }
 
     #[tool(
-        description = "List bounded exact process/window targets. Unfiltered results include verified window owners without a bundle ID. The optional bundle ID filter matches only that exact ID."
+        description = "List bounded exact process/window targets. Filter by exact bundleId, case-insensitive titleContains or ownerContains, or unbundledOnly for verified window owners without a bundle ID. Filters combine."
     )]
     async fn targets(
         &self,
@@ -296,6 +302,9 @@ impl Host {
         self.execute(
             RequestBody::Targets(TargetsRequest {
                 bundle_id: args.bundle_id,
+                title_contains: args.title_contains,
+                owner_contains: args.owner_contains,
+                unbundled_only: args.unbundled_only,
             }),
             args.budget_ms,
             context,
@@ -304,7 +313,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Observe one exact window. For verified owners without a bundle ID, request screenshot or OCR for a read-only observation with no actionable AX refs. Optional axSelectors reads matching AX controls and reports query coverage separately from window coverage. Optional eventHistory retains bounded selected-state changes between observations; historical controls have no actionable refs. Values, screenshots, and Vision OCR are opt-in. cropWindow uses window-local points. Partial coverage cannot prove absence; history can be stale or overrun."
+        description = "Observe one exact window, including Accessibility controls exposed by owners without a bundle ID. Request screenshots or OCR for controls or windows without usable AX coverage. Optional axSelectors reads matching AX controls and reports query coverage separately from window coverage. Optional eventHistory retains bounded selected-state changes between observations; historical controls have no actionable refs. Values, screenshots, and Vision OCR are opt-in. cropWindow uses window-local points. Partial coverage cannot prove absence; history can be stale or overrun."
     )]
     async fn observe(
         &self,

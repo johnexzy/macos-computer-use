@@ -34,11 +34,15 @@ private final class SemanticNode: AXObject, @unchecked Sendable {
 private final class SemanticBackend: AXReading, @unchecked Sendable {
     let app = SemanticNode("app", role: "AXApplication", title: nil, bounds: Rect(x: 0, y: 0, width: 1, height: 1))
     var appWindows: [SemanticNode] = []
+    var focused: SemanticNode?
     var windowsComplete = true
     var valueReads: [String] = []
     var applicationCalls = 0
     func application(pid: UInt32, context: OperationContext) throws -> any AXObject {
         try context.check(); applicationCalls += 1; return app
+    }
+    func focusedElement(of application: any AXObject, context: OperationContext) throws -> (any AXObject)? {
+        try context.check(); return focused
     }
     func windows(of application: any AXObject, context: OperationContext) throws -> AXChildren {
         try context.check(); return AXChildren(elements: appWindows, complete: windowsComplete)
@@ -77,7 +81,7 @@ private final class SemanticCatalog: WindowCatalog, @unchecked Sendable {
     var generation: ProcessGeneration?
     var didReadWindow: (() -> Void)?
     init(_ records: [Target]) { self.records = records }
-    func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult {
+    func targets(_ request: TargetsRequest, context: OperationContext) throws -> TargetsResult {
         try context.check(); return TargetsResult(targets: records, truncated: false)
     }
     func window(_ key: TargetKey, context: OperationContext) throws -> Target {
@@ -118,6 +122,19 @@ private struct SemanticFixture {
             params: ObserveRequest(target: target.key, includeScreenshot: false, includeValues: values, axSelectors: selectors), observationId: id,
             context: OperationContext(budgetMs: 5000))
     }
+}
+
+private func largeSubtree(in fixture: SemanticFixture) -> SemanticNode {
+    let group = SemanticNode("large-subtree", role: "AXGroup", title: nil, bounds: fixture.target.bounds)
+    group.parent = fixture.window
+    group.owner = fixture.window
+    group.children = (0..<1024).map { index in
+        let node = SemanticNode("noise-\(index)", role: "AXStaticText", title: nil, bounds: fixture.target.bounds)
+        node.parent = group
+        node.owner = fixture.window
+        return node
+    }
+    return group
 }
 
 private struct TestVisualCapture: VisualCapturing {
@@ -208,6 +225,37 @@ final class SemanticObservationTests: XCTestCase {
         XCTAssertEqual(native.observation.axSelection?.ambiguous, true)
         XCTAssertEqual(native.observation.axSelection?.coverage, .complete)
         XCTAssertTrue(fixture.backend.valueReads.isEmpty)
+    }
+    func testSelectedScanReachesControlNearFocusPastLargeUnrelatedSubtree() throws {
+        let fixture = SemanticFixture()
+        let noise = largeSubtree(in: fixture)
+        let field = fixture.first
+        field.role = "AXTextArea"; field.title = "Composer"
+        let button = fixture.second
+        button.role = "AXButton"
+        fixture.backend.focused = button
+        let wrappers = (0..<33).map { index in
+            SemanticNode("wrapper-\(index)", role: "AXGroup", title: nil, bounds: fixture.target.bounds)
+        }
+        for (parent, child) in zip(wrappers, wrappers.dropFirst()) {
+            parent.children = [child]; child.parent = parent
+        }
+        for node in wrappers { node.owner = fixture.window }
+        let root = try XCTUnwrap(wrappers.first)
+        let leaf = try XCTUnwrap(wrappers.last)
+        root.parent = fixture.window
+        leaf.children = [button, field]
+        field.parent = leaf; button.parent = leaf
+        fixture.window.children = [noise, root]
+
+        let result = try fixture.observe(selectors: [Selector(role: "AXTextArea", label: nil, identifier: nil)])
+        XCTAssertEqual(result.observation.elements.map(\.label), ["Composer"])
+        XCTAssertEqual(result.observation.axSelection?.coverage, .partial)
+        XCTAssertLessThanOrEqual(try XCTUnwrap(result.observation.axSelection?.visitedNodes), 1024)
+        let reference = try XCTUnwrap(result.observation.elements.first?.reference)
+        let handle = try XCTUnwrap(result.handle as? SemanticObservationHandle)
+        let retained = try handle.resolve(reference, context: OperationContext(budgetMs: 5000))
+        XCTAssertTrue(fixture.backend.same(retained.object, field))
     }
     func testUnreadableIdentityCannotMakeASelectedNegativeReadComplete() throws {
         let fixture = SemanticFixture(); fixture.second.readUnavailable = true
@@ -300,6 +348,7 @@ final class SemanticObservationTests: XCTestCase {
 
     func testUnbundledProcessReplacementDiscardsPixelsAndOCR() throws {
         let fixture = SemanticFixture()
+        fixture.backend.appWindows = []
         let catalog = fixture.catalog
         catalog.records = [Target(key: fixture.target.key, bundleId: nil, title: fixture.target.title,
                                   bounds: fixture.target.bounds, ownerName: "Unbundled fixture")]
@@ -318,6 +367,22 @@ final class SemanticObservationTests: XCTestCase {
         XCTAssertEqual(result.observation.visual?.ocr?.status, .unavailable)
         XCTAssertNil(result.observation.screenshot)
         XCTAssertNil(result.handle)
+    }
+
+    func testUnbundledOwnerCanExposeExactAXControls() throws {
+        let fixture = SemanticFixture()
+        fixture.catalog.records = [Target(key: fixture.target.key, bundleId: nil, title: fixture.target.title,
+                                           bounds: fixture.target.bounds, ownerName: "Unbundled fixture")]
+        let capture = TestVisualCapture { _, _, _, _ in
+            XCTFail("AX-only observation entered visual capture")
+            throw NativeFailure(.nativeFailed, "unexpected capture")
+        }
+        let system = MacOSSystem(backend: fixture.backend, catalog: fixture.catalog, visual: capture, isAXTrusted: { true })
+        let result = try system.observe(params: ObserveRequest(target: fixture.target.key, includeScreenshot: false, includeValues: false),
+            observationId: "unbundled-ax", context: OperationContext(budgetMs: 1000))
+        XCTAssertEqual(result.observation.accessibility, .complete)
+        XCTAssertNotNil(result.handle as? SemanticObservationHandle)
+        XCTAssertTrue(result.observation.elements.contains { $0.identifier == "first" && $0.role == "AXTextField" })
     }
 
     func testUnavailableReadKeepsReadableSiblingsWithoutProvingAbsence() throws {
@@ -384,6 +449,18 @@ final class SemanticObservationTests: XCTestCase {
             XCTAssertEqual(($0 as? NativeFailure)?.code, .staleElement)
         }
         XCTAssertTrue(fixture.backend.valueReads.isEmpty)
+    }
+    func testExactRetainedValueReadSurvivesLabelChangeAndHeavySiblingSubtree() throws {
+        let fixture = SemanticFixture()
+        let observed = try fixture.observe()
+        let handle = try XCTUnwrap(observed.handle as? SemanticObservationHandle)
+        let reference = try XCTUnwrap(observed.observation.elements.first?.reference)
+        fixture.window.children.insert(largeSubtree(in: fixture), at: 0)
+        fixture.first.title = nil
+        fixture.first.value = "first line\nsecond line"
+        let expected = Condition.valueEquals(ValueCondition(elementRef: reference, value: "first line\nsecond line"))
+        let proof = try PredicateEvaluator().evaluate(expected, handle: handle, context: OperationContext(budgetMs: 5000))
+        XCTAssertEqual(proof.matched, true)
     }
     func testUnlabelledCloseButtonSubroleIsExportedAndCannotBeReusedAsMinimize() throws {
         let fixture = SemanticFixture()
@@ -738,6 +815,7 @@ private final class TestForegroundPlatform: ForegroundPlatform, @unchecked Senda
     var activated: [UInt32] = []
     var posted = 0
     var permission = true
+    var visualPermission = true
     var beforePost: (() -> Void)?
     var afterPost: (() -> Void)?
     var overlappingWindow: TargetKey?
@@ -751,6 +829,7 @@ private final class TestForegroundPlatform: ForegroundPlatform, @unchecked Senda
     }
 
     func permissionAvailable() -> Bool { permission }
+    func visualPermissionAvailable() -> Bool { visualPermission }
     func sample() -> ForegroundSample { ForegroundSample(pid: currentPid, hardwareCounters: [inputCounter], inputHeld: false) }
     func watch(expecting pid: UInt32) -> ActivationWatch { monitor }
     func focusedWindow(pid: UInt32, context: OperationContext) throws -> (any AXObject)? {
@@ -770,6 +849,10 @@ private final class TestForegroundPlatform: ForegroundPlatform, @unchecked Senda
     func hitTest(_ point: Point, in target: SemanticObservationHandle, context: OperationContext) throws -> Bool {
         try context.check()
         return overlappingWindow == nil
+    }
+    func visualHitTest(_ point: Point, in target: Target, context: OperationContext) throws -> Bool {
+        try context.check()
+        return target.key.pid == targetPid && overlappingWindow == nil
     }
     func post(_ input: ForegroundInput, willDispatch: () throws -> Void) throws {
         beforePost?()
@@ -891,5 +974,51 @@ final class ForegroundActionTests: XCTestCase {
         XCTAssertEqual(result.steps[0].delivery, .notDispatched)
         XCTAssertEqual(platform.posted, 0)
         XCTAssertEqual(result.foreground?.restoration, .restored)
+    }
+
+    func testVisualOnlyClickRequiresForegroundAndAnUnobscuredExactWindow() throws {
+        let fixture = SemanticFixture()
+        fixture.catalog.records = [Target(key: fixture.target.key, bundleId: nil,
+            title: fixture.target.title, bounds: fixture.target.bounds)]
+        fixture.catalog.generation = ProcessGeneration(startAbstime: 1, executableUUID: UUID())
+        fixture.backend.appWindows = []
+        let platform = TestForegroundPlatform(fixture)
+        platform.permission = false
+        let capture = TestVisualCapture { target, _, _, _ in try blankFrame(target) }
+        let system = MacOSSystem(backend: fixture.backend, catalog: fixture.catalog, visual: capture, isAXTrusted: { true })
+        let context = OperationContext(budgetMs: 3000)
+        let native = try system.observe(params: ObserveRequest(target: fixture.target.key, includeScreenshot: true, includeValues: false),
+            observationId: "visual-only", context: context)
+        XCTAssertEqual(native.observation.accessibility, .unavailable)
+        XCTAssertNil(native.observation.visual?.geometryMatchesAX)
+        XCTAssertNotNil(native.handle as? VisualObservationHandle)
+        let click = ActionStep(actionId: "click", operation: .click(ClickOperation(point: Point(x: 60, y: 40), space: .imagePixels)),
+                               precondition: nil, expect: nil)
+        let request = ActRequest(grantId: "grant", observationId: "visual-only", target: fixture.target.key,
+                                 steps: [click], foreground: true)
+        let entry = RetainedObservation(observation: native.observation, handle: native.handle, createdAt: DispatchTime.now().uptimeNanoseconds)
+        let actions = BackgroundActions(foregroundPlatform: platform, coordinateCapture: capture)
+        func act() -> ActResult {
+            actions.act(request, entry: entry, context: context, state: ActionExecutionState(act: request))
+        }
+        XCTAssertEqual(act().steps[0].delivery, .notDispatched)
+        XCTAssertTrue(platform.activated.isEmpty)
+
+        platform.currentPid = platform.targetPid
+        platform.overlappingWindow = TargetKey(pid: 50, windowId: 55)
+        let obscured = act()
+        XCTAssertEqual(obscured.foreground?.interruption, .windowChanged)
+        XCTAssertEqual(obscured.steps[0].delivery, .notDispatched)
+
+        platform.overlappingWindow = nil
+        let delivered = act()
+        XCTAssertEqual(delivered.stopReason, .completed)
+        XCTAssertEqual(delivered.steps[0].route, .foregroundClick)
+        XCTAssertEqual(delivered.steps[0].delivery, .dispatched)
+        XCTAssertEqual(delivered.foreground?.activationRequested, false)
+
+        fixture.catalog.generation = ProcessGeneration(startAbstime: 2, executableUUID: UUID())
+        XCTAssertEqual(act().steps[0].delivery, .notDispatched)
+        XCTAssertEqual(platform.posted, 1)
     }
 }

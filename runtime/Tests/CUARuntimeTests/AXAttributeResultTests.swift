@@ -5,6 +5,15 @@ import Foundation
 import XCTest
 
 final class AXAttributeResultTests: XCTestCase {
+    func testBoundedActionNamesKeepAdvertisedPressAndDoNotSynthesizeIt() {
+        let otherActions = (0..<40).map { "AXOther\($0)" }
+        let press = kAXPressAction as String
+        XCTAssertEqual(boundedAXActionNames(otherActions), Array(otherActions.prefix(32)))
+        XCTAssertEqual(boundedAXActionNames([press] + otherActions), [press] + Array(otherActions.prefix(31)))
+        XCTAssertEqual(boundedAXActionNames(otherActions + [press]), [press] + Array(otherActions.prefix(31)))
+        XCTAssertEqual(boundedAXActionNames([]), [])
+    }
+
     func testOptionalDescriptionFailureDisclosesMissingMetadata() throws {
         let result = try decodeAXDescription(.failure, value: nil, context: OperationContext(budgetMs: 100))
         XCTAssertNil(result.value)
