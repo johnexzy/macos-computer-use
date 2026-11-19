@@ -6,6 +6,8 @@
     <string>macOS Computer Use</string>
     <key>CFBundleExecutable</key>
     <string>cua-setup</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.johnoba.cua</string>
     <key>CFBundleName</key>

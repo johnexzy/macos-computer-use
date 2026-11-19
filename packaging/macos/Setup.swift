@@ -46,6 +46,13 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
         delegate = self
         isReleasedWhenClosed = false
 
+        let icon = NSImageView()
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") {
+            icon.image = NSImage(contentsOf: url)
+        }
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.setAccessibilityElement(false)
+
         let heading = NSTextField(labelWithString: "Connect your MCP client")
         heading.font = .systemFont(ofSize: 21, weight: .semibold)
         let help = NSTextField(wrappingLabelWithString:
@@ -66,14 +73,18 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
         buttons.spacing = 8
 
         let content = NSView()
-        for view in [heading, help, status, buttons] {
+        for view in [icon, heading, help, status, buttons] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
         }
         contentView = content
         NSLayoutConstraint.activate([
-            heading.topAnchor.constraint(equalTo: content.topAnchor, constant: 23),
-            heading.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
+            icon.topAnchor.constraint(equalTo: content.topAnchor, constant: 20),
+            icon.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            icon.widthAnchor.constraint(equalToConstant: 64),
+            icon.heightAnchor.constraint(equalTo: icon.widthAnchor),
+            heading.topAnchor.constraint(equalTo: content.topAnchor, constant: 25),
+            heading.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 14),
             help.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 10),
             help.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
             help.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),

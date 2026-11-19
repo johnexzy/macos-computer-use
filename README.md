@@ -1,4 +1,6 @@
-# 🍏 macOS Computer Use (MCP Server)
+<img src="brand/app-icon.svg" width="76" height="76" alt="">
+
+# macOS Computer Use
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20(Apple%20Silicon%20%26%20Intel)-lightgrey.svg)]()
@@ -8,7 +10,7 @@ A native **Model Context Protocol (MCP)** server for macOS inspection and deskto
 
 The Rust + Swift rebuild runs alongside the existing Node/Swift server. It now supports semantic observations and a narrow background action path. The [native installation and migration guide](docs/native-delivery.md) covers the standalone universal archive, client configuration, compatibility gaps, rollback and release checks; its end-user binaries require no Node or local compiler.
 
-For a drag-and-drop local install, see the [native disk image and setup instructions](docs/native-delivery.md#install-from-a-disk-image).
+For a drag-and-drop local install, see the [native disk image and setup instructions](docs/native-delivery.md#install-from-a-disk-image). The [brand kit](brand/README.md) contains the logo and usage guide.
 
 - [Legacy baseline and measurement boundaries](docs/baseline.md) (PER-1)
 - [Disposable two-window macOS fixture](docs/fixture.md)

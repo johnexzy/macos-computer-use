@@ -31,6 +31,16 @@ mkdir -p "$executables" "$resources"
 install -m 755 "$native/bin/cua-host" "$native/bin/cua-runtime" "$executables/"
 install -m 644 "$native/LICENSE" "$resources/LICENSE"
 install -m 644 "$native/manifest.json" "$resources/native-manifest.json"
+icon_source="$root/brand/app-icon.png"
+iconset="$temporary/AppIcon.iconset"
+mkdir "$iconset"
+for size in 16 32 128 256 512; do
+  retina=$((size * 2))
+  /usr/bin/sips -z "$size" "$size" "$icon_source" --out "$iconset/icon_${size}x${size}.png" >/dev/null
+  /usr/bin/sips -z "$retina" "$retina" "$icon_source" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+/usr/bin/iconutil -c icns "$iconset" -o "$resources/AppIcon.icns"
+
 plist="$bundle/Contents/Info.plist"
 install -m 644 "$root/packaging/macos/Info.plist" "$plist"
 /usr/bin/plutil -insert CFBundleShortVersionString -string "$version" "$plist"
