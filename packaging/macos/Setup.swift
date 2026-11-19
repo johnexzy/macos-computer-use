@@ -35,6 +35,7 @@ struct CUASetup {
 
 @MainActor
 private final class SetupWindow: NSWindow, NSWindowDelegate {
+    private static let skillName = "macos-computer-use-native"
     private let configuration: String?
     private let status = NSTextField(labelWithString: "")
 
@@ -66,10 +67,12 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
         copy.bezelStyle = .rounded
         copy.isEnabled = configuration != nil
         copy.keyEquivalent = "\r"
+        let install = NSButton(title: "Install Claude Code Skill…", target: self, action: #selector(chooseSkillProject))
+        install.bezelStyle = .rounded
         let done = NSButton(title: "Done", target: self, action: #selector(close))
         done.bezelStyle = .rounded
         done.keyEquivalent = "\u{1b}"
-        let buttons = NSStackView(views: [done, copy])
+        let buttons = NSStackView(views: [done, install, copy])
         buttons.spacing = 8
 
         let content = NSView()
@@ -90,6 +93,7 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
             help.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
             status.topAnchor.constraint(equalTo: help.bottomAnchor, constant: 14),
             status.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
+            status.trailingAnchor.constraint(equalTo: help.trailingAnchor),
             buttons.trailingAnchor.constraint(equalTo: help.trailingAnchor),
             buttons.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -19),
         ])
@@ -104,10 +108,64 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         let copied = pasteboard.setString(configuration, forType: .string)
-        status.stringValue = copied ? "Configuration copied" : "The clipboard could not be updated."
+        showStatus(copied ? "Configuration copied" : "The clipboard could not be updated.")
+    }
+
+    @objc private func chooseSkillProject() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "Install Skill"
+        panel.message = "Choose the folder you open as a project in Claude Code."
+        panel.beginSheetModal(for: self) { [weak self] response in
+            guard response == .OK, let project = panel.url else { return }
+            self?.installSkill(in: project)
+        }
+    }
+
+    private func installSkill(in project: URL) {
+        let skill = Self.skillName
+        guard let source = Bundle.main.url(forResource: "SKILL", withExtension: "md", subdirectory: "skills/\(skill)") else {
+            showStatus("The bundled Claude Code skill is missing.")
+            return
+        }
+
+        let root = project.resolvingSymlinksInPath()
+        var directory = root
+        for component in [".claude", "skills", skill] {
+            directory = directory.appendingPathComponent(component, isDirectory: true).resolvingSymlinksInPath()
+            guard directory.pathComponents.starts(with: root.pathComponents) else {
+                showStatus("The skills folder points outside this project.")
+                return
+            }
+        }
+
+        let files = FileManager.default
+        let destination = directory.appendingPathComponent("SKILL.md")
+        if files.fileExists(atPath: destination.path) {
+            if let existing = try? Data(contentsOf: destination),
+               let bundled = try? Data(contentsOf: source), existing == bundled {
+                showStatus("Skill already installed. Reopen the project in Claude Code.")
+            } else {
+                showStatus("A different skill already exists in this project.")
+            }
+            return
+        }
+
+        do {
+            try files.createDirectory(at: directory, withIntermediateDirectories: true)
+            try files.copyItem(at: source, to: destination)
+            showStatus("Skill installed. Reopen the project in Claude Code.")
+        } catch {
+            showStatus("Could not install the skill in this project.")
+        }
+    }
+
+    private func showStatus(_ message: String) {
+        status.stringValue = message
         if NSWorkspace.shared.isVoiceOverEnabled {
             NSAccessibility.post(element: self, notification: .announcementRequested, userInfo: [
-                .announcement: status.stringValue,
+                .announcement: message,
                 .priority: NSAccessibilityPriorityLevel.medium.rawValue,
             ])
         }

@@ -15,6 +15,14 @@ configuration and reconnect the client. The setup window uses the app's actual
 installed path and enables the activity badge and live preview. The MCP client
 launches the runtime when it connects.
 
+In Claude Code Desktop, use **Install Claude Code Skill…** and select the folder
+you open as your local project. The setup window copies the bundled
+`macos-computer-use-native` skill into that project's `.claude/skills/`
+directory. Start or reopen a local Code session in that folder and choose
+`/macos-computer-use-native` from the slash menu to invoke it with a task.
+Claude Code can also choose the skill when relevant.
+[Claude Code Desktop skills](https://code.claude.com/docs/en/desktop#use-skills)
+
 The command in the copied configuration is typically
 `/Applications/macOS Computer Use.app/Contents/MacOS/cua-host`. The helper
 ships next to it inside the app. Permission preflight runs in the MCP client's
