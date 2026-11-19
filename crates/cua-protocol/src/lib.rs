@@ -680,7 +680,10 @@ fn expectation(
                     | (Operation::TypeText(_), DeliveryRoute::AxSelectedText)
                     | (Operation::Press(_), DeliveryRoute::AxPress)
                     | (Operation::Scroll(_), DeliveryRoute::AxScroll)
-                    | (Operation::ScrollToVisible(_), DeliveryRoute::AxScrollToVisible)
+                    | (
+                        Operation::ScrollToVisible(_),
+                        DeliveryRoute::AxScrollToVisible
+                    )
                     | (Operation::Key(_), DeliveryRoute::ForegroundKey)
                     | (Operation::Click(_), DeliveryRoute::ForegroundClick)
             ),
