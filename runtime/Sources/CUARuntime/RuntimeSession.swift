@@ -38,6 +38,7 @@ public final class RuntimeSession: @unchecked Sendable {
     private let system: any NativeSystem
     private let actions: BackgroundActions
     private let activityOverlay: DesktopActivityOverlay?
+    private let livePreview: RuntimeLivePreview?
     private let limits: RuntimeLimits
     private let emit: @Sendable (Response) -> Void
     private let emitProgress: (@Sendable (CUAProtocol.Progress) throws -> OutputTicket)?
@@ -54,12 +55,15 @@ public final class RuntimeSession: @unchecked Sendable {
                 limits: RuntimeLimits = RuntimeLimits(),
                 actions: BackgroundActions = BackgroundActions(),
                 visualFeedback: Bool = false,
+                livePreview: Bool = false,
                 emit: @escaping @Sendable (Response) -> Void,
                 emitProgress: (@Sendable (CUAProtocol.Progress) throws -> OutputTicket)? = nil,
                 didShutdown: @escaping @Sendable () -> Void = {}) {
         self.system = system; self.epoch = epoch; self.limits = limits
         self.actions = actions
-        activityOverlay = visualFeedback ? DesktopActivityOverlay() : nil
+        let preview = livePreview ? RuntimeLivePreview() : nil
+        self.livePreview = preview
+        activityOverlay = visualFeedback ? DesktopActivityOverlay(onActivity: { preview?.present($0) }) : nil
         self.emit = emit; self.emitProgress = emitProgress; self.didShutdown = didShutdown
         observations = ObservationRegistry(epoch: epoch)
         system.configureObservationWorker(worker)
@@ -87,20 +91,23 @@ public final class RuntimeSession: @unchecked Sendable {
         system.shutdownObservations()
         observations.invalidate()
         activityOverlay?.dismiss()
+        livePreview?.dismiss()
         session = nil
         seen.removeAll()
         didShutdown()
     }
 
     private func respond(_ request: Request, _ body: ResponseBody, activity: DesktopActivity? = nil) {
-        if !closed, let activityOverlay {
+        if !closed {
             if let activity {
-                activityOverlay.submit(activity)
+                if let activityOverlay { activityOverlay.submit(activity) }
+                else { livePreview?.submit(activity) }
             } else if case .act(let act) = request.body, case .act(let result) = body {
                 if let recovery = DesktopActivity.recoveryPhase(act, result: result) {
-                    activityOverlay.showRecovery(recovery, target: act.target)
+                    activityOverlay?.showRecovery(recovery, target: act.target)
+                    if activityOverlay == nil { livePreview?.recover(recovery, target: act.target) }
                 } else {
-                    activityOverlay.discardApproach(for: act.target)
+                    activityOverlay?.discardApproach(for: act.target)
                 }
             }
         }
@@ -175,9 +182,11 @@ public final class RuntimeSession: @unchecked Sendable {
                 do {
                     if case .observe(let observation) = result.body {
                         try self.observations.insert(observation, handle: result.handle)
+                        self.livePreview?.follow(observation, target: (result.handle as? SemanticObservationHandle)?.target)
                     }
                     if case .waitFor(let wait) = result.body, let observation = wait.observation {
                         try self.observations.insert(observation, handle: result.handle)
+                        self.livePreview?.follow(observation, target: (result.handle as? SemanticObservationHandle)?.target)
                     }
                     self.respond(request, result.body, activity: result.activity)
                 } catch {
@@ -233,7 +242,7 @@ public final class RuntimeSession: @unchecked Sendable {
             activityOverlay?.beginObservation(params.target)
             let native = try system.observe(params: params, observationId: nextObservationID(), context: context)
             return NativeResult(.observe(native.observation), handle: native.handle,
-                activity: activityOverlay.map { _ in .observing(native.observation) })
+                activity: activityOverlay != nil || livePreview != nil ? .observing(native.observation) : nil)
         case .act(let act):
             if emitProgress == nil && act.steps.count > 1 && act.steps.contains(where: {
                 if case .waitFor = $0.operation { return false }; return true
@@ -245,6 +254,8 @@ public final class RuntimeSession: @unchecked Sendable {
                 return NativeResult(rejectedAct(act, reason: .targetStale, stop: .targetStale))
             }
             guard let execution else { throw NativeFailure(.nativeFailed, "action state unavailable") }
+            livePreview?.follow(retained.observation, target: (retained.handle as? SemanticObservationHandle)?.target,
+                                onlyIfDifferent: true)
             let progress: BackgroundActions.ProgressSink?
             if let emitProgress {
                 progress = { [self] prefix, context in
@@ -262,9 +273,8 @@ public final class RuntimeSession: @unchecked Sendable {
             } else { progress = nil }
             let result = actions.act(act, entry: retained, context: context, state: execution,
                                      progress: progress, activityOverlay: activityOverlay)
-            let activity = activityOverlay.flatMap { _ in
-                DesktopActivity.action(act, result: result, observation: retained.observation)
-            }
+            let activity = activityOverlay != nil || livePreview != nil
+                ? DesktopActivity.action(act, result: result, observation: retained.observation) : nil
             return NativeResult(.act(result), activity: activity)
         case .waitFor(let wait):
             let retained = try observations.lookup(wait.observationId, epoch: epoch, target: wait.target)

@@ -115,6 +115,7 @@ public enum Key: String, Codable, Equatable, Sendable {
     case right
     case up
     case down
+    case saveAs
 }
 
 public enum ElementAction: String, Codable, Equatable, Sendable {

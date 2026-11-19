@@ -32,7 +32,7 @@ npm run build:runtime
 npm run start:rust
 ```
 
-Set `CUA_VISUAL_FEEDBACK=1` to show a window marker, agent pointer, and writing cues while the native server works. See [on-screen feedback](docs/runtime.md#on-screen-feedback) for MCP setup.
+Set `CUA_VISUAL_FEEDBACK=1` to show a window marker, agent pointer, and writing cues while the native server works. Set `CUA_LIVE_PREVIEW=1` to watch the selected window and its attached sheet in a local floating panel. See [on-screen feedback](docs/runtime.md#on-screen-feedback) and [live preview](docs/runtime.md#live-preview) for MCP setup.
 
 For automated checks, run `npm run test:runtime`. To exercise the installed pair against only the disposable fixture:
 

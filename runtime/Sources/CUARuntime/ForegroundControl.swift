@@ -150,7 +150,7 @@ final class ForegroundControl {
         let input: ForegroundInput
         switch operation {
         case .key(let value):
-            try checkKeyTarget(value.elementRef)
+            try checkKeyTarget(value)
             input = .key(value.key)
         case .click:
             guard let click else { throw stop(.frameChanged) }
@@ -168,7 +168,7 @@ final class ForegroundControl {
             try checkGuard()
             try checkFocused()
             if let click, try !platform.hitTest(click.screen, in: target, context: context) { throw stop(.windowChanged) }
-            if case .key(let value) = operation { try checkKeyTarget(value.elementRef) }
+            if case .key(let value) = operation { try checkKeyTarget(value) }
             // Final lightweight sample follows window/element reads. macOS does not offer atomic validate-and-post.
             try checkInterference()
             guard last.pid == target.target.key.pid else { throw stop(.focusChanged) }
@@ -176,9 +176,13 @@ final class ForegroundControl {
         }
     }
 
-    private func checkKeyTarget(_ reference: String) throws {
-        let resolved = try target.resolve(reference, context: context)
-        guard resolved.snapshot.enabledKnown && resolved.snapshot.enabled,
+    private func checkKeyTarget(_ operation: KeyOperation) throws {
+        let resolved = try target.resolve(operation.elementRef, context: context)
+        let snapshot = resolved.snapshot
+        // A document editor can expose focus and writable text while declaring AXEnabled unsupported.
+        let writableEditor = operation.key == .saveAs && snapshot.role == "AXTextArea"
+            && snapshot.valueSettable && snapshot.enabledUnsupported
+        guard (snapshot.enabledKnown && snapshot.enabled) || writableEditor,
               let focused = try platform.focusedElement(pid: target.target.key.pid, context: context),
               target.backend.same(focused, resolved.object) else { throw stop(.windowChanged) }
     }
@@ -321,13 +325,15 @@ struct NativeForegroundPlatform: ForegroundPlatform {
     func hitTest(_ point: Point, in target: SemanticObservationHandle, context: OperationContext) throws -> Bool {
         try context.check()
         let runtimePID = UInt32(getpid())
+        let previewID = LivePreviewPanel.interactiveWindowID.withLock { $0 }
         var displayCount: UInt32 = 0
         var display: CGDirectDisplayID = 0
         guard CGGetDisplaysWithPoint(CGPoint(x: point.x, y: point.y), 1, &display, &displayCount) == .success, displayCount > 0,
               let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]],
               let frontWindow = windows.first(where: { row in
-                  guard row[kCGWindowLayer as String] as? Int == 0,
-                        (row[kCGWindowOwnerPID as String] as? UInt32) != runtimePID,
+                  let owner = row[kCGWindowOwnerPID as String] as? UInt32
+                  let interactivePreview = previewID != nil && row[kCGWindowNumber as String] as? UInt32 == previewID && owner == runtimePID
+                  guard interactivePreview || (row[kCGWindowLayer as String] as? Int == 0 && owner != runtimePID),
                         let alpha = row[kCGWindowAlpha as String] as? Double, alpha > 0,
                         let bounds = row[kCGWindowBounds as String] as? [String: Double],
                         let x = bounds["X"], let y = bounds["Y"], let w = bounds["Width"], let h = bounds["Height"] else { return false }
@@ -366,11 +372,13 @@ struct NativeForegroundPlatform: ForegroundPlatform {
             case .right: code = kVK_RightArrow
             case .up: code = kVK_UpArrow
             case .down: code = kVK_DownArrow
+            case .saveAs: code = kVK_ANSI_S
             }
             down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: true)
             up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: false)
-            down?.flags = []
-            up?.flags = []
+            let flags: CGEventFlags = key == .saveAs ? [.maskCommand, .maskAlternate, .maskShift] : []
+            down?.flags = flags
+            up?.flags = flags
         case .click(let point):
             let location = CGPoint(x: point.x, y: point.y)
             down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: location, mouseButton: .left)

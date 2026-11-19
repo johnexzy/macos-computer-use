@@ -138,7 +138,8 @@ The action enum also represents supported keys, semantic scroll, and coordinate
 click. Coordinate click carries an explicit coordinate
 space. It does not authorize global pointer input: background delivery still needs
 an exact semantic target; unsupported targeting must fail without silent fallback.
-Background keys are initially return/tab/escape/backspace/arrows. Scroll amounts
+The foreground key set includes return/tab/escape/backspace/arrows and `saveAs`
+(⌥⇧⌘S). Scroll amounts
 are signed nonzero units in `[-1000,1000]`; runtime determines support and delivery.
 The `key` and `click` paths are explicitly selected via `act.foreground: true`.
 The host and helper enforce the installed foreground grant. The opt-in sequence

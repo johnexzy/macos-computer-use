@@ -142,8 +142,11 @@ final class DesktopActivityOverlay {
     private var recoveryTarget: TargetKey?
     private var timer: Timer?
     private var expiresAt: TimeInterval = 0
+    private let onActivity: @MainActor @Sendable (DesktopActivity) -> Void
 
-    nonisolated init() {}
+    nonisolated init(onActivity: @escaping @MainActor @Sendable (DesktopActivity) -> Void = { _ in }) {
+        self.onActivity = onActivity
+    }
 
     nonisolated func submit(_ activity: DesktopActivity) {
         DispatchQueue.main.async { self.present(activity) }
@@ -238,6 +241,7 @@ final class DesktopActivityOverlay {
         let workspace = NSWorkspace.shared
         let changed = !sameTarget || activity?.phase != event.phase
         activity = event
+        onActivity(event)
         expiresAt = now + Self.displayDuration
         panel.setFrame(frame, display: false)
         if panel.contentView !== view { panel.contentView = view }

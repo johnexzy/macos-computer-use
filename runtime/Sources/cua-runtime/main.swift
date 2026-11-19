@@ -6,6 +6,7 @@ import Foundation
 
 final class RuntimeProcess: @unchecked Sendable {
     private let visualFeedback: Bool
+    private let livePreview: Bool
     private var session: RuntimeSession!
     private var output: OutputPump!
     private var signals: [DispatchSourceSignal] = []
@@ -13,15 +14,16 @@ final class RuntimeProcess: @unchecked Sendable {
     private var exitCode: Int32 = 0
     private var stopped = false
 
-    init(visualFeedback: Bool) {
+    init(visualFeedback: Bool, livePreview: Bool) {
         self.visualFeedback = visualFeedback
+        self.livePreview = livePreview
     }
 
     func start() {
         signal(SIGPIPE, SIG_IGN)
         output = OutputPump(write: { try FileHandle.standardOutput.write(contentsOf: $0) },
                             onFailure: { [weak self] in self?.session.shutdown() })
-        session = RuntimeSession(visualFeedback: visualFeedback, emit: { [weak self] response in
+        session = RuntimeSession(visualFeedback: visualFeedback, livePreview: livePreview, emit: { [weak self] response in
             guard let self else { return }
             do { try self.output.send(response) }
             catch { self.diagnostic("output_failure"); self.session.shutdown() }
@@ -77,7 +79,7 @@ final class RuntimeProcess: @unchecked Sendable {
         guard !stopped else { lock.unlock(); return }
         stopped = true
         lock.unlock()
-        if visualFeedback {
+        if visualFeedback || livePreview {
             DispatchQueue.main.async {
                 let app = NSApplication.shared
                 app.stop(nil)
@@ -101,14 +103,16 @@ final class RuntimeProcess: @unchecked Sendable {
 
 MainActor.assumeIsolated {
     let app = NSApplication.shared
-    let feedbackRequested = ProcessInfo.processInfo.environment["CUA_VISUAL_FEEDBACK"] == "1"
-    let visualFeedback = feedbackRequested && app.setActivationPolicy(.accessory)
-    if !visualFeedback { app.setActivationPolicy(.prohibited) }
-    let process = RuntimeProcess(visualFeedback: visualFeedback)
+    let environment = ProcessInfo.processInfo.environment
+    let feedbackRequested = environment["CUA_VISUAL_FEEDBACK"] == "1"
+    let previewRequested = environment["CUA_LIVE_PREVIEW"] == "1"
+    let useAppKit = (feedbackRequested || previewRequested) && app.setActivationPolicy(.accessory)
+    if !useAppKit { app.setActivationPolicy(.prohibited) }
+    let process = RuntimeProcess(visualFeedback: useAppKit && feedbackRequested, livePreview: useAppKit && previewRequested)
     process.start()
     if process.shouldRun() {
         process.startReading()
-        if visualFeedback { app.run() }
+        if useAppKit { app.run() }
         else { CFRunLoopRun() }
     }
     exit(process.result())

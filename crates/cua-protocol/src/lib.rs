@@ -104,7 +104,8 @@ choices!(Key {
     Left,
     Right,
     Up,
-    Down
+    Down,
+    SaveAs
 });
 choices!(ElementAction {
     Press,

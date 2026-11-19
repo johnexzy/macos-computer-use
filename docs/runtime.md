@@ -128,6 +128,20 @@ Feedback follows macOS Reduce Motion and Increase Contrast preferences and
 announces meaningful state changes through accessibility. Remove the environment
 entry and reconnect to turn feedback off.
 
+## Live preview
+
+Set `CUA_LIVE_PREVIEW=1` in the same native server environment and reconnect
+to open a small floating preview beside your client. Screen Recording access
+and macOS 14.2 or later are required. Drag the title bar to place the preview,
+use **Pause** to stop capture temporarily, or close it for the session.
+
+The preview follows the latest published CUA window observation. When the
+Accessibility tree identifies one attached sheet and ScreenCaptureKit matches
+it to a unique window owned by that app, the preview includes the sheet. It
+shows **Window unavailable** if the capture cannot be safely resolved. The
+frames stay inside the native helper. Set `CUA_VISUAL_FEEDBACK=1` too to show
+the pre-action pointer glide.
+
 ## Foreground input
 
 Start the host with `--allow-foreground` when the operator wants to permit
@@ -136,7 +150,8 @@ request. This selects the route for that exact target and sequence. Other
 requests continue to use the background path.
 
 A foreground sequence contains keys or clicks and may include predicate waits.
-Keys require the named AX control to be the exact focused element. A click needs
+Keys require the named AX control to be the exact focused element. The
+`saveAs` key sends ⌥⇧⌘S in apps that support that shortcut. A click needs
 a screenshot-backed observation that agreed with AX geometry. The runtime
 recaptures the same crop and verifies the layout around the click point, then
 checks the exact focused window and screen hit. It aborts on unsafe focus,
