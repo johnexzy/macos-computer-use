@@ -68,4 +68,3 @@ export class Session {
     this.output.close();
   }
 }
-

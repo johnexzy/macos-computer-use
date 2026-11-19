@@ -20,4 +20,3 @@ export function gradeState({ original, beforeRepair, after, goals, foreground = 
   return { strictCompletion: stateComplete ? foreground : false,
     goalSatisfied, originalIdentityPreserved, protectedPreserved, foreground, extraAttempts, duplicateActions, additionalDamage };
 }
-

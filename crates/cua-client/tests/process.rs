@@ -881,13 +881,14 @@ async fn deadline_during_a_large_pipe_write_keeps_delivery_unknown() {
     if let RequestBody::Act(request) = &mut body {
         request.steps[0].operation = Operation::TypeText(TypeTextOperation {
             element_ref: "element-1".into(),
-            text: "x".repeat(4 * 1024 * 1024),
+            // Fill the pipe while leaving time for debug-build JSON encoding.
+            text: "x".repeat(256 * 1024),
         });
     }
     let started = Instant::now();
     let result = act_result(
         client
-            .call(body, Duration::from_millis(500), CancellationToken::new())
+            .call(body, Duration::from_secs(1), CancellationToken::new())
             .await
             .unwrap(),
     );
