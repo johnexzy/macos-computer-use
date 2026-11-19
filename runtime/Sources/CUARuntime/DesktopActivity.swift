@@ -15,6 +15,16 @@ struct DesktopActivity: Sendable {
         case sent = "Action sent"
         case check = "Check result"
 
+        var badgeLabel: String {
+            switch self {
+            case .observing: "Reading"
+            case .movingToControl, .movingToText: "Moving"
+            case .pressed: "Pressed"
+            case .updated: "Updated"
+            case .written, .writingSent, .sent, .check: rawValue
+            }
+        }
+
         var showsWriting: Bool { self == .written || self == .writingSent }
         var isApproach: Bool { self == .movingToControl || self == .movingToText }
     }
@@ -308,19 +318,19 @@ private final class DesktopActivityView: NSView {
     }
 
     private func drawStatus() {
-        let label = "Agent  ·  " + phase.rawValue
+        let label = phase.badgeLabel
         let font = NSFont.systemFont(ofSize: highContrast ? 13 : 12, weight: .semibold)
         let style: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
         let size = (label as NSString).size(withAttributes: style)
         guard size.width + 34 <= bounds.width else { return }
-        let chip = CGRect(x: bounds.maxX - size.width - 32, y: bounds.maxY - 33, width: size.width + 22, height: 24)
-        let path = NSBezierPath(roundedRect: chip, xRadius: 8, yRadius: 8)
+        let chip = CGRect(x: bounds.maxX - size.width - 25, y: bounds.maxY - 31, width: size.width + 16, height: 22)
+        let path = NSBezierPath(roundedRect: chip, xRadius: 11, yRadius: 11)
         ink.setFill()
         path.fill()
-        (highContrast ? NSColor.white : accent).setStroke()
+        NSColor.white.withAlphaComponent(highContrast ? 1 : 0.22).setStroke()
         path.lineWidth = highContrast ? 2 : 1
         path.stroke()
-        (label as NSString).draw(at: CGPoint(x: chip.minX + 11, y: chip.midY - size.height / 2), withAttributes: style)
+        (label as NSString).draw(at: CGPoint(x: chip.minX + 8, y: chip.midY - size.height / 2), withAttributes: style)
     }
 
     private func drawPointer(at tip: CGPoint) {
