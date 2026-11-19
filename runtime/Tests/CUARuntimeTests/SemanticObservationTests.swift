@@ -60,6 +60,9 @@ private final class SemanticBackend: AXReading, @unchecked Sendable {
     func ownerPID(of element: any AXObject, context: OperationContext) throws -> UInt32 {
         try context.check(); return (element as! SemanticNode).pid
     }
+    func bounds(of element: any AXObject, context: OperationContext) throws -> Rect? {
+        try context.check(); return (element as! SemanticNode).bounds
+    }
     func snapshot(of element: any AXObject, includeValue: Bool, context: OperationContext) throws -> AXNodeSnapshot? {
         try context.check(); let node = element as! SemanticNode
         if node.readUnavailable { throw AXReadUnavailable() }
@@ -256,6 +259,71 @@ final class SemanticObservationTests: XCTestCase {
         let handle = try XCTUnwrap(result.handle as? SemanticObservationHandle)
         let retained = try handle.resolve(reference, context: OperationContext(budgetMs: 5000))
         XCTAssertTrue(fixture.backend.same(retained.object, field))
+    }
+    func testVisibleComposerAndSendSurviveClippedSidebarAndHistoryWithinTheNodeBudget() throws {
+        let fixture = SemanticFixture()
+        let sidebar = SemanticNode("sidebar", role: "AXScrollArea", title: nil,
+            bounds: Rect(x: 0, y: 40, width: 110, height: 200))
+        let chat = SemanticNode("chat", role: "AXGroup", title: nil,
+            bounds: Rect(x: 120, y: 40, width: 300, height: 200))
+        let history = SemanticNode("history", role: "AXScrollArea", title: nil,
+            bounds: Rect(x: 120, y: 40, width: 300, height: 140))
+        let composerGroup = SemanticNode("composer-group", role: "AXGroup", title: nil,
+            bounds: Rect(x: 120, y: 190, width: 300, height: 50))
+        let composer = SemanticNode("composer", role: "AXTextArea", title: "Work with Codex",
+            bounds: Rect(x: 126, y: 196, width: 230, height: 32))
+        composer.identifier = "composer"
+        composer.valueSettable = true
+        let send = SemanticNode("send", role: "AXButton", title: "Send",
+            bounds: Rect(x: 374, y: 204, width: 28, height: 26))
+        send.identifier = "send"
+
+        func link(_ children: [SemanticNode], under parent: SemanticNode) {
+            parent.children = children
+            for child in children {
+                child.parent = parent
+                child.owner = fixture.window
+            }
+        }
+        link([sidebar, chat], under: fixture.window)
+        link([history, composerGroup], under: chat)
+        link([composer, send], under: composerGroup)
+        link((0..<700).map { index in
+            SemanticNode("sidebar-\(index)", role: "AXButton", title: "Clipped sidebar row",
+                bounds: Rect(x: 5, y: 41, width: 96, height: 1))
+        }, under: sidebar)
+        link((0..<700).map { index in
+            SemanticNode("history-\(index)", role: "AXStaticText", title: "Clipped message",
+                bounds: Rect(x: 126, y: 42, width: 286, height: 1))
+        }, under: history)
+
+        let selectors = [Selector(role: "AXTextArea", label: nil, identifier: nil),
+                         Selector(role: "AXButton", label: "Send", identifier: nil)]
+        let selected = try fixture.observe(values: true, selectors: selectors)
+        XCTAssertEqual(Set(selected.observation.elements.compactMap(\.identifier)), ["composer", "send"])
+        XCTAssertEqual(Set(fixture.backend.valueReads), ["composer", "send"])
+        XCTAssertEqual(selected.observation.axSelection?.coverage, .partial)
+        XCTAssertLessThanOrEqual(try XCTUnwrap(selected.observation.axSelection?.visitedNodes), 1024)
+
+        let unfiltered = try fixture.observe()
+        XCTAssertEqual(unfiltered.observation.accessibility, .partial)
+        XCTAssertEqual(Set(unfiltered.observation.elements.compactMap(\.identifier)), ["composer", "send"])
+    }
+
+    func testClippedContainerCanStillExposeAVisibleControl() throws {
+        let fixture = SemanticFixture()
+        let container = SemanticNode("clipped", role: "AXGroup", title: nil,
+            bounds: Rect(x: 30, y: 40, width: 200, height: 1))
+        container.owner = fixture.window
+        container.parent = fixture.window
+        fixture.first.parent = container
+        container.children = [fixture.first]
+        fixture.window.children = [container, fixture.second]
+
+        let selected = try fixture.observe(selectors: [Selector(role: "AXTextField", label: nil, identifier: "first")])
+        XCTAssertEqual(selected.observation.elements.compactMap(\.identifier), ["first"])
+        XCTAssertEqual(selected.observation.axSelection?.coverage, .complete)
+        XCTAssertEqual(selected.observation.axSelection?.visitedNodes, 4)
     }
     func testUnreadableIdentityCannotMakeASelectedNegativeReadComplete() throws {
         let fixture = SemanticFixture(); fixture.second.readUnavailable = true

@@ -93,17 +93,20 @@ public struct MacOSAXBackend: AXReading, AXScrolling {
         return AXElementIdentity(role: role, identifier: try string(element, kAXIdentifierAttribute as CFString, context: context),
             subrole: try string(element, kAXSubroleAttribute as CFString, context: context))
     }
+    public func bounds(of element: any AXObject, context: OperationContext) throws -> Rect? {
+        var raw: CFArray?
+        let attributes = [kAXPositionAttribute, kAXSizeAttribute] as CFArray
+        let result = AXUIElementCopyMultipleAttributeValues(try prepared(element, context: context), attributes, [], &raw)
+        try checkAXRead(result, context: context, allowMissing: true)
+        guard result == .success, let values = raw as? [CFTypeRef], values.count == 2 else { return nil }
+        return decodeBounds(position: values[0], size: values[1])
+    }
+
     public func snapshot(of element: any AXObject, includeValue: Bool, context: OperationContext) throws -> AXNodeSnapshot? {
         guard let role = try string(element, kAXRoleAttribute as CFString, context: context),
               let position = try attribute(element, kAXPositionAttribute as CFString, context: context),
               let size = try attribute(element, kAXSizeAttribute as CFString, context: context),
-              CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
-        var point = CGPoint.zero
-        var dimensions = CGSize.zero
-        guard AXValueGetValue(position as! AXValue, .cgPoint, &point),
-              AXValueGetValue(size as! AXValue, .cgSize, &dimensions),
-              [point.x, point.y, dimensions.width, dimensions.height].allSatisfy(\.isFinite),
-              dimensions.width > 0, dimensions.height > 0 else { return nil }
+              let bounds = decodeBounds(position: position, size: size) else { return nil }
         let title = try string(element, kAXTitleAttribute as CFString, context: context)
         var descriptionValue: CFTypeRef?
         let descriptionResult = AXUIElementCopyAttributeValue(try prepared(element, context: context),
@@ -132,7 +135,7 @@ public struct MacOSAXBackend: AXReading, AXScrolling {
         let label = rawLabel.flatMap { $0.utf8.count <= 1024 ? $0 : nil }
         let boundedValue = value.flatMap { $0.utf8.count <= 65_536 ? $0 : nil }
         return AXNodeSnapshot(role: role, title: title, label: label, identifier: rawIdentifier,
-            bounds: Rect(x: point.x, y: point.y, width: dimensions.width, height: dimensions.height),
+            bounds: bounds,
             enabled: enabled.value ?? false, enabledKnown: enabled.value != nil, value: boundedValue,
             valueSettable: settable, selectedTextSettable: textSettable, selectedRange: range,
             actions: boundedAXActionNames(actions),
@@ -140,6 +143,17 @@ public struct MacOSAXBackend: AXReading, AXScrolling {
                 && (rawIdentifier?.utf8.count ?? 0) <= 1024 && (subrole?.utf8.count ?? 0) <= 1024
                 && value == boundedValue && actions.count <= 32,
             subrole: subrole, enabledUnsupported: enabled.unsupported)
+    }
+
+    private func decodeBounds(position: CFTypeRef, size: CFTypeRef) -> Rect? {
+        guard CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+        var point = CGPoint.zero
+        var dimensions = CGSize.zero
+        guard AXValueGetValue(position as! AXValue, .cgPoint, &point),
+              AXValueGetValue(size as! AXValue, .cgSize, &dimensions),
+              [point.x, point.y, dimensions.width, dimensions.height].allSatisfy(\.isFinite),
+              dimensions.width > 0, dimensions.height > 0 else { return nil }
+        return Rect(x: point.x, y: point.y, width: dimensions.width, height: dimensions.height)
     }
 
     private func prepared(_ object: any AXObject, context: OperationContext) throws -> AXUIElement {

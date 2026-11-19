@@ -73,6 +73,7 @@ public protocol AXReading: Sendable {
     func parent(of element: any AXObject, context: OperationContext) throws -> (any AXObject)?
     func window(of element: any AXObject, context: OperationContext) throws -> (any AXObject)?
     func ownerPID(of element: any AXObject, context: OperationContext) throws -> UInt32
+    func bounds(of element: any AXObject, context: OperationContext) throws -> Rect?
     func identity(of element: any AXObject, context: OperationContext) throws -> AXElementIdentity?
     func snapshot(of element: any AXObject, includeValue: Bool, context: OperationContext) throws -> AXNodeSnapshot?
     func same(_ lhs: any AXObject, _ rhs: any AXObject) -> Bool
@@ -80,6 +81,7 @@ public protocol AXReading: Sendable {
 
 public extension AXReading {
     func focusedElement(of application: any AXObject, context: OperationContext) throws -> (any AXObject)? { nil }
+    func bounds(of element: any AXObject, context: OperationContext) throws -> Rect? { nil }
 
     func identity(of element: any AXObject, context: OperationContext) throws -> AXElementIdentity? {
         try snapshot(of: element, includeValue: false, context: context)?.identity
@@ -130,6 +132,7 @@ public struct AXTreeSnapshot: Sendable {
 private let maxTreeNodes = 1024
 private let maxTreeDepth = 32
 private let maxSelectiveTreeDepth = 48
+private let activeSiblingBatch = 32
 
 struct RetainedAXElement: Sendable {
     let object: any AXObject
@@ -245,7 +248,7 @@ public struct SemanticAXObserver: Sendable {
         let window = try associatedWindow(target: target, application: application, backend: backend, catalog: catalog, context: context)
         let scan = try collectTree(window: window, pid: target.key.pid, backend: backend,
                                    includeValues: params.includeValues, selectors: params.axSelectors, application: application,
-                                   context: context)
+                                   visibleIn: target.bounds, context: context)
         if target.bundleId == nil, params.axSelectors == nil,
            !scan.nodes.contains(where: { $0.snapshot.role != "AXWindow" && $0.snapshot.role != "AXGroup" }) {
             throw AXReadUnavailable()
@@ -353,7 +356,7 @@ private func requireOwningWindow(_ object: any AXObject, window: any AXObject, p
 
 private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReading,
                          includeValues: Bool, selectors: [CUAProtocol.Selector]? = nil, application: (any AXObject)? = nil,
-                         context: OperationContext) throws -> AXTreeSnapshot {
+                         visibleIn windowBounds: Rect? = nil, context: OperationContext) throws -> AXTreeSnapshot {
     let depthLimit = selectors == nil ? maxTreeDepth : maxSelectiveTreeDepth
     let focusPath: [any AXObject]
     if selectors != nil, let application {
@@ -364,11 +367,21 @@ private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReadi
     } else {
         focusPath = []
     }
-    var pending: [(any AXObject, Int)] = [(window, 0)]
+    typealias PendingNode = (object: any AXObject, depth: Int)
+    var pending: [PendingNode] = [(window, 0)]
+    var deferred: [PendingNode] = []
     var seen: [any AXObject] = []
     var nodes: [ResolvedAXElement] = []
+    var clippedNodes: [ResolvedAXElement] = []
     var complete = true
-    func enqueueChildren(of object: any AXObject, depth: Int) throws {
+
+    func enqueueDeferred(_ children: ArraySlice<any AXObject>, depth: Int) {
+        // Lower-priority work must not reserve the budget for undiscovered visible descendants.
+        let capacity = maxTreeNodes - deferred.count
+        if children.count > capacity { complete = false }
+        for child in children.prefix(capacity).reversed() { deferred.append((child, depth)) }
+    }
+    func enqueueChildren(of object: any AXObject, depth: Int, clipped: Bool) throws {
         let children = try backend.children(of: object, limit: max(0, maxTreeNodes - seen.count - pending.count), context: context)
         if !children.complete { complete = false }
         guard depth < depthLimit else {
@@ -382,19 +395,41 @@ private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReadi
             let preferred = ordered.remove(at: branch)
             ordered.insert(preferred, at: 0)
         }
-        for child in ordered.reversed() { pending.append((child, depth + 1)) }
+        let childDepth = depth + 1
+        if clipped {
+            enqueueDeferred(ordered[...], depth: childDepth)
+        } else if windowBounds != nil, ordered.count > activeSiblingBatch {
+            // Sample both edges of a wide sibling list before its interior. This keeps
+            // long history lists from starving adjacent branches or controls at the end.
+            let edge = activeSiblingBatch / 2
+            enqueueDeferred(ordered[edge..<(ordered.count - edge)], depth: childDepth)
+            for child in ordered.suffix(edge).reversed() { pending.append((child, childDepth)) }
+            for child in ordered.prefix(edge).reversed() { pending.append((child, childDepth)) }
+        } else {
+            for child in ordered.reversed() { pending.append((child, childDepth)) }
+        }
     }
-    while let (object, depth) = pending.popLast() {
+    while let (object, depth) = pending.popLast() ?? deferred.popLast() {
         try context.check()
         if seen.contains(where: { backend.same($0, object) }) { complete = false; continue }
         guard seen.count < maxTreeNodes else { complete = false; break }
         seen.append(object)
         do {
             try requireOwningWindow(object, window: window, pid: pid, backend: backend, context: context)
+            var clipped = false
+            if selectors != nil, let windowBounds, depth > 0,
+               let bounds = try optionalTopologyRead({ try backend.bounds(of: object, context: context) }) {
+                clipped = isClipped(bounds, to: windowBounds)
+            }
+            func append(_ snapshot: AXNodeSnapshot) {
+                let resolved = ResolvedAXElement(object: object, snapshot: snapshot)
+                if clipped { clippedNodes.append(resolved) }
+                else { nodes.append(resolved) }
+            }
             if let selectors {
                 guard let identity = try backend.identity(of: object, context: context) else {
                     complete = false
-                    try enqueueChildren(of: object, depth: depth)
+                    try enqueueChildren(of: object, depth: depth, clipped: clipped)
                     continue
                 }
                 let candidates = selectors.filter { $0.role == identity.role && ($0.identifier == nil || $0.identifier == identity.identifier) }
@@ -411,17 +446,18 @@ private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReadi
                                     snapshot = withValue
                                 }
                                 if snapshot.identity == identity && candidates.contains(where: { matches(snapshot, selector: $0) }) {
-                                    nodes.append(ResolvedAXElement(object: object, snapshot: snapshot))
+                                    append(snapshot)
                                 } else { complete = false }
                             }
                         }
                     } else { complete = false }
                 }
             } else if let snapshot = try backend.snapshot(of: object, includeValue: includeValues, context: context) {
-                nodes.append(ResolvedAXElement(object: object, snapshot: snapshot))
+                if let windowBounds, depth > 0 { clipped = isClipped(snapshot.bounds, to: windowBounds) }
+                append(snapshot)
                 if !snapshot.complete { complete = false }
             } else { complete = false }
-            try enqueueChildren(of: object, depth: depth)
+            try enqueueChildren(of: object, depth: depth, clipped: clipped)
         } catch is AXReadUnavailable {
             // Keep readable siblings without claiming that the unreadable subtree is absent.
             complete = false
@@ -429,7 +465,13 @@ private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReadi
             complete = false
         }
     }
-    return AXTreeSnapshot(nodes: nodes, complete: complete, visitedNodes: UInt32(seen.count))
+    return AXTreeSnapshot(nodes: nodes + clippedNodes, complete: complete, visitedNodes: UInt32(seen.count))
+}
+
+private func isClipped(_ element: Rect, to window: Rect) -> Bool {
+    let width = min(element.x + element.width, window.x + window.width) - max(element.x, window.x)
+    let height = min(element.y + element.height, window.y + window.height) - max(element.y, window.y)
+    return width <= 1 || height <= 1
 }
 
 func matches(_ snapshot: AXNodeSnapshot, selector: CUAProtocol.Selector) -> Bool {

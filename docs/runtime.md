@@ -213,6 +213,9 @@ not an observable native generation guarantee.
 
 Collection is bounded to 1,024 tree nodes and at most 256 returned elements.
 The depth limit is 32 for full observations and 48 for selected scans.
+Explicit observations give visible branches priority over clipped descendants.
+The traversal still explores deferred branches when the budget permits, and
+reports partial coverage when it cannot finish them.
 Unreadable metadata, unknown enabled states, traversal limits, and
 export limits produce partial coverage. Enabled state is a required nullable field:
 `null` means unavailable, rather than observed disabled. Optional `subrole` identifies

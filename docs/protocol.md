@@ -205,16 +205,18 @@ processes. Such a target uses the actual owner PID and CG window ID, with
 owner's bundle ID. Window association retains all of the owner's CG siblings,
 and exact CG absence remains distinct from unavailable process identity.
 
-For a window without a bundle ID, `observe` reports unavailable AX coverage and
-returns no actionable references. Screenshot and OCR can still use a unique
+For a window without a bundle ID, `observe` probes the verified window owner
+for AX controls. If AX is unavailable, screenshot and OCR can use a unique
 ScreenCaptureKit match on the exact window ID and owner PID. Capture checks the
-live process generation and window geometry before returning any visual evidence.
+live process generation and window geometry before returning visual evidence.
 Each reference retains an actual object plus observed role, subrole and raw identifier;
 live `CFEqual` tree/window membership, ownership and identity metadata are checked
 before use. Changed labels, values, or control positions do not remap the reference.
 Unchanged identity metadata is not a native object-generation guarantee.
 
-Observation traversal is bounded to 1,024 nodes/depth 32 and 256 returned elements.
+Observation traversal is bounded to 1,024 nodes and 256 returned elements.
+Full observations can reach depth 32 and selected observations depth 48.
+Explicit observations prioritize visible branches before clipped descendants.
 Unreadability, unknown enabled states, traversal bounds, or omitted oversized
 exports produce partial coverage. `Element.enabled` is required and nullable:
 `null` discloses unavailable state, not false. Optional `Element.subrole` carries
