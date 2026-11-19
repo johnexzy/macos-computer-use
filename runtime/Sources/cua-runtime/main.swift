@@ -5,6 +5,7 @@ import Darwin
 import Foundation
 
 final class RuntimeProcess: @unchecked Sendable {
+    private let visualFeedback: Bool
     private var session: RuntimeSession!
     private var output: OutputPump!
     private var signals: [DispatchSourceSignal] = []
@@ -12,11 +13,15 @@ final class RuntimeProcess: @unchecked Sendable {
     private var exitCode: Int32 = 0
     private var stopped = false
 
+    init(visualFeedback: Bool) {
+        self.visualFeedback = visualFeedback
+    }
+
     func start() {
         signal(SIGPIPE, SIG_IGN)
         output = OutputPump(write: { try FileHandle.standardOutput.write(contentsOf: $0) },
                             onFailure: { [weak self] in self?.session.shutdown() })
-        session = RuntimeSession(emit: { [weak self] response in
+        session = RuntimeSession(visualFeedback: visualFeedback, emit: { [weak self] response in
             guard let self else { return }
             do { try self.output.send(response) }
             catch { self.diagnostic("output_failure"); self.session.shutdown() }
@@ -72,8 +77,20 @@ final class RuntimeProcess: @unchecked Sendable {
         guard !stopped else { lock.unlock(); return }
         stopped = true
         lock.unlock()
-        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { CFRunLoopStop(CFRunLoopGetMain()) }
-        CFRunLoopWakeUp(CFRunLoopGetMain())
+        if visualFeedback {
+            DispatchQueue.main.async {
+                let app = NSApplication.shared
+                app.stop(nil)
+                // Wake AppKit's next-event loop without posting any system input.
+                if let wake = NSEvent.otherEvent(with: .applicationDefined, location: .zero, modifierFlags: [],
+                    timestamp: 0, windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0) {
+                    app.postEvent(wake, atStart: true)
+                }
+            }
+        } else {
+            CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue) { CFRunLoopStop(CFRunLoopGetMain()) }
+            CFRunLoopWakeUp(CFRunLoopGetMain())
+        }
     }
     func result() -> Int32 { lock.lock(); defer { lock.unlock() }; return exitCode }
     func shouldRun() -> Bool { lock.lock(); defer { lock.unlock() }; return !stopped }
@@ -83,13 +100,16 @@ final class RuntimeProcess: @unchecked Sendable {
 }
 
 MainActor.assumeIsolated {
-    let process = RuntimeProcess()
-    process.start()
     let app = NSApplication.shared
-    app.setActivationPolicy(.prohibited)
+    let feedbackRequested = ProcessInfo.processInfo.environment["CUA_VISUAL_FEEDBACK"] == "1"
+    let visualFeedback = feedbackRequested && app.setActivationPolicy(.accessory)
+    if !visualFeedback { app.setActivationPolicy(.prohibited) }
+    let process = RuntimeProcess(visualFeedback: visualFeedback)
+    process.start()
     if process.shouldRun() {
         process.startReading()
-        CFRunLoopRun()
+        if visualFeedback { app.run() }
+        else { CFRunLoopRun() }
     }
     exit(process.result())
 }

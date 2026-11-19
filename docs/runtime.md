@@ -96,6 +96,32 @@ and focus checks.
 Apple documentation covers [ScreenCaptureKit window capture](https://developer.apple.com/documentation/screencapturekit/scscreenshotmanager)
 and [Vision text range boxes](https://developer.apple.com/documentation/vision/recognizing-text-in-images).
 
+## On-screen feedback
+
+Set `CUA_VISUAL_FEEDBACK=1` in the environment for the native MCP server.
+Use the same tool calls as usual after reconnecting the client.
+
+```json
+{
+  "mcpServers": {
+    "cua": {
+      "command": "/absolute/path/to/cua-host",
+      "env": { "CUA_VISUAL_FEEDBACK": "1" }
+    }
+  }
+}
+```
+
+The marker identifies the exact window most recently observed or used and clears
+after a short idle period. The latest mutation receipt drives a separate pointer
+and press ring or a caret and short writing indicator. Text updates still use one
+atomic native mutation. The indicator displays no input text. The feedback is
+click-through and leaves app focus and the system pointer alone.
+
+Feedback follows macOS Reduce Motion and Increase Contrast preferences and
+announces meaningful state changes through accessibility. Remove the environment
+entry and reconnect to turn feedback off.
+
 ## Foreground input
 
 Start the host with `--allow-foreground` when the operator wants to permit

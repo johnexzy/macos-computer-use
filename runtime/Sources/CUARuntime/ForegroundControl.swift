@@ -315,12 +315,14 @@ struct NativeForegroundPlatform: ForegroundPlatform {
 
     func hitTest(_ point: Point, in target: SemanticObservationHandle, context: OperationContext) throws -> Bool {
         try context.check()
+        let runtimePID = UInt32(getpid())
         var displayCount: UInt32 = 0
         var display: CGDirectDisplayID = 0
         guard CGGetDisplaysWithPoint(CGPoint(x: point.x, y: point.y), 1, &display, &displayCount) == .success, displayCount > 0,
               let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]],
               let frontWindow = windows.first(where: { row in
                   guard row[kCGWindowLayer as String] as? Int == 0,
+                        (row[kCGWindowOwnerPID as String] as? UInt32) != runtimePID,
                         let alpha = row[kCGWindowAlpha as String] as? Double, alpha > 0,
                         let bounds = row[kCGWindowBounds as String] as? [String: Double],
                         let x = bounds["X"], let y = bounds["Y"], let w = bounds["Width"], let h = bounds["Height"] else { return false }

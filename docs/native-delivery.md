@@ -108,7 +108,7 @@ points still start v3; installing an archive does not migrate them automatically
 | `press_key` | A foreground `key` step on the exact focused AX reference. Supported keys are Return, Tab, Escape, Backspace and arrows. |
 | `scroll` | Unsupported. |
 | `launch_app`, `open_url`, `run_applescript` | Unsupported; use separate explicitly authorized setup when required. |
-| Cursor overlay | No native overlay/daemon is installed. |
+| Cursor overlay | [On-screen feedback](runtime.md#on-screen-feedback) is built into the runtime and enabled per MCP connection with `CUA_VISUAL_FEEDBACK=1`. |
 
 For transient selected state, opt in to `eventHistory` on `observe`.
 History includes a cursor and coverage evidence. Use refs from the current

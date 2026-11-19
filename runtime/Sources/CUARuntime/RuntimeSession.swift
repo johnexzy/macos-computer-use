@@ -23,7 +23,10 @@ private final class PendingRequest: @unchecked Sendable {
 private struct NativeResult: Sendable {
     let body: ResponseBody
     let handle: (any RetainedNativeHandle)?
-    init(_ body: ResponseBody, handle: (any RetainedNativeHandle)? = nil) { self.body = body; self.handle = handle }
+    let activity: DesktopActivity?
+    init(_ body: ResponseBody, handle: (any RetainedNativeHandle)? = nil, activity: DesktopActivity? = nil) {
+        self.body = body; self.handle = handle; self.activity = activity
+    }
 }
 
 /// Control admission/timers/cancel are independent of the serial native worker and AppKit runloop.
@@ -34,6 +37,7 @@ public final class RuntimeSession: @unchecked Sendable {
     private let worker = DispatchQueue(label: "cua.runtime.native", qos: .userInitiated)
     private let system: any NativeSystem
     private let actions: BackgroundActions
+    private let activityOverlay: DesktopActivityOverlay?
     private let limits: RuntimeLimits
     private let emit: @Sendable (Response) -> Void
     private let emitProgress: (@Sendable (CUAProtocol.Progress) throws -> OutputTicket)?
@@ -49,11 +53,13 @@ public final class RuntimeSession: @unchecked Sendable {
     public init(system: any NativeSystem = MacOSSystem(), epoch: String = UUID().uuidString,
                 limits: RuntimeLimits = RuntimeLimits(),
                 actions: BackgroundActions = BackgroundActions(),
+                visualFeedback: Bool = false,
                 emit: @escaping @Sendable (Response) -> Void,
                 emitProgress: (@Sendable (CUAProtocol.Progress) throws -> OutputTicket)? = nil,
                 didShutdown: @escaping @Sendable () -> Void = {}) {
         self.system = system; self.epoch = epoch; self.limits = limits
         self.actions = actions
+        activityOverlay = visualFeedback ? DesktopActivityOverlay() : nil
         self.emit = emit; self.emitProgress = emitProgress; self.didShutdown = didShutdown
         observations = ObservationRegistry(epoch: epoch)
         system.configureObservationWorker(worker)
@@ -80,6 +86,7 @@ public final class RuntimeSession: @unchecked Sendable {
         for entry in Array(pending.values) { interrupt(entry, reason: .cancelled) }
         system.shutdownObservations()
         observations.invalidate()
+        activityOverlay?.dismiss()
         session = nil
         seen.removeAll()
         didShutdown()
@@ -162,6 +169,7 @@ public final class RuntimeSession: @unchecked Sendable {
                         try self.observations.insert(observation, handle: result.handle)
                     }
                     self.respond(request, result.body)
+                    if let activity = result.activity { self.activityOverlay?.submit(activity) }
                 } catch {
                     self.reject(request, code: .staleObservation, "session closed before observation publication")
                 }
@@ -213,7 +221,8 @@ public final class RuntimeSession: @unchecked Sendable {
             return NativeResult(.targets(try system.targets(bundleId: params.bundleId, context: context)))
         case .observe(let params):
             let native = try system.observe(params: params, observationId: nextObservationID(), context: context)
-            return NativeResult(.observe(native.observation), handle: native.handle)
+            return NativeResult(.observe(native.observation), handle: native.handle,
+                activity: activityOverlay.map { _ in .observing(native.observation) })
         case .act(let act):
             if emitProgress == nil && act.steps.count > 1 && act.steps.contains(where: {
                 if case .waitFor = $0.operation { return false }; return true
@@ -240,7 +249,10 @@ public final class RuntimeSession: @unchecked Sendable {
                     try ticket.wait(context: context)
                 }
             } else { progress = nil }
-            return NativeResult(.act(actions.act(act, entry: retained, context: context, state: execution, progress: progress)))
+            let result = actions.act(act, entry: retained, context: context, state: execution, progress: progress)
+            return NativeResult(.act(result), activity: activityOverlay.flatMap { _ in
+                DesktopActivity.action(act, result: result, observation: retained.observation)
+            })
         case .waitFor(let wait):
             let retained = try observations.lookup(wait.observationId, epoch: epoch, target: wait.target)
             let started = unixMilliseconds()

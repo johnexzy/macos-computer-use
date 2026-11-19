@@ -304,7 +304,9 @@ public struct MacOSWindowCatalog: WindowCatalog {
             guard let records = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
                 throw NativeFailure(.nativeFailed, "window enumeration unavailable")
             }
-            return records
+            // The runtime’s optional nonactivating panel is presentation, outside the target catalog.
+            let runtimePID = UInt32(getpid())
+            return records.filter { ($0[kCGWindowOwnerPID as String] as? UInt32) != runtimePID }
         }, processBundles: resolver.resolve)
     }
 
