@@ -11,6 +11,15 @@ public protocol AXMutating: Sendable {
                willDispatch: @Sendable () throws -> Void) throws
     func replaceSelectedText(_ text: String, on object: any AXObject, context: OperationContext,
                              willDispatch: @Sendable () throws -> Void) throws
+    func scrollToVisible(_ object: any AXObject, context: OperationContext,
+                         willDispatch: @Sendable () throws -> Void) throws
+}
+
+public extension AXMutating {
+    func scrollToVisible(_ object: any AXObject, context: OperationContext,
+                         willDispatch: @Sendable () throws -> Void) throws {
+        throw NativeFailure(.unsupported, "AXScrollToVisible is not supported by this backend")
+    }
 }
 
 public struct WaitEvaluation: Sendable {
@@ -238,13 +247,19 @@ public struct BackgroundActions: Sendable {
         case .press(let value): reference = value.elementRef; route = .axPress
         case .typeText(let value): reference = value.elementRef; route = .axSelectedText
         case .scroll(let value): reference = value.elementRef; route = .axScroll
+        case .scrollToVisible(let value): reference = value.elementRef; route = .axScrollToVisible
         default: throw NativeFailure(.unsupported, "background operation is not implemented")
         }
-        let resolved = try handle.resolve(reference, includeValue: route != .axScroll, context: context)
+        let resolved = try handle.resolve(reference, includeValue: route != .axScroll && route != .axScrollToVisible, context: context)
         if route == .axScroll {
             guard resolved.snapshot.availableActions(backend: handle.backend).contains(.scroll),
                   !resolved.snapshot.enabledKnown || resolved.snapshot.enabled else {
                 throw NativeFailure(.unsupported, "scroll requires a live AX scroll area")
+            }
+        } else if route == .axScrollToVisible {
+            guard resolved.snapshot.actions.contains("AXScrollToVisible"),
+                  !resolved.snapshot.enabledKnown || resolved.snapshot.enabled else {
+                throw NativeFailure(.unsupported, "AXScrollToVisible is not advertised or target is disabled")
             }
         } else {
             try requireEnabledSnapshot(resolved.snapshot, allowUnsupported: route != .axPress)
@@ -307,9 +322,9 @@ public struct BackgroundActions: Sendable {
         if approached && live.snapshot.bounds != resolved.snapshot.bounds {
             throw NativeFailure(.staleElement, "control moved during visual approach")
         }
-        if route == .axScroll {
+        if route == .axScroll || route == .axScrollToVisible {
             if live.snapshot.enabledKnown && !live.snapshot.enabled {
-                throw NativeFailure(.unsupported, "scroll area is disabled")
+                throw NativeFailure(.unsupported, "scroll target is disabled")
             }
         } else {
             try requireEnabledSnapshot(live.snapshot, allowUnsupported: route != .axPress)
@@ -349,6 +364,8 @@ public struct BackgroundActions: Sendable {
                     state.finish(reason: .verificationFailed, stop: .verificationFailed)
                     return false
                 }
+            case .scrollToVisible:
+                try writer.scrollToVisible(resolved.object, context: context, willDispatch: handoff)
             default: break
             }
             if route != .axScroll { state.returnedSuccessfully() }
@@ -514,6 +531,26 @@ extension MacOSAXBackend: AXMutating {
         try willDispatch()
         guard AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) == .success else {
             throw NativeFailure(.nativeFailed, "AXSelectedText replacement returned an error")
+        }
+    }
+    public func scrollToVisible(_ object: any AXObject, context: OperationContext,
+                                willDispatch: @Sendable () throws -> Void) throws {
+        let element = try nativeElement(object, context: context)
+        try installTimeout(element, context: context)
+        var enabledValue: CFTypeRef?
+        let enabledResult = AXUIElementCopyAttributeValue(element, kAXEnabledAttribute as CFString, &enabledValue)
+        let enabled = try decodeAXEnabled(enabledResult, value: enabledValue, context: context)
+        if enabled.value == false {
+            throw NativeFailure(.unsupported, "AX target is disabled")
+        }
+        try installTimeout(element, context: context)
+        guard try readAXActionNames(element, context: context).contains("AXScrollToVisible") else {
+            throw NativeFailure(.unsupported, "AXScrollToVisible is not currently advertised")
+        }
+        try installTimeout(element, context: context)
+        try willDispatch()
+        guard AXUIElementPerformAction(element, "AXScrollToVisible" as CFString) == .success else {
+            throw NativeFailure(.nativeFailed, "AXScrollToVisible returned an error")
         }
     }
 }

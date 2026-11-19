@@ -238,10 +238,31 @@ final class ForegroundControl {
         }
     }
 
+    private static func isWindowBrowserShortcut(_ key: Key) -> Bool {
+        switch key {
+        case .focusAddressBar, .reload, .newTab, .closeTab, .navigateBack, .navigateForward:
+            return true
+        default:
+            return false
+        }
+    }
+
     private func checkKeyTarget(_ operation: KeyOperation) throws {
         guard case .semantic(let handle) = target else { throw stop(.windowChanged) }
         let resolved = try handle.resolve(operation.elementRef, context: context)
         let snapshot = resolved.snapshot
+        if Self.isWindowBrowserShortcut(operation.key) {
+            // Window-scoped browser shortcuts target the validated focused window even when focus
+            // sits on a child control inside AXWebArea or the browser toolbar.
+            guard (snapshot.enabledKnown && snapshot.enabled) || snapshot.enabledUnsupported else {
+                throw stop(.windowChanged)
+            }
+            if let focused = try platform.focusedElement(pid: window.key.pid, context: context) {
+                do { try handle.validateOwner(of: focused, context: context) }
+                catch { throw stop(.windowChanged) }
+            }
+            return
+        }
         // A document editor can expose focus and writable text while declaring AXEnabled unsupported.
         let writableEditor = operation.key == .saveAs && snapshot.role == "AXTextArea"
             && snapshot.valueSettable && snapshot.enabledUnsupported
@@ -449,20 +470,26 @@ struct NativeForegroundPlatform: ForegroundPlatform {
         switch input {
         case .key(let key):
             let code: Int
+            let flags: CGEventFlags
             switch key {
-            case .return: code = kVK_Return
-            case .tab: code = kVK_Tab
-            case .escape: code = kVK_Escape
-            case .backspace: code = kVK_Delete
-            case .left: code = kVK_LeftArrow
-            case .right: code = kVK_RightArrow
-            case .up: code = kVK_UpArrow
-            case .down: code = kVK_DownArrow
-            case .saveAs: code = kVK_ANSI_S
+            case .return: code = kVK_Return; flags = []
+            case .tab: code = kVK_Tab; flags = []
+            case .escape: code = kVK_Escape; flags = []
+            case .backspace: code = kVK_Delete; flags = []
+            case .left: code = kVK_LeftArrow; flags = []
+            case .right: code = kVK_RightArrow; flags = []
+            case .up: code = kVK_UpArrow; flags = []
+            case .down: code = kVK_DownArrow; flags = []
+            case .saveAs: code = kVK_ANSI_S; flags = [.maskCommand, .maskAlternate, .maskShift]
+            case .focusAddressBar: code = kVK_ANSI_L; flags = [.maskCommand]
+            case .reload: code = kVK_ANSI_R; flags = [.maskCommand]
+            case .newTab: code = kVK_ANSI_T; flags = [.maskCommand]
+            case .closeTab: code = kVK_ANSI_W; flags = [.maskCommand]
+            case .navigateBack: code = kVK_ANSI_LeftBracket; flags = [.maskCommand]
+            case .navigateForward: code = kVK_ANSI_RightBracket; flags = [.maskCommand]
             }
             down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: true)
             up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: false)
-            let flags: CGEventFlags = key == .saveAs ? [.maskCommand, .maskAlternate, .maskShift] : []
             down?.flags = flags
             up?.flags = flags
         case .click(let point):

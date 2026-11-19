@@ -21,6 +21,7 @@ pub const MAX_TARGET_EVENTS: usize = 64;
 pub const MAX_TARGET_EVENT_BYTES: usize = 64 * 1024;
 pub const MAX_EVENT_CONTROLS: usize = 16;
 pub const MAX_EVENT_VALUE_BYTES: usize = 4096;
+pub const MAX_URL_BYTES: usize = 2048;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 macro_rules! record {
@@ -62,6 +63,7 @@ choices!(DeliveryRoute {
     AxSelectedText,
     AxPress,
     AxScroll,
+    AxScrollToVisible,
     ForegroundKey,
     ForegroundClick
 });
@@ -106,14 +108,21 @@ choices!(Key {
     Right,
     Up,
     Down,
-    SaveAs
+    SaveAs,
+    FocusAddressBar,
+    Reload,
+    NewTab,
+    CloseTab,
+    NavigateBack,
+    NavigateForward
 });
 choices!(ElementAction {
     Press,
     SetValue,
     TypeText,
     Key,
-    Scroll
+    Scroll,
+    ScrollToVisible
 });
 choices!(ActionKind {
     Press,
@@ -121,6 +130,7 @@ choices!(ActionKind {
     TypeText,
     Key,
     Scroll,
+    ScrollToVisible,
     Click
 });
 choices!(StopReason {
@@ -290,6 +300,8 @@ pub struct Element {
     pub actions: Vec<ElementAction>,
     pub identifier: Option<String>,
     pub subrole: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 #[cfg(feature = "schema")]
@@ -367,6 +379,14 @@ record!(EnabledCondition {
 });
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UrlCondition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element_ref: Option<String>,
+    pub contains: String,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(
     tag = "kind",
     content = "params",
@@ -378,6 +398,7 @@ pub enum Condition {
     ElementAbsent(ElementCondition),
     ValueEquals(ValueCondition),
     Enabled(EnabledCondition),
+    UrlContains(UrlCondition),
     WindowAbsent(Empty),
 }
 record!(ElementOperation {
@@ -421,6 +442,7 @@ pub enum Operation {
     TypeText(TypeTextOperation),
     Key(KeyOperation),
     Scroll(ScrollOperation),
+    ScrollToVisible(ElementOperation),
     Click(ClickOperation),
     WaitFor(WaitOperation),
 }
@@ -658,6 +680,7 @@ fn expectation(
                     | (Operation::TypeText(_), DeliveryRoute::AxSelectedText)
                     | (Operation::Press(_), DeliveryRoute::AxPress)
                     | (Operation::Scroll(_), DeliveryRoute::AxScroll)
+                    | (Operation::ScrollToVisible(_), DeliveryRoute::AxScrollToVisible)
                     | (Operation::Key(_), DeliveryRoute::ForegroundKey)
                     | (Operation::Click(_), DeliveryRoute::ForegroundClick)
             ),
@@ -759,6 +782,15 @@ impl Condition {
             Self::ElementExists(v) | Self::ElementAbsent(v) => id(&v.selector.role),
             Self::ValueEquals(v) => id(&v.element_ref),
             Self::Enabled(v) => id(&v.element_ref),
+            Self::UrlContains(v) => {
+                if let Some(element_ref) = &v.element_ref {
+                    id(element_ref)?;
+                }
+                require(
+                    !v.contains.is_empty() && v.contains.len() <= MAX_URL_BYTES,
+                    "invalid URL substring condition",
+                )
+            }
             Self::WindowAbsent(_) => Ok(()),
         }
     }
@@ -800,6 +832,10 @@ impl ObservationFeedback {
                     element.label.as_ref().is_none_or(|s| s.len() <= 1024)
                         && element.identifier.as_ref().is_none_or(|s| s.len() <= 1024)
                         && element.subrole.as_ref().is_none_or(|s| s.len() <= 1024)
+                        && element
+                            .url
+                            .as_ref()
+                            .is_none_or(|s| !s.is_empty() && s.len() <= MAX_URL_BYTES)
                         && element.value.as_ref().is_none_or(|s| s.len() <= 65_536),
                     "feedback projection exceeds string limit",
                 )?;
@@ -1234,6 +1270,13 @@ impl Observation {
                 element.subrole.as_ref().is_none_or(|s| s.len() <= 1024),
                 "element subrole exceeds string limit",
             )?;
+            require(
+                element
+                    .url
+                    .as_ref()
+                    .is_none_or(|s| !s.is_empty() && s.len() <= MAX_URL_BYTES),
+                "element URL exceeds string limit",
+            )?;
         }
         if let Some(selection) = &self.ax_selection {
             validate_selectors(&selection.selectors)?;
@@ -1399,6 +1442,7 @@ impl ActRequest {
                         "invalid scroll amount",
                     )?;
                 }
+                Operation::ScrollToVisible(v) => id(&v.element_ref)?,
                 Operation::Click(v) => require(
                     v.point.x.is_finite() && v.point.y.is_finite(),
                     "invalid point",

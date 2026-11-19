@@ -116,6 +116,7 @@ struct DesktopActivity: Sendable {
             }
             point = screen.map { CGPoint(x: $0.x, y: $0.y) }
         case .scroll(let input): elementRef = input.elementRef; phase = .scrolled
+        case .scrollToVisible(let input): elementRef = input.elementRef; phase = .scrolled
         case .waitFor: return nil
         }
         if let elementRef, let element = observation.elements.first(where: { $0.reference == elementRef }) {

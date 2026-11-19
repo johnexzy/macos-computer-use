@@ -24,7 +24,7 @@ fn shared_valid_fixtures_decode_and_round_trip() {
     let paths = fixtures("valid");
     assert_eq!(
         paths.len(),
-        62,
+        66,
         "keep the shared fixture inventory deliberate"
     );
     for path in paths {
@@ -132,7 +132,7 @@ fn ocr_budget_accounts_for_json_escaping_not_only_text_bytes() {
 #[test]
 fn shared_invalid_fixtures_are_rejected() {
     let paths = fixtures("invalid");
-    assert_eq!(paths.len(), 91);
+    assert_eq!(paths.len(), 94);
     for path in paths {
         assert!(
             decode_line(&fs::read(&path).unwrap()).is_err(),

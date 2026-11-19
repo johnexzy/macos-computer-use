@@ -40,17 +40,20 @@ public struct AXNodeSnapshot: Sendable {
     public let selectedRange: AXTextRange?
     public let actions: [String]
     public let complete: Bool
+    public let url: String?
     public var identity: AXElementIdentity { AXElementIdentity(role: role, identifier: identifier, subrole: subrole) }
     public init(role: String, title: String? = nil, label: String? = nil, identifier: String? = nil,
                 bounds: Rect, enabled: Bool = true, enabledKnown: Bool = true, value: String? = nil,
                 valueSettable: Bool = false, selectedTextSettable: Bool = false, selectedRange: AXTextRange? = nil,
-                actions: [String] = [], complete: Bool = true, subrole: String? = nil, enabledUnsupported: Bool = false) {
+                actions: [String] = [], complete: Bool = true, subrole: String? = nil, enabledUnsupported: Bool = false,
+                url: String? = nil) {
         self.role = role; self.title = title; self.label = label; self.identifier = identifier
         self.subrole = subrole
         self.bounds = bounds; self.enabled = enabled; self.enabledKnown = enabledKnown; self.value = value
         self.enabledUnsupported = enabledUnsupported
         self.valueSettable = valueSettable; self.selectedTextSettable = selectedTextSettable
         self.selectedRange = selectedRange; self.actions = actions; self.complete = complete
+        self.url = url
     }
 
     func availableActions(backend: any AXReading) -> [ElementAction] {
@@ -60,6 +63,7 @@ public struct AXNodeSnapshot: Sendable {
         if actions.contains("AXPress") { available.append(.press) }
         if selectedTextSettable { available.append(.typeText) }
         if role == "AXScrollArea", backend is any AXScrolling { available.append(.scroll) }
+        if actions.contains("AXScrollToVisible") { available.append(.scrollToVisible) }
         return available
     }
 }
@@ -77,11 +81,13 @@ public protocol AXReading: Sendable {
     func identity(of element: any AXObject, context: OperationContext) throws -> AXElementIdentity?
     func snapshot(of element: any AXObject, includeValue: Bool, context: OperationContext) throws -> AXNodeSnapshot?
     func same(_ lhs: any AXObject, _ rhs: any AXObject) -> Bool
+    func prepareBrowserAccessibility(application: any AXObject, bundleId: String?, context: OperationContext) throws -> Bool
 }
 
 public extension AXReading {
     func focusedElement(of application: any AXObject, context: OperationContext) throws -> (any AXObject)? { nil }
     func bounds(of element: any AXObject, context: OperationContext) throws -> Rect? { nil }
+    func prepareBrowserAccessibility(application: any AXObject, bundleId: String?, context: OperationContext) throws -> Bool { false }
 
     func identity(of element: any AXObject, context: OperationContext) throws -> AXElementIdentity? {
         try snapshot(of: element, includeValue: false, context: context)?.identity
@@ -166,16 +172,24 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
         self.generation = generation
     }
 
-    public func validateWindow(context: OperationContext) throws {
+    public func validateWindow(context: OperationContext, allowTitleChange: Bool = false) throws {
         try context.check()
         let snapshot = try catalog.windowSnapshot(target.key, context: context)
         let current = snapshot.target
         guard (generation == nil || snapshot.generation == generation),
               current.bounds == target.bounds, current.bundleId == target.bundleId,
-              titlesCompatible(current.title, target.title) else {
+              (allowTitleChange || titlesCompatible(current.title, target.title)) else {
             throw NativeFailure(.staleObservation, "observed window metadata changed")
         }
-        let live = try associatedWindow(target: current, application: application, backend: backend, catalog: catalog, context: context)
+        let live: any AXObject
+        do {
+            live = try associatedWindow(target: current, application: application, backend: backend, catalog: catalog, context: context)
+        } catch let failure as NativeFailure where allowTitleChange && failure.code == .targetNotFound {
+            // During browser navigation, AXTitle can update milliseconds before CGWindowName.
+            // The CG window itself is still present (catalog.windowSnapshot succeeded above),
+            // so surface a transient read gap for wait polling instead of failing closed early.
+            throw AXReadUnavailable()
+        }
         guard backend.same(live, retainedWindow) else { throw NativeFailure(.staleElement, "observed AX window was replaced") }
     }
 
@@ -183,10 +197,11 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
         try requireOwningWindow(object, window: retainedWindow, pid: target.key.pid, backend: backend, context: context)
     }
 
-    public func resolve(_ reference: String, includeValue: Bool = false, context: OperationContext) throws -> ResolvedAXElement {
+    public func resolve(_ reference: String, includeValue: Bool = false, allowTitleChange: Bool = false,
+                        context: OperationContext) throws -> ResolvedAXElement {
         guard let retained = references[reference] else { throw NativeFailure(.staleElement, "reference does not belong to this observation") }
         let object = retained.object
-        try validateWindow(context: context)
+        try validateWindow(context: context, allowTitleChange: allowTitleChange)
         try validateOwner(of: object, context: context)
         guard try containsRetainedObject(object, window: retainedWindow, backend: backend, context: context) else {
             throw NativeFailure(.staleElement, "retained control is not in the current bounded window tree")
@@ -201,7 +216,7 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
             throw NativeFailure(.staleElement, "retained control role, subrole or identifier changed")
         }
         try validateOwner(of: object, context: context)
-        try validateWindow(context: context)
+        try validateWindow(context: context, allowTitleChange: allowTitleChange)
         return ResolvedAXElement(object: object, snapshot: snapshot)
     }
 
@@ -213,11 +228,12 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
         return scan
     }
 
-    public func scan(selectors: [CUAProtocol.Selector], includeValues: Bool, context: OperationContext) throws -> AXTreeSnapshot {
-        try validateWindow(context: context)
+    public func scan(selectors: [CUAProtocol.Selector], includeValues: Bool, allowTitleChange: Bool = false,
+                     context: OperationContext) throws -> AXTreeSnapshot {
+        try validateWindow(context: context, allowTitleChange: allowTitleChange)
         let scan = try collectTree(window: retainedWindow, pid: target.key.pid, backend: backend,
                                   includeValues: includeValues, selectors: selectors, context: context)
-        try validateWindow(context: context)
+        try validateWindow(context: context, allowTitleChange: allowTitleChange)
         return scan
     }
     func eventReadSource() -> SemanticObservationHandle {
@@ -245,7 +261,33 @@ public struct SemanticAXObserver: Sendable {
         let started = milliseconds()
         let axStarted = milliseconds()
         let application = try backend.application(pid: target.key.pid, context: context)
+        let activatedBrowserAX = try backend.prepareBrowserAccessibility(application: application, bundleId: target.bundleId, context: context)
         let window = try associatedWindow(target: target, application: application, backend: backend, catalog: catalog, context: context)
+        if activatedBrowserAX {
+            let webSelector = [CUAProtocol.Selector(role: "AXWebArea", label: nil, identifier: nil)]
+            // Cold-started Chromium renderers can take ~1.5-2.0s to publish their first AXWebArea
+            // after AXEnhancedUserInterface flips from 0 to 1; warm browsers match immediately.
+            let deadline = DispatchTime.now().uptimeNanoseconds + 2_500_000_000
+            var sawWebArea = false
+            while DispatchTime.now().uptimeNanoseconds < deadline {
+                try context.check()
+                let probe = try collectTree(window: window, pid: target.key.pid, backend: backend,
+                                            includeValues: false, selectors: webSelector, application: application,
+                                            visibleIn: target.bounds, context: context)
+                if !probe.nodes.isEmpty {
+                    sawWebArea = true
+                    break
+                }
+                let delay = Double(try context.nativeTimeoutSeconds(maximum: 0.08))
+                if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+            }
+            if sawWebArea {
+                // Allow Chromium's newly enabled web accessibility tree one brief settle tick
+                // so web controls publish full action lists (e.g. AXPress) on the first observe.
+                let settle = Double(try context.nativeTimeoutSeconds(maximum: 0.08))
+                if settle > 0 { Thread.sleep(forTimeInterval: settle) }
+            }
+        }
         let scan = try collectTree(window: window, pid: target.key.pid, backend: backend,
                                    includeValues: params.includeValues, selectors: params.axSelectors, application: application,
                                    visibleIn: target.bounds, context: context)
@@ -258,7 +300,15 @@ public struct SemanticAXObserver: Sendable {
         var complete = scan.complete
         var encodedBytes = 0
         let encoder = JSONEncoder()
-        for node in scan.nodes where params.axSelectors != nil || (node.snapshot.role != "AXWindow" && node.snapshot.role != "AXGroup") {
+        let eligible = scan.nodes.filter { params.axSelectors != nil || ($0.snapshot.role != "AXWindow" && $0.snapshot.role != "AXGroup") }
+        let selectedNodes: [ResolvedAXElement]
+        if params.axSelectors == nil && eligible.count > Limits.maxElements {
+            complete = false
+            selectedNodes = selectElementsForBudget(eligible, limit: Limits.maxElements, windowBounds: target.bounds)
+        } else {
+            selectedNodes = eligible
+        }
+        for node in selectedNodes {
             if elements.count == Limits.maxElements { complete = false; break }
             let reference = "element-\(UUID().uuidString)"
             let s = node.snapshot
@@ -269,12 +319,13 @@ public struct SemanticAXObserver: Sendable {
             let label = bounded(s.label, bytes: 1024)
             let identifier = bounded(s.identifier, bytes: 1024)
             let subrole = bounded(s.subrole, bytes: 1024)
+            let url = boundedNonEmpty(s.url, bytes: Limits.maxUrlBytes)
             let value = params.includeValues ? bounded(s.value, bytes: 65_536) : nil
-            if label != s.label || identifier != s.identifier || subrole != s.subrole || (params.includeValues && value != s.value) { complete = false }
+            if label != s.label || identifier != s.identifier || subrole != s.subrole || url != s.url || (params.includeValues && value != s.value) { complete = false }
             let actions = s.availableActions(backend: backend)
             let element = Element(reference: reference, role: s.role, label: label, value: value,
                                   bounds: s.bounds, enabled: s.enabledKnown ? s.enabled : nil, actions: actions,
-                                  identifier: identifier, subrole: subrole)
+                                  identifier: identifier, subrole: subrole, url: url)
             let size = try encoder.encode(element).count
             if encodedBytes + size > 2 * 1024 * 1024 { complete = false; break }
             encodedBytes += size
@@ -306,6 +357,31 @@ private func titlesCompatible(_ lhs: String?, _ rhs: String?) -> Bool {
     return lhs == rhs
 }
 
+/// Fail-closed browser/AX window title compatibility.
+/// Supports exact matches, Chromium-style `" - <Browser/Profile>"` suffixes on `AXTitle`,
+/// and macOS WindowServer middle-ellipsis truncation (`"prefix…suffix"`) on `CGWindowName`.
+func axTitleCompatible(axTitle: String?, cgTitle: String?) -> Bool {
+    guard let axTitle, !axTitle.isEmpty, let cgTitle, !cgTitle.isEmpty else { return true }
+    if axTitle == cgTitle { return true }
+    if axTitle.hasPrefix(cgTitle + " - ") { return true }
+    // WindowServer middle-truncates very long CGWindow titles with a single U+2026 ellipsis.
+    if let ellipsis = cgTitle.firstIndex(of: "\u{2026}") {
+        let afterEllipsis = cgTitle.index(after: ellipsis)
+        let prefix = cgTitle[..<ellipsis]
+        let suffix = cgTitle[afterEllipsis...]
+        if !suffix.contains("\u{2026}"), prefix.count >= 4, suffix.count >= 4, axTitle.hasPrefix(prefix) {
+            let searchStart = axTitle.index(axTitle.startIndex, offsetBy: prefix.count)
+            var cursor = searchStart
+            while let match = axTitle.range(of: suffix, range: cursor..<axTitle.endIndex) {
+                let tail = axTitle[match.upperBound...]
+                if tail.isEmpty || tail.hasPrefix(" - ") { return true }
+                cursor = match.upperBound
+            }
+        }
+    }
+    return false
+}
+
 private func associatedWindow(target: Target, application: any AXObject, backend: any AXReading,
                               catalog: any WindowCatalog, context: OperationContext) throws -> any AXObject {
     let siblings = try catalog.processWindows(pid: target.key.pid, context: context)
@@ -319,7 +395,7 @@ private func associatedWindow(target: Target, application: any AXObject, backend
         try context.check()
         guard try backend.ownerPID(of: window, context: context) == target.key.pid,
               let snapshot = try backend.snapshot(of: window, includeValue: false, context: context),
-              snapshot.bounds == target.bounds, titlesCompatible(snapshot.title, target.title) else { continue }
+              snapshot.bounds == target.bounds, axTitleCompatible(axTitle: snapshot.title, cgTitle: target.title) else { continue }
         matches.append(ResolvedAXElement(object: window, snapshot: snapshot))
     }
     guard matches.count == 1 else {
@@ -328,7 +404,7 @@ private func associatedWindow(target: Target, application: any AXObject, backend
     }
     let selected = matches[0]
     guard !siblings.contains(where: {
-        $0.key != target.key && $0.bounds == selected.snapshot.bounds && titlesCompatible($0.title, selected.snapshot.title)
+        $0.key != target.key && $0.bounds == selected.snapshot.bounds && axTitleCompatible(axTitle: selected.snapshot.title, cgTitle: $0.title)
     }) else {
         throw NativeFailure(.ambiguousTarget, "selected AX window metadata also matches another CG window")
     }
@@ -468,6 +544,51 @@ private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReadi
     return AXTreeSnapshot(nodes: nodes + clippedNodes, complete: complete, visitedNodes: UInt32(seen.count))
 }
 
+private let interactiveRoles: Set<String> = [
+    "AXWebArea", "AXLink", "AXButton", "AXTextField", "AXTextArea", "AXSearchField",
+    "AXComboBox", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXMenuButton",
+    "AXTabButton", "AXTabGroup", "AXSlider", "AXIncrementor", "AXScrollArea",
+    "AXToolbar", "AXMenuItem", "AXDisclosureTriangle",
+]
+
+private let landmarkRoles: Set<String> = [
+    "AXHeading", "AXList", "AXTable", "AXSheet", "AXDialog", "AXOutline",
+]
+
+private func isInteractiveElement(_ snapshot: AXNodeSnapshot) -> Bool {
+    interactiveRoles.contains(snapshot.role)
+        || snapshot.valueSettable
+        || snapshot.selectedTextSettable
+        || snapshot.actions.contains("AXPress")
+}
+
+/// When an unfiltered observation exceeds `limit`, retain visible interactive controls
+/// and web roots ahead of dense non-interactive text/cell runs while keeping document order.
+func selectElementsForBudget(_ nodes: [ResolvedAXElement], limit: Int, windowBounds: Rect?) -> [ResolvedAXElement] {
+    guard nodes.count > limit, limit > 0 else { return Array(nodes.prefix(max(0, limit))) }
+    var tiers: [[Int]] = [[], [], [], [], []]
+    for (index, node) in nodes.enumerated() {
+        let clipped = windowBounds.map { isClipped(node.snapshot.bounds, to: $0) } ?? false
+        let interactive = isInteractiveElement(node.snapshot)
+        let tier: Int
+        if !clipped && interactive { tier = 0 }
+        else if !clipped && landmarkRoles.contains(node.snapshot.role) { tier = 1 }
+        else if !clipped { tier = 2 }
+        else if interactive { tier = 3 }
+        else { tier = 4 }
+        tiers[tier].append(index)
+    }
+    var chosen: [Int] = []
+    chosen.reserveCapacity(limit)
+    for bucket in tiers {
+        let remaining = limit - chosen.count
+        if remaining <= 0 { break }
+        chosen.append(contentsOf: bucket.prefix(remaining))
+    }
+    chosen.sort()
+    return chosen.map { nodes[$0] }
+}
+
 private func isClipped(_ element: Rect, to window: Rect) -> Bool {
     let width = min(element.x + element.width, window.x + window.width) - max(element.x, window.x)
     let height = min(element.y + element.height, window.y + window.height) - max(element.y, window.y)
@@ -531,4 +652,7 @@ private func optionalTopologyRead<T>(_ read: () throws -> T?) throws -> T? {
 private func milliseconds() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }
 private func bounded(_ string: String?, bytes: Int) -> String? {
     string.flatMap { $0.utf8.count <= bytes ? $0 : nil }
+}
+private func boundedNonEmpty(_ string: String?, bytes: Int) -> String? {
+    string.flatMap { !$0.isEmpty && $0.utf8.count <= bytes ? $0 : nil }
 }

@@ -63,7 +63,7 @@ public struct MacOSSystem: NativeSystem {
     }
     public func supportedActions(permissions: Permissions) -> [ActionKind] {
         guard permissions.accessibility else { return [] }
-        var supported: [ActionKind] = backend is any AXMutating ? [.setValue, .press, .typeText] : []
+        var supported: [ActionKind] = backend is any AXMutating ? [.setValue, .press, .typeText, .scrollToVisible] : []
         if backend is any AXScrolling { supported.append(.scroll) }
         return supported
     }

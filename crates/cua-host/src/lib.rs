@@ -339,7 +339,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Run 1-16 ordered typed background actions and predicate waits within one budget. Supports background setValue, selection replacement, press, and scroll on live references. Scroll uses an AXScrollArea that advertises scroll. Use axis vertical or horizontal and a nonzero amount from -1000 to 1000. Positive moves down or right, and 250 requests 25% of the full range. Observe again after movement. Foreground keys and clicks require operator authority and foreground: true. Stops at the first failed requirement. Optional feedback returns requested control updates tied to the base observation. No rollback or automatic replay."
+        description = "Run 1-16 ordered typed background actions and predicate waits within one budget. Supports background setValue, selection replacement, press, scroll, and scrollToVisible on live references. Scroll uses an AXScrollArea that advertises scroll; scrollToVisible uses any live element advertising scrollToVisible (such as browser web controls). Use axis vertical or horizontal and a nonzero amount from -1000 to 1000. Positive moves down or right, and 250 requests 25% of the full range. Observe again after movement. Foreground keys (including browser shortcuts) and clicks require operator authority and foreground: true. Stops at the first failed requirement. Optional feedback returns requested control updates tied to the base observation. No rollback or automatic replay."
     )]
     async fn act(
         &self,
@@ -363,7 +363,7 @@ impl Host {
 
     #[tool(
         name = "waitFor",
-        description = "Wait within one budget for an exact value, enabled state, element presence/absence, or disappearance of the exact window identity. Partial reads cannot prove absence. Window disappearance returns timestamped evidence without creating a replacement target."
+        description = "Wait within one budget for an exact value, enabled state, element presence/absence, web URL substring (urlContains), or disappearance of the exact window identity. Partial reads cannot prove absence. Window disappearance returns timestamped evidence without creating a replacement target."
     )]
     async fn wait_for(
         &self,

@@ -34,7 +34,7 @@ private func expectation(_ step: ActionStep, _ receipt: StepReceipt, settled: Bo
     if let route = receipt.route {
         switch (step.operation, route) {
         case (.setValue, .axSetValue), (.typeText, .axSelectedText), (.press, .axPress), (.scroll, .axScroll),
-             (.key, .foregroundKey), (.click, .foregroundClick): break
+             (.scrollToVisible, .axScrollToVisible), (.key, .foregroundKey), (.click, .foregroundClick): break
         default: throw ContractError("receipt route does not match operation")
         }
         try require(foreground == (route == .foregroundKey || route == .foregroundClick),
@@ -79,6 +79,9 @@ extension Condition {
         case .elementExists(let value), .elementAbsent(let value): try identifier(value.selector.role)
         case .valueEquals(let value): try identifier(value.elementRef)
         case .enabled(let value): try identifier(value.elementRef)
+        case .urlContains(let value):
+            if let ref = value.elementRef { try identifier(ref) }
+            try require(!value.contains.isEmpty && value.contains.utf8.count <= Limits.maxUrlBytes, "invalid URL substring condition")
         case .windowAbsent: break
         }
     }
@@ -106,6 +109,7 @@ extension ObservationFeedback {
                 try validRect(element.bounds)
                 try require((element.label?.utf8.count ?? 0) <= 1024 && (element.identifier?.utf8.count ?? 0) <= 1024
                             && (element.subrole?.utf8.count ?? 0) <= 1024
+                            && (element.url.map { !$0.isEmpty && $0.utf8.count <= Limits.maxUrlBytes } ?? true)
                             && (element.value?.utf8.count ?? 0) <= 65_536, "feedback projection exceeds string limit")
             }
         }
@@ -299,6 +303,7 @@ extension Observation {
             try identifier(element.role)
             try validRect(element.bounds)
             try require((element.subrole?.utf8.count ?? 0) <= 1024, "element subrole exceeds string limit")
+            try require(element.url.map { !$0.isEmpty && $0.utf8.count <= Limits.maxUrlBytes } ?? true, "element URL exceeds string limit")
         }
         if let selection = axSelection {
             try validateSelectors(selection.selectors)
@@ -376,6 +381,7 @@ extension ActRequest {
             case .scroll(let value):
                 try identifier(value.elementRef)
                 try require(value.amount != 0 && (-1000...1000).contains(value.amount), "invalid scroll amount")
+            case .scrollToVisible(let value): try identifier(value.elementRef)
             case .click(let value):
                 try require(value.point.x.isFinite && value.point.y.isFinite, "invalid point")
             case .waitFor(let value):
