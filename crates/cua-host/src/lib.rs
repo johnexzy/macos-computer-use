@@ -36,6 +36,12 @@ pub struct CapabilitiesArgs {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TargetsArgs {
     pub bundle_id: Option<String>,
+    #[schemars(length(min = 1, max = 1024))]
+    pub title_contains: Option<String>,
+    #[schemars(length(min = 1, max = 1024))]
+    pub owner_contains: Option<String>,
+    #[serde(default)]
+    pub unbundled_only: bool,
     #[serde(default = "default_budget")]
     #[schemars(range(min = 1, max = 60000))]
     pub budget_ms: u32,
@@ -286,7 +292,7 @@ impl Host {
     }
 
     #[tool(
-        description = "List bounded exact process/window targets, optionally filtering by bundle ID."
+        description = "List bounded exact process/window targets. Filter by exact bundleId, case-insensitive titleContains or ownerContains, or unbundledOnly for verified window owners without a bundle ID. Filters combine."
     )]
     async fn targets(
         &self,
@@ -296,6 +302,9 @@ impl Host {
         self.execute(
             RequestBody::Targets(TargetsRequest {
                 bundle_id: args.bundle_id,
+                title_contains: args.title_contains,
+                owner_contains: args.owner_contains,
+                unbundled_only: args.unbundled_only,
             }),
             args.budget_ms,
             context,
@@ -304,7 +313,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Observe one exact window. Optional axSelectors reads matching AX controls and reports query coverage separately from window coverage. Optional eventHistory retains bounded selected-state changes between observations; historical controls have no actionable refs. Values, screenshots, and Vision OCR are opt-in. cropWindow uses window-local points. Partial coverage cannot prove absence; history can be stale or overrun."
+        description = "Observe one exact window, including Accessibility controls exposed by owners without a bundle ID. Request screenshots or OCR for controls or windows without usable AX coverage. Optional axSelectors reads matching AX controls and reports query coverage separately from window coverage. Optional eventHistory retains bounded selected-state changes between observations; historical controls have no actionable refs. Values, screenshots, and Vision OCR are opt-in. cropWindow uses window-local points. Partial coverage cannot prove absence; history can be stale or overrun."
     )]
     async fn observe(
         &self,
@@ -330,7 +339,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Run 1-16 ordered typed background actions and predicate waits within one budget. Supports background setValue, selection replacement, and press on live references. Foreground keys and clicks require operator authority and foreground: true. Stops at the first failed requirement. Optional feedback returns requested control updates tied to the base observation. No rollback or automatic replay."
+        description = "Run 1-16 ordered typed background actions and predicate waits within one budget. Supports background setValue, selection replacement, press, scroll, and scrollToVisible on live references. Scroll uses an AXScrollArea that advertises scroll; scrollToVisible uses any live element advertising scrollToVisible (such as browser web controls). Use axis vertical or horizontal and a nonzero amount from -1000 to 1000. Positive moves down or right, and 250 requests 25% of the full range. Observe again after movement. Foreground keys (including browser shortcuts) and clicks require operator authority and foreground: true. Stops at the first failed requirement. Optional feedback returns requested control updates tied to the base observation. No rollback or automatic replay."
     )]
     async fn act(
         &self,
@@ -354,7 +363,7 @@ impl Host {
 
     #[tool(
         name = "waitFor",
-        description = "Wait within one budget for an exact value, enabled state, element presence/absence, or disappearance of the exact window identity. Partial reads cannot prove absence. Window disappearance returns timestamped evidence without creating a replacement target."
+        description = "Wait within one budget for an exact value, enabled state, element presence/absence, web URL substring (urlContains), or disappearance of the exact window identity. Partial reads cannot prove absence. Window disappearance returns timestamped evidence without creating a replacement target."
     )]
     async fn wait_for(
         &self,

@@ -24,7 +24,7 @@ fn shared_valid_fixtures_decode_and_round_trip() {
     let paths = fixtures("valid");
     assert_eq!(
         paths.len(),
-        61,
+        66,
         "keep the shared fixture inventory deliberate"
     );
     for path in paths {
@@ -34,6 +34,19 @@ fn shared_valid_fixtures_decode_and_round_trip() {
         assert_eq!(encoded.last(), Some(&b'\n'));
         assert_eq!(decode_line(&encoded).unwrap(), frame, "{}", path.display());
     }
+}
+
+#[test]
+fn bundled_and_unbundled_targets_omit_absent_metadata() {
+    let frame = fixture("targets-response");
+    let encoded: serde_json::Value = serde_json::from_slice(&encode_line(&frame).unwrap()).unwrap();
+    let targets = encoded["message"]["body"]["data"]["targets"]
+        .as_array()
+        .unwrap();
+    assert_eq!(targets[0]["bundleId"], "com.apple.TextEdit");
+    assert!(targets[0].get("ownerName").is_none());
+    assert_eq!(targets[1]["ownerName"], "Window Fixture");
+    assert!(targets[1].get("bundleId").is_none());
 }
 
 #[test]
@@ -119,7 +132,7 @@ fn ocr_budget_accounts_for_json_escaping_not_only_text_bytes() {
 #[test]
 fn shared_invalid_fixtures_are_rejected() {
     let paths = fixtures("invalid");
-    assert_eq!(paths.len(), 90);
+    assert_eq!(paths.len(), 94);
     for path in paths {
         assert!(
             decode_line(&fs::read(&path).unwrap()).is_err(),

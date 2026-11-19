@@ -45,22 +45,19 @@ public struct FeedbackCollector: Sendable {
                     let label = exportString(snapshot.label, limit: 1024)
                     let identifier = exportString(snapshot.identifier, limit: 1024)
                     let subrole = exportString(snapshot.subrole, limit: 1024)
+                    let url = exportNonEmpty(snapshot.url, limit: Limits.maxUrlBytes)
                     let value = request.includeValues ? exportString(snapshot.value, limit: 65_536) : nil
                     if !snapshot.complete || !snapshot.enabledKnown || label != snapshot.label || identifier != snapshot.identifier
-                        || subrole != snapshot.subrole
+                        || subrole != snapshot.subrole || url != snapshot.url
                         || (request.includeValues && value != snapshot.value) { truncated = true }
-                    var actions: [ElementAction] = []
-                    if handle.backend is any AXMutating {
-                        if snapshot.valueSettable { actions.append(.setValue) }
-                        if snapshot.actions.contains("AXPress") { actions.append(.press) }
-                        if snapshot.selectedTextSettable { actions.append(.typeText) }
-                    }
+                    let actions = snapshot.availableActions(backend: handle.backend)
                     let current = Element(reference: reference, role: snapshot.role, label: label, value: value,
                         bounds: snapshot.bounds, enabled: snapshot.enabledKnown ? snapshot.enabled : nil, actions: actions,
-                        identifier: identifier, subrole: subrole)
+                        identifier: identifier, subrole: subrole, url: url)
                     let previous = Element(reference: original.reference, role: original.role, label: original.label,
                         value: request.includeValues ? original.value : nil, bounds: original.bounds,
-                        enabled: original.enabled, actions: original.actions, identifier: original.identifier, subrole: original.subrole)
+                        enabled: original.enabled, actions: original.actions, identifier: original.identifier, subrole: original.subrole,
+                        url: original.url)
                     feedback = current == previous
                         ? ControlFeedback(elementRef: reference, state: .unchanged)
                         : ControlFeedback(elementRef: reference, state: .changed, element: current)
@@ -89,4 +86,5 @@ private func bindingInvalidated(_ error: any Error) -> Bool {
         || error.code == .targetNotFound || error.code == .ambiguousTarget
 }
 private func exportString(_ string: String?, limit: Int) -> String? { string.flatMap { $0.utf8.count <= limit ? $0 : nil } }
+private func exportNonEmpty(_ string: String?, limit: Int) -> String? { string.flatMap { !$0.isEmpty && $0.utf8.count <= limit ? $0 : nil } }
 private func feedbackMilliseconds() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }

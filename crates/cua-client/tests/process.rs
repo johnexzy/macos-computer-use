@@ -87,12 +87,10 @@ async fn one_persistent_peer_uses_host_authority_and_rejects_public_control() {
     assert_eq!(client.epoch(), "helper-epoch-test");
     let pid = client.helper_pid();
     for expected in ["call-1", "call-2"] {
-        let ResponseBody::Targets(targets) = call(
-            &client,
-            RequestBody::Targets(TargetsRequest { bundle_id: None }),
-        )
-        .await
-        .body
+        let ResponseBody::Targets(targets) =
+            call(&client, RequestBody::Targets(TargetsRequest::default()))
+                .await
+                .body
         else {
             panic!()
         };
@@ -573,12 +571,10 @@ async fn queued_deadline_expires_without_waiting_for_another_call_or_dispatching
     assert_eq!(result.steps[0].delivery, Delivery::NotDispatched);
     assert_eq!(result.stop_reason, StopReason::DeadlineExceeded);
     assert!(active.await.unwrap().is_ok());
-    let ResponseBody::Targets(targets) = call(
-        &client,
-        RequestBody::Targets(TargetsRequest { bundle_id: None }),
-    )
-    .await
-    .body
+    let ResponseBody::Targets(targets) =
+        call(&client, RequestBody::Targets(TargetsRequest::default()))
+            .await
+            .body
     else {
         panic!()
     };
@@ -608,12 +604,10 @@ async fn precancelled_and_invalid_requests_never_reach_native_dispatch() {
         .unwrap_err();
     assert_eq!(error.kind, ClientErrorKind::InvalidRequest);
     assert!(error.uncertainty.is_none());
-    let ResponseBody::Targets(targets) = call(
-        &client,
-        RequestBody::Targets(TargetsRequest { bundle_id: None }),
-    )
-    .await
-    .body
+    let ResponseBody::Targets(targets) =
+        call(&client, RequestBody::Targets(TargetsRequest::default()))
+            .await
+            .body
     else {
         panic!()
     };

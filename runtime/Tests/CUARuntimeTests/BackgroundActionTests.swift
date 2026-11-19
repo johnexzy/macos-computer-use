@@ -25,12 +25,15 @@ private final class ActionClock: @unchecked Sendable {
     func now() -> UInt64 { lock.lock(); defer { lock.unlock() }; return value }
     func expire() { lock.lock(); value += UInt64(Limits.observationTTLMS) * 1_000_000; lock.unlock() }
 }
-private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchecked Sendable {
+private final class ActionBackend: AXReading, AXMutating, AXScrolling, WindowCatalog, @unchecked Sendable {
     enum Behavior { case apply, ignore, delayed, throwAfterWrite, readbackFailure, activate, activateBeforeDispatch, refuse, block }
     let app = ActionNode("AXApplication")
     let windowNode = ActionNode("AXWindow")
     let field = ActionNode("AXTextField")
     let button = ActionNode("AXButton")
+    let scrollArea = ActionNode("AXScrollArea")
+    let verticalBar = ActionNode("AXScrollBar")
+    let horizontalBar = ActionNode("AXScrollBar")
     let entered = DispatchSemaphore(value: 0)
     let release = DispatchSemaphore(value: 0)
     let lock = NSLock()
@@ -53,6 +56,9 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
     var unavailableAfterDispatchReads = 0
     var alwaysValueUnavailable = false
     var fieldPresent = true
+    var scrollAreaPresent = false
+    var verticalPosition = 0.5
+    var horizontalPosition: Double?
     var beforeHandoff: (@Sendable () -> Void)?
     private var foregroundReads = 0
     private var preimageReads = 0
@@ -75,10 +81,19 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
     func application(pid: UInt32, context: OperationContext) throws -> any AXObject { try context.check(); return app }
     func windows(of application: any AXObject, context: OperationContext) throws -> AXChildren { try context.check(); return AXChildren(elements: [windowNode]) }
     func children(of element: any AXObject, limit: Int, context: OperationContext) throws -> AXChildren {
-        try context.check(); return AXChildren(elements: same(element, windowNode) ? (fieldPresent ? [field, button] : [button]) : [])
+        try context.check()
+        if same(element, scrollArea) {
+            return AXChildren(elements: horizontalPosition == nil ? [verticalBar] : [verticalBar, horizontalBar])
+        }
+        guard same(element, windowNode) else { return AXChildren(elements: []) }
+        var children = fieldPresent ? [field, button] : [button]
+        if scrollAreaPresent { children.append(scrollArea) }
+        return AXChildren(elements: children)
     }
     func parent(of element: any AXObject, context: OperationContext) throws -> (any AXObject)? {
-        try context.check(); return same(element, app) ? nil : same(element, windowNode) ? app : windowNode
+        try context.check()
+        if same(element, verticalBar) || same(element, horizontalBar) { return scrollArea }
+        return same(element, app) ? nil : same(element, windowNode) ? app : windowNode
     }
     func window(of element: any AXObject, context: OperationContext) throws -> (any AXObject)? { try context.check(); return windowNode }
     func ownerPID(of element: any AXObject, context: OperationContext) throws -> UInt32 { try context.check(); return 42 }
@@ -117,7 +132,7 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
             selectedRange: isField ? selectedRange : nil,
             actions: role == "AXButton" && pressAdvertised ? ["AXPress"] : [], enabledUnsupported: enabledUnsupported)
     }
-    func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult { try context.check(); return TargetsResult(targets: [actionTarget], truncated: false) }
+    func targets(_ request: TargetsRequest, context: OperationContext) throws -> TargetsResult { try context.check(); return TargetsResult(targets: [actionTarget], truncated: false) }
     func window(_ key: TargetKey, context: OperationContext) throws -> Target { try context.check(); return actionTarget }
     func processWindows(pid: UInt32, context: OperationContext) throws -> [Target] { try context.check(); return [actionTarget] }
     private func mutate(_ expected: String?, context: OperationContext, willDispatch: @Sendable () throws -> Void) throws {
@@ -150,6 +165,19 @@ private final class ActionBackend: AXReading, AXMutating, WindowCatalog, @unchec
         let range = selectedRange.flatMap { Range(NSRange(location: $0.location, length: $0.length), in: before) }
         try mutate(range.map { before.replacingCharacters(in: $0, with: text) }, context: context, willDispatch: willDispatch)
     }
+    func scrollbar(in area: any AXObject, axis: Axis, context: OperationContext) throws -> AXScrollbar? {
+        try context.check()
+        guard scrollAreaPresent, same(area, scrollArea) else { return nil }
+        if axis == .vertical { return AXScrollbar(object: verticalBar, position: verticalPosition) }
+        return horizontalPosition.map { AXScrollbar(object: horizontalBar, position: $0) }
+    }
+    func setScrollPosition(_ position: Double, on scrollbar: any AXObject, context: OperationContext,
+                           willDispatch: @Sendable () throws -> Void) throws {
+        try mutate(nil, context: context, willDispatch: willDispatch)
+        if behavior == .ignore { return }
+        if same(scrollbar, verticalBar) { verticalPosition = position }
+        if same(scrollbar, horizontalBar) { horizontalPosition = position }
+    }
 }
 
 final class BackgroundActionTests: XCTestCase {
@@ -170,7 +198,9 @@ final class BackgroundActionTests: XCTestCase {
                 "field": RetainedAXElement(object: backend.field,
                     snapshot: AXNodeSnapshot(role: backend.field.role, bounds: actionTarget.bounds)),
                 "button": RetainedAXElement(object: backend.button,
-                    snapshot: AXNodeSnapshot(role: "AXButton", bounds: actionTarget.bounds))
+                    snapshot: AXNodeSnapshot(role: "AXButton", bounds: actionTarget.bounds)),
+                "scroll": RetainedAXElement(object: backend.scrollArea,
+                    snapshot: AXNodeSnapshot(role: "AXScrollArea", bounds: actionTarget.bounds))
             ])
         return RetainedObservation(observation: observation, handle: handle, createdAt: DispatchTime.now().uptimeNanoseconds)
     }
@@ -584,7 +614,54 @@ final class BackgroundActionTests: XCTestCase {
         backend.pressAdvertised = false
         let (unsupported, _) = try perform(backend, request(.press(ElementOperation(elementRef: "button"))))
         XCTAssertEqual(unsupported.steps[0].delivery, .notDispatched)
+        XCTAssertEqual(unsupported.steps[0].reason, .unsupported)
+        XCTAssertNil(unsupported.steps[0].route)
         XCTAssertEqual(backend.calls, 1)
+
+        backend.pressAdvertised = true
+        backend.behavior = .refuse
+        let (withdrawn, _) = try perform(backend, request(.press(ElementOperation(elementRef: "button"))))
+        XCTAssertEqual(withdrawn.steps[0].delivery, .notDispatched)
+        XCTAssertEqual(withdrawn.steps[0].reason, .unsupported)
+        XCTAssertEqual(backend.calls, 1)
+    }
+    func testScrollDispatchesOnceOnRequestedAxisAndConfirmsDirectionalMovement() throws {
+        let backend = ActionBackend(); backend.scrollAreaPresent = true; backend.horizontalPosition = 0.5
+        let act = request(.scroll(ScrollOperation(elementRef: "scroll", axis: .horizontal, amount: -250)))
+        let (result, _) = try perform(backend, act)
+        XCTAssertEqual(result.stopReason, .completed)
+        XCTAssertEqual(result.steps[0].delivery, .dispatched)
+        XCTAssertEqual(result.steps[0].route, .axScroll)
+        XCTAssertEqual(backend.horizontalPosition, 0.25)
+        XCTAssertEqual(backend.verticalPosition, 0.5)
+        XCTAssertEqual(backend.calls, 1)
+    }
+    func testIgnoredScrollWriteDoesNotCompleteOrRedispatch() throws {
+        let backend = ActionBackend(); backend.scrollAreaPresent = true; backend.behavior = .ignore
+        let act = request(.scroll(ScrollOperation(elementRef: "scroll", axis: .vertical, amount: 250)))
+        let (result, _) = try perform(backend, act, budget: 80)
+        XCTAssertEqual(result.stopReason, .deadlineExceeded)
+        XCTAssertEqual(result.steps[0].delivery, .dispatched)
+        XCTAssertEqual(backend.verticalPosition, 0.5)
+        XCTAssertEqual(backend.calls, 1)
+    }
+    func testScrollRefusesStaleAreaUnsupportedAxisAndBoundaryBeforeDispatch() throws {
+        let backend = ActionBackend()
+        let vertical = request(.scroll(ScrollOperation(elementRef: "scroll", axis: .vertical, amount: 250)))
+        let horizontal = request(.scroll(ScrollOperation(elementRef: "scroll", axis: .horizontal, amount: 250)))
+        let (stale, _) = try perform(backend, vertical)
+        XCTAssertEqual(stale.stopReason, .targetStale)
+        backend.scrollAreaPresent = true
+        let (unsupported, _) = try perform(backend, horizontal)
+        XCTAssertEqual(unsupported.stopReason, .unsupported)
+        backend.verticalPosition = 1
+        let (atEdge, _) = try perform(backend, vertical)
+        XCTAssertEqual(atEdge.stopReason, .verificationFailed)
+        for result in [stale, unsupported, atEdge] {
+            XCTAssertEqual(result.steps[0].delivery, .notDispatched)
+            XCTAssertNil(result.steps[0].route)
+        }
+        XCTAssertEqual(backend.calls, 0)
     }
     func testCapabilityEnabledGuardAndMultistepRefuseBeforeDispatch() throws {
         for option in 0..<4 {

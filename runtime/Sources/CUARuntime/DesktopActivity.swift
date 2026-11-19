@@ -12,6 +12,7 @@ struct DesktopActivity: Sendable {
         case written = "Text updated"
         case writingSent = "Text sent"
         case updated = "Control updated"
+        case scrolled = "Scrolled"
         case sent = "Action sent"
         case skipped = "Input skipped"
         case rechecking = "Rechecking target"
@@ -25,7 +26,7 @@ struct DesktopActivity: Sendable {
             case .updated: "Updated"
             case .skipped: "Skipped"
             case .rechecking: "Rechecking"
-            case .written, .writingSent, .sent, .check: rawValue
+            case .written, .writingSent, .scrolled, .sent, .check: rawValue
             }
         }
 
@@ -114,14 +115,16 @@ struct DesktopActivity: Sendable {
             case .imagePixels: screen = try? observation.visual?.frame?.imageToScreen.toScreen(input.point)
             }
             point = screen.map { CGPoint(x: $0.x, y: $0.y) }
-        case .scroll, .waitFor: return nil
+        case .scroll(let input): elementRef = input.elementRef; phase = .scrolled
+        case .scrollToVisible(let input): elementRef = input.elementRef; phase = .scrolled
+        case .waitFor: return nil
         }
         if let elementRef, let element = observation.elements.first(where: { $0.reference == elementRef }) {
             if case .setValue = step.operation, textRole(element.role) { phase = .written }
             point = anchor(control: element.bounds, window: observation.windowBounds, writing: phase.showsWriting)
         }
 
-        if receipt.verification == .unverified {
+        if receipt.verification == .unverified && phase != .scrolled {
             phase = phase.showsWriting ? .writingSent : .sent
         }
         return Self(target: observation.target, bounds: observation.windowBounds, phase: phase, point: point)

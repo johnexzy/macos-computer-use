@@ -42,13 +42,14 @@ the private Rust–Swift protocol has its own version and epoch.
 | --- | --- |
 | `capabilities` | Read permission booleans and installed mode without permission prompts; advertise semantic AX actions when available. An operator-authorized connection can advertise foreground keys and clicks after permission preflight. |
 | `targets` | Return at most 256 visible, layer-zero windows with bundle IDs and exact process/window keys. |
-| `observe` | Associate the exact CG target with one AX window and return at most 256 retained controls. Optional `axSelectors` scopes the read and reports query completeness. `eventHistory` retains bounded selected-state changes without historical action refs. Values, screenshots, and OCR are opt-in. |
-| `act` | Execute 1–16 ordered `setValue`, `typeText`, `press`, or read-only `waitFor` steps against the same target and original observation. Revalidate before each mutation and stop on failure or unknown delivery. Foreground key and click sequences require an explicit selector and operator authority. |
-| `waitFor` | Poll `elementExists`, `elementAbsent`, `enabled`, `valueEquals`, or `windowAbsent` within the original budget. Element waits return a fresh value-private observation; exact window absence returns its timed witness without a new observation. |
+| `observe` | Associate the exact CG target with one AX window (supporting Chromium `" - <Browser/Profile>"` suffixes and WindowServer middle-ellipsis truncation while staying fail-closed) and return at most 256 retained controls. Optional `axSelectors` scopes the read and reports query completeness. Unfiltered observations exceeding 256 elements prioritize visible interactive controls and `AXWebArea` roots. `AXWebArea` and `AXLink` elements expose live `url` metadata, and Chromium browsers lazily opt into `AXEnhancedUserInterface`. `eventHistory` retains bounded selected-state changes without historical action refs. Values, screenshots, and OCR are opt-in. |
+| `act` | Execute 1–16 ordered `setValue`, `typeText`, `press`, `scroll`, `scrollToVisible`, or read-only `waitFor` steps against the same target and original observation. Revalidate before each mutation and stop on failure or unknown delivery. Foreground key (control-scoped or window-scoped browser navigation shortcuts) and click sequences require an explicit selector and operator authority. |
+| `waitFor` | Poll `elementExists`, `elementAbsent`, `enabled`, `valueEquals`, `urlContains`, or `windowAbsent` within the original budget. Element and URL waits return a fresh value-private observation; exact window absence returns its timed witness without a new observation. |
 
-Scrolling remains unsupported. Composition has no branching, nested sequences, or target switching.
+Composition has no branching, nested sequences, or target switching.
 All mutations use the original retained refs; a presence wait does not issue refs
-for newly discovered controls. The wire format can
+for newly discovered controls. Run the disposable live Chrome benchmark with
+`npm run test:browser:live`. The wire format can
 represent more operations than this implementation executes. It does not route
 around missing capabilities through legacy selectors, activation, or global input.
 
@@ -203,14 +204,20 @@ Each issued reference retains the actual AX control, its observed role/subrole,
 and its raw AX identifier. Before a read or action, the runtime rechecks the exact CG target
 and metadata, the retained window's `CFEqual` membership in current AX windows,
 the control's PID and owning-window link or parent chain, bounded live-tree
-membership, and its role/subrole/identifier. Recreated objects, changed identity metadata,
+membership, and its role/subrole/identifier. A live parent chain whose child
+edges still contain the exact retained objects can prove membership without
+traversing unrelated sibling subtrees. Recreated objects, changed identity metadata,
 wrong-window refs, and stale session refs are refused. A genuine in-place reorder
 may move a control without invalidating it; mutable labels, values, and control
 bounds are not treated as identity. Same-role reuse with no changed identifier is
 not an observable native generation guarantee.
 
-Collection is bounded to 1,024 tree nodes and depth 32, with at most 256 returned
-elements. Unreadable metadata, unknown enabled states, traversal limits, and
+Collection is bounded to 1,024 tree nodes and at most 256 returned elements.
+The depth limit is 32 for full observations and 48 for selected scans.
+Explicit observations give visible branches priority over clipped descendants.
+The traversal still explores deferred branches when the budget permits, and
+reports partial coverage when it cannot finish them.
+Unreadable metadata, unknown enabled states, traversal limits, and
 export limits produce partial coverage. Enabled state is a required nullable field:
 `null` means unavailable, rather than observed disabled. Optional `subrole` identifies
 controls such as an unlabelled `AXCloseButton`. Exported labels, identifiers and subroles are capped

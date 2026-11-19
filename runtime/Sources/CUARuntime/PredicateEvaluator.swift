@@ -38,6 +38,22 @@ public struct PredicateEvaluator: Sendable {
             reference = value.elementRef
             let snapshot = try handle.resolve(value.elementRef, context: context).snapshot
             matched = snapshot.enabledKnown ? snapshot.enabled == value.enabled : nil
+        case .urlContains(let value):
+            reference = value.elementRef
+            if let ref = value.elementRef {
+                let snapshot = try handle.resolve(ref, allowTitleChange: true, context: context).snapshot
+                matched = snapshot.url.map { $0.contains(value.contains) }
+            } else {
+                let scan = try handle.scan(selectors: [CUAProtocol.Selector(role: "AXWebArea", label: nil, identifier: nil)],
+                                           includeValues: false, allowTitleChange: true, context: context)
+                if scan.nodes.contains(where: { $0.snapshot.url?.contains(value.contains) == true }) {
+                    matched = true
+                } else if scan.complete && scan.nodes.allSatisfy({ $0.snapshot.complete }) {
+                    matched = false
+                } else {
+                    matched = nil
+                }
+            }
         case .elementExists(let value), .elementAbsent(let value):
             reference = nil
             let scan = try handle.scan(context: context)

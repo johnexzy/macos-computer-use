@@ -11,6 +11,15 @@ public protocol AXMutating: Sendable {
                willDispatch: @Sendable () throws -> Void) throws
     func replaceSelectedText(_ text: String, on object: any AXObject, context: OperationContext,
                              willDispatch: @Sendable () throws -> Void) throws
+    func scrollToVisible(_ object: any AXObject, context: OperationContext,
+                         willDispatch: @Sendable () throws -> Void) throws
+}
+
+public extension AXMutating {
+    func scrollToVisible(_ object: any AXObject, context: OperationContext,
+                         willDispatch: @Sendable () throws -> Void) throws {
+        throw NativeFailure(.unsupported, "AXScrollToVisible is not supported by this backend")
+    }
 }
 
 public struct WaitEvaluation: Sendable {
@@ -74,27 +83,46 @@ public struct BackgroundActions: Sendable {
                     }
                 }
             }
-            let handle = try semanticHandle(entry, observationId: request.observationId, target: request.target)
-            let foreground = request.foreground ? try ForegroundControl(platform: foregroundPlatform, capture: coordinateCapture,
-                target: handle, context: context, state: state) : nil
+            let handle: SemanticObservationHandle?
+            let foreground: ForegroundControl?
+            if request.foreground, let visual = entry.handle as? VisualObservationHandle {
+                guard visual.observationId == request.observationId, visual.target.key == request.target,
+                      entry.observation.target == request.target else {
+                    throw NativeFailure(.staleObservation, "visual observation does not belong to this request")
+                }
+                guard request.steps.allSatisfy({ step in
+                    if case .click = step.operation { return step.precondition == nil && step.expect == nil }
+                    return false
+                }) else {
+                    throw NativeFailure(.unsupported, "visual observations support only foreground clicks without AX conditions")
+                }
+                handle = nil
+                foreground = try ForegroundControl(platform: foregroundPlatform, capture: coordinateCapture,
+                    target: .visual(visual), context: context, state: state)
+            } else {
+                let semantic = try semanticHandle(entry, observationId: request.observationId, target: request.target)
+                handle = semantic
+                foreground = request.foreground ? try ForegroundControl(platform: foregroundPlatform, capture: coordinateCapture,
+                    target: .semantic(semantic), context: context, state: state) : nil
+            }
             defer { foreground?.restore() }
             for step in request.steps {
                 try state.checkActive(context: context)
                 try checkLifetime(entry)
                 try foreground?.checkContext()
                 let reason: ReceiptReason?
-                if case .waitFor(let wait) = step.operation {
+                if case .waitFor(let wait) = step.operation, let handle {
                     reason = try waitStep(wait.condition, entry: entry, handle: handle, context: context,
                                           state: state, foreground: foreground)
                 } else if let foreground {
                     let already = try executeForeground(step, entry: entry, handle: handle, context: context,
                                                         state: state, control: foreground, activityOverlay: activityOverlay)
                     reason = already ? .alreadySatisfied : nil
-                } else {
+                } else if let handle {
                     let already = try execute(step, entry: entry, handle: handle, context: context,
                                               state: state, before: before, activityOverlay: activityOverlay)
                     reason = already ? .alreadySatisfied : nil
-                }
+                } else { throw NativeFailure(.unsupported, "action requires a semantic observation") }
                 try foreground?.checkContext()
                 if before != nil { try checkForeground(before, targetPID: request.target.pid) }
                 if let prefix = try state.settle(context: context, reason: reason), let progress {
@@ -158,7 +186,7 @@ public struct BackgroundActions: Sendable {
         }
     }
 
-    private func executeForeground(_ step: ActionStep, entry: RetainedObservation, handle: SemanticObservationHandle,
+    private func executeForeground(_ step: ActionStep, entry: RetainedObservation, handle: SemanticObservationHandle?,
                                    context: OperationContext, state: ActionExecutionState, control: ForegroundControl,
                                    activityOverlay: DesktopActivityOverlay?) throws -> Bool {
         let route: DeliveryRoute
@@ -169,7 +197,7 @@ public struct BackgroundActions: Sendable {
         }
         func checkGuard() throws {
             guard let condition = step.precondition else { return }
-            guard let check = try evaluate(condition, handle: handle, context: context) else {
+            guard let handle, let check = try evaluate(condition, handle: handle, context: context) else {
                 throw NativeFailure(.unsupported, "foreground precondition cannot be read")
             }
             if !check.matched {
@@ -179,14 +207,14 @@ public struct BackgroundActions: Sendable {
             }
         }
         try checkGuard()
-        if let expected = step.expect, let check = try evaluate(expected, handle: handle, context: context), check.matched {
+        if let expected = step.expect, let handle, let check = try evaluate(expected, handle: handle, context: context), check.matched {
             state.checked([check], verification: .confirmed)
             return true
         }
 
         let approach: ((Point) throws -> Void)? = activityOverlay.map { overlay in
             { point in
-                _ = try overlay.approach(.approaching(handle.target, screenPoint: point), context: context)
+                _ = try overlay.approach(.approaching(control.window, screenPoint: point), context: context)
                 try checkLifetime(entry)
             }
         }
@@ -195,7 +223,7 @@ public struct BackgroundActions: Sendable {
             try state.beginDispatch(context: context, route: route)
         }
         state.returnedSuccessfully()
-        guard let expected = step.expect else { return false }
+        guard let expected = step.expect, let handle else { return false }
         while true {
             try context.check()
             try checkLifetime(entry)
@@ -218,13 +246,27 @@ public struct BackgroundActions: Sendable {
         case .setValue(let value): reference = value.elementRef; route = .axSetValue
         case .press(let value): reference = value.elementRef; route = .axPress
         case .typeText(let value): reference = value.elementRef; route = .axSelectedText
+        case .scroll(let value): reference = value.elementRef; route = .axScroll
+        case .scrollToVisible(let value): reference = value.elementRef; route = .axScrollToVisible
         default: throw NativeFailure(.unsupported, "background operation is not implemented")
         }
-        let resolved = try handle.resolve(reference, includeValue: true, context: context)
-        try requireEnabledSnapshot(resolved.snapshot, allowUnsupported: route != .axPress)
+        let resolved = try handle.resolve(reference, includeValue: route != .axScroll && route != .axScrollToVisible, context: context)
+        if route == .axScroll {
+            guard resolved.snapshot.availableActions(backend: handle.backend).contains(.scroll),
+                  !resolved.snapshot.enabledKnown || resolved.snapshot.enabled else {
+                throw NativeFailure(.unsupported, "scroll requires a live AX scroll area")
+            }
+        } else if route == .axScrollToVisible {
+            guard resolved.snapshot.actions.contains("AXScrollToVisible"),
+                  !resolved.snapshot.enabledKnown || resolved.snapshot.enabled else {
+                throw NativeFailure(.unsupported, "AXScrollToVisible is not advertised or target is disabled")
+            }
+        } else {
+            try requireEnabledSnapshot(resolved.snapshot, allowUnsupported: route != .axPress)
+        }
         switch step.operation {
         case .setValue: guard resolved.snapshot.valueSettable else { throw NativeFailure(.unsupported, "AXValue is not settable") }
-        case .press: guard resolved.snapshot.actions.contains("AXPress") else { throw NativeFailure(.unsupported, "AXPress is not advertised") }
+        case .press: guard resolved.snapshot.actions.contains(kAXPressAction as String) else { throw NativeFailure(.unsupported, "AXPress is not advertised") }
         case .typeText: guard resolved.snapshot.selectedTextSettable else { throw NativeFailure(.unsupported, "AXSelectedText is not settable") }
         default: break
         }
@@ -280,7 +322,13 @@ public struct BackgroundActions: Sendable {
         if approached && live.snapshot.bounds != resolved.snapshot.bounds {
             throw NativeFailure(.staleElement, "control moved during visual approach")
         }
-        try requireEnabledSnapshot(live.snapshot, allowUnsupported: route != .axPress)
+        if route == .axScroll || route == .axScrollToVisible {
+            if live.snapshot.enabledKnown && !live.snapshot.enabled {
+                throw NativeFailure(.unsupported, "scroll target is disabled")
+            }
+        } else {
+            try requireEnabledSnapshot(live.snapshot, allowUnsupported: route != .axPress)
+        }
         if typing && (live.snapshot.value != resolved.snapshot.value || live.snapshot.selectedRange != resolved.snapshot.selectedRange) {
             throw NativeFailure(.staleElement, "text value or selection changed before dispatch")
         }
@@ -309,9 +357,18 @@ public struct BackgroundActions: Sendable {
                 try writer.press(resolved.object, context: context, willDispatch: handoff)
             case .typeText(let value):
                 try writer.replaceSelectedText(value.text, on: resolved.object, context: context, willDispatch: handoff)
+            case .scroll(let value):
+                let moved = try scroll(value, area: live.object, handle: handle, entry: entry, state: state,
+                                       context: context, before: before, willDispatch: handoff)
+                if !moved {
+                    state.finish(reason: .verificationFailed, stop: .verificationFailed)
+                    return false
+                }
+            case .scrollToVisible:
+                try writer.scrollToVisible(resolved.object, context: context, willDispatch: handoff)
             default: break
             }
-            state.returnedSuccessfully()
+            if route != .axScroll { state.returnedSuccessfully() }
         } catch let error as NativeFailure { mutationFailure = error }
         catch { mutationFailure = NativeFailure(.nativeFailed, "native action returned an error") }
         if !state.hasEnteredDispatch, let mutationFailure { throw mutationFailure }
@@ -339,6 +396,37 @@ public struct BackgroundActions: Sendable {
                 if let mutationFailure { throw mutationFailure }
                 try checkForeground(before, targetPID: handle.target.key.pid)
             }
+            try pause(context)
+        }
+    }
+
+    private func scroll(_ operation: ScrollOperation, area: any AXObject, handle: SemanticObservationHandle,
+                        entry: RetainedObservation, state: ActionExecutionState, context: OperationContext, before: UInt32?,
+                        willDispatch: @Sendable () throws -> Void) throws -> Bool {
+        guard let scroller = handle.backend as? any AXScrolling,
+              let initial = try scroller.scrollbar(in: area, axis: operation.axis, context: context) else {
+            throw NativeFailure(.unsupported, "axis has no readable, writable scrollbar")
+        }
+        let requested = min(1, max(0, initial.position + Double(operation.amount) / 1000))
+        guard requested != initial.position else { return false }
+        try handle.validateOwner(of: initial.object, context: context)
+        try handle.validateWindow(context: context)
+        try scroller.setScrollPosition(requested, on: initial.object, context: context, willDispatch: willDispatch)
+        state.returnedSuccessfully()
+        while true {
+            try context.check()
+            try checkLifetime(entry)
+            try checkForeground(before, targetPID: handle.target.key.pid)
+            do {
+                guard let current = try scroller.scrollbar(in: area, axis: operation.axis, context: context),
+                      handle.backend.same(current.object, initial.object) else {
+                    throw NativeFailure(.staleElement, "scrollbar changed before readback")
+                }
+                if operation.amount > 0 ? current.position > initial.position : current.position < initial.position {
+                    try handle.validateWindow(context: context)
+                    return true
+                }
+            } catch is AXReadUnavailable { /* A transient AX read can be repeated. */ }
             try pause(context)
         }
     }
@@ -425,9 +513,7 @@ extension MacOSAXBackend: AXMutating {
         let element = try nativeElement(object, context: context)
         try requireEnabled(element, allowUnsupported: false, context: context)
         try installTimeout(element, context: context)
-        var names: CFArray?
-        guard AXUIElementCopyActionNames(element, &names) == .success,
-              (names as? [String])?.contains(kAXPressAction as String) == true else {
+        guard try readAXActionNames(element, context: context).contains(kAXPressAction as String) else {
             throw NativeFailure(.unsupported, "AXPress is not currently advertised")
         }
         try installTimeout(element, context: context)
@@ -445,6 +531,26 @@ extension MacOSAXBackend: AXMutating {
         try willDispatch()
         guard AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) == .success else {
             throw NativeFailure(.nativeFailed, "AXSelectedText replacement returned an error")
+        }
+    }
+    public func scrollToVisible(_ object: any AXObject, context: OperationContext,
+                                willDispatch: @Sendable () throws -> Void) throws {
+        let element = try nativeElement(object, context: context)
+        try installTimeout(element, context: context)
+        var enabledValue: CFTypeRef?
+        let enabledResult = AXUIElementCopyAttributeValue(element, kAXEnabledAttribute as CFString, &enabledValue)
+        let enabled = try decodeAXEnabled(enabledResult, value: enabledValue, context: context)
+        if enabled.value == false {
+            throw NativeFailure(.unsupported, "AX target is disabled")
+        }
+        try installTimeout(element, context: context)
+        guard try readAXActionNames(element, context: context).contains("AXScrollToVisible") else {
+            throw NativeFailure(.unsupported, "AXScrollToVisible is not currently advertised")
+        }
+        try installTimeout(element, context: context)
+        try willDispatch()
+        guard AXUIElementPerformAction(element, "AXScrollToVisible" as CFString) == .success else {
+            throw NativeFailure(.nativeFailed, "AXScrollToVisible returned an error")
         }
     }
 }

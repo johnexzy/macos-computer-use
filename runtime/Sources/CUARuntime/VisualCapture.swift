@@ -52,7 +52,7 @@ struct ScreenWindowCapture: VisualCapturing {
         guard matches.count == 1, let window = matches.first, let app = window.owningApplication else {
             throw fail(.unavailable, "Exact window is unavailable for capture")
         }
-        guard app.bundleIdentifier.isEmpty || app.bundleIdentifier == target.bundleId else {
+        if let bundleId = target.bundleId, !app.bundleIdentifier.isEmpty, app.bundleIdentifier != bundleId {
             throw fail(.geometryChanged, "Capture application identity changed")
         }
         guard visualRect(window.frame) == before.bounds else { throw fail(.geometryChanged, "Window geometry changed before capture") }

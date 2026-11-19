@@ -7,8 +7,99 @@ public final class NativeAXObject: AXObject, @unchecked Sendable {
     public init(_ element: AXUIElement) { self.element = element }
 }
 
-public struct MacOSAXBackend: AXReading {
+struct AXScrollbar: Sendable {
+    let object: any AXObject
+    let position: Double
+}
+
+protocol AXScrolling: AXMutating {
+    func scrollbar(in area: any AXObject, axis: Axis, context: OperationContext) throws -> AXScrollbar?
+    func setScrollPosition(_ position: Double, on scrollbar: any AXObject, context: OperationContext,
+                           willDispatch: @Sendable () throws -> Void) throws
+}
+
+func readAXActionNames(_ element: AXUIElement, context: OperationContext) throws -> [String] {
+    var names: CFArray?
+    let result = AXUIElementCopyActionNames(element, &names)
+    try checkAXRead(result, context: context, allowMissing: true)
+    return result == .success ? (names as? [String] ?? []) : []
+}
+
+func boundedAXActionNames(_ actions: [String]) -> [String] {
+    let limit = 32
+    guard actions.count > limit else { return actions }
+    let priority = [kAXPressAction as String, "AXScrollToVisible"].filter { actions.contains($0) }
+    var selected: [String] = []
+    for name in priority where !selected.contains(name) { selected.append(name) }
+    for name in actions where !selected.contains(name) {
+        if selected.count == limit { break }
+        selected.append(name)
+    }
+    return selected
+}
+
+private final class BrowserAccessibilityRegistry: @unchecked Sendable {
+    static let shared = BrowserAccessibilityRegistry()
+    private static let chromiumBrowserBundles: Set<String> = [
+        "com.google.Chrome",
+        "com.google.Chrome.beta",
+        "com.google.Chrome.dev",
+        "com.google.Chrome.canary",
+        "org.chromium.Chromium",
+        "com.brave.Browser",
+        "com.microsoft.edgemac",
+        "company.thebrowser.Browser",
+        "company.thebrowser.dia",
+        "com.operasoftware.Opera",
+        "com.vivaldi.Vivaldi",
+        "com.kagi.kagimacOS",
+    ]
+    private let lock = NSLock()
+    private var preparedPIDs: Set<UInt32> = []
+
+    static func isChromiumBrowser(_ bundleId: String?) -> Bool {
+        guard let bundleId else { return false }
+        return chromiumBrowserBundles.contains(bundleId)
+    }
+
+    func alreadyPrepared(_ pid: UInt32) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return preparedPIDs.contains(pid)
+    }
+
+    func markPrepared(_ pid: UInt32) {
+        lock.lock(); defer { lock.unlock() }
+        if preparedPIDs.count >= 64 { preparedPIDs.removeAll(keepingCapacity: true) }
+        preparedPIDs.insert(pid)
+    }
+}
+
+public struct MacOSAXBackend: AXReading, AXScrolling {
     public init() {}
+    public func prepareBrowserAccessibility(application: any AXObject, bundleId: String?, context: OperationContext) throws -> Bool {
+        try context.check()
+        guard BrowserAccessibilityRegistry.isChromiumBrowser(bundleId) else { return false }
+        let pid = try ownerPID(of: application, context: context)
+        if BrowserAccessibilityRegistry.shared.alreadyPrepared(pid) { return false }
+        let app = try prepared(application, context: context)
+        var current: CFTypeRef?
+        let readResult = AXUIElementCopyAttributeValue(app, "AXEnhancedUserInterface" as CFString, &current)
+        if readResult == .success, let flag = current as? NSNumber, flag.boolValue {
+            BrowserAccessibilityRegistry.shared.markPrepared(pid)
+            return false
+        }
+        let setResult = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        // Chromium's BrowserCrApplication enables full web accessibility on AXEnhancedUserInterface
+        // and may return .success or .notImplemented/.attributeUnsupported.
+        switch setResult {
+        case .success, .notImplemented, .attributeUnsupported:
+            BrowserAccessibilityRegistry.shared.markPrepared(pid)
+            return true
+        default:
+            try checkAXRead(setResult, context: context, allowMissing: true)
+            return false
+        }
+    }
     public func application(pid: UInt32, context: OperationContext) throws -> any AXObject {
         try context.check()
         guard AXIsProcessTrusted() else { throw NativeFailure(.permissionDenied, "Accessibility permission is unavailable") }
@@ -25,6 +116,9 @@ public struct MacOSAXBackend: AXReading {
     public func parent(of element: any AXObject, context: OperationContext) throws -> (any AXObject)? {
         try objectAttribute(element, kAXParentAttribute as CFString, context: context)
     }
+    public func focusedElement(of application: any AXObject, context: OperationContext) throws -> (any AXObject)? {
+        try objectAttribute(application, kAXFocusedUIElementAttribute as CFString, context: context)
+    }
     public func window(of element: any AXObject, context: OperationContext) throws -> (any AXObject)? {
         try objectAttribute(element, kAXWindowAttribute as CFString, context: context)
     }
@@ -39,22 +133,45 @@ public struct MacOSAXBackend: AXReading {
         guard let lhs = lhs as? NativeAXObject, let rhs = rhs as? NativeAXObject else { return false }
         return CFEqual(lhs.element, rhs.element)
     }
+    func scrollbar(in area: any AXObject, axis: Axis, context: OperationContext) throws -> AXScrollbar? {
+        let name = axis == .vertical ? kAXVerticalScrollBarAttribute : kAXHorizontalScrollBarAttribute
+        let value = kAXValueAttribute as CFString
+        guard let bar = try objectAttribute(area, name as CFString, context: context),
+              try string(bar, kAXRoleAttribute as CFString, context: context) == kAXScrollBarRole as String,
+              try isSettable(bar, value, context: context),
+              let raw = try attribute(bar, value, context: context), CFGetTypeID(raw) == CFNumberGetTypeID(),
+              let number = raw as? NSNumber, (0...1).contains(number.doubleValue) else { return nil }
+        return AXScrollbar(object: bar, position: number.doubleValue)
+    }
+    func setScrollPosition(_ position: Double, on scrollbar: any AXObject, context: OperationContext,
+                           willDispatch: @Sendable () throws -> Void) throws {
+        let bar = try prepared(scrollbar, context: context)
+        try willDispatch()
+        guard AXUIElementSetAttributeValue(bar, kAXValueAttribute as CFString, NSNumber(value: position)) == .success else {
+            throw NativeFailure(.nativeFailed, "AX scrollbar setter returned an error")
+        }
+    }
     public func identity(of element: any AXObject, context: OperationContext) throws -> AXElementIdentity? {
         guard let role = try string(element, kAXRoleAttribute as CFString, context: context) else { return nil }
         return AXElementIdentity(role: role, identifier: try string(element, kAXIdentifierAttribute as CFString, context: context),
             subrole: try string(element, kAXSubroleAttribute as CFString, context: context))
     }
+    public func bounds(of element: any AXObject, context: OperationContext) throws -> Rect? {
+        var raw: CFArray?
+        let attributes = [kAXPositionAttribute, kAXSizeAttribute] as CFArray
+        let result = AXUIElementCopyMultipleAttributeValues(try prepared(element, context: context), attributes, [], &raw)
+        try checkAXRead(result, context: context, allowMissing: true)
+        guard result == .success, let values = raw as? [CFTypeRef], values.count == 2 else { return nil }
+        return decodeBounds(position: values[0], size: values[1], allowClippedZeroAxis: true)
+    }
+
     public func snapshot(of element: any AXObject, includeValue: Bool, context: OperationContext) throws -> AXNodeSnapshot? {
         guard let role = try string(element, kAXRoleAttribute as CFString, context: context),
               let position = try attribute(element, kAXPositionAttribute as CFString, context: context),
-              let size = try attribute(element, kAXSizeAttribute as CFString, context: context),
-              CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
-        var point = CGPoint.zero
-        var dimensions = CGSize.zero
-        guard AXValueGetValue(position as! AXValue, .cgPoint, &point),
-              AXValueGetValue(size as! AXValue, .cgSize, &dimensions),
-              [point.x, point.y, dimensions.width, dimensions.height].allSatisfy(\.isFinite),
-              dimensions.width > 0, dimensions.height > 0 else { return nil }
+              let size = try attribute(element, kAXSizeAttribute as CFString, context: context) else { return nil }
+        let actions = try readAXActionNames(prepared(element, context: context), context: context)
+        let allowClippedZeroAxis = role != "AXWindow" && actions.contains("AXScrollToVisible")
+        guard let bounds = decodeBounds(position: position, size: size, allowClippedZeroAxis: allowClippedZeroAxis) else { return nil }
         let title = try string(element, kAXTitleAttribute as CFString, context: context)
         var descriptionValue: CFTypeRef?
         let descriptionResult = AXUIElementCopyAttributeValue(try prepared(element, context: context),
@@ -78,22 +195,37 @@ public struct MacOSAXBackend: AXReading {
                 range = AXTextRange(location: selected.location, length: selected.length)
             }
         }
-        var actionNames: CFArray?
-        let result = AXUIElementCopyActionNames(try prepared(element, context: context), &actionNames)
-        try checkAXRead(result, context: context, allowMissing: true)
-        let actions = actionNames as? [String] ?? []
+        let rawUrl = (role == "AXWebArea" || role == "AXLink") ? try urlString(element, context: context) : nil
+        let boundedUrl = rawUrl.flatMap { !$0.isEmpty && $0.utf8.count <= Limits.maxUrlBytes ? $0 : nil }
         let rawLabel = [title, description.value].compactMap { $0 }.first { !$0.isEmpty }
         let label = rawLabel.flatMap { $0.utf8.count <= 1024 ? $0 : nil }
         let boundedValue = value.flatMap { $0.utf8.count <= 65_536 ? $0 : nil }
         return AXNodeSnapshot(role: role, title: title, label: label, identifier: rawIdentifier,
-            bounds: Rect(x: point.x, y: point.y, width: dimensions.width, height: dimensions.height),
+            bounds: bounds,
             enabled: enabled.value ?? false, enabledKnown: enabled.value != nil, value: boundedValue,
             valueSettable: settable, selectedTextSettable: textSettable, selectedRange: range,
-            actions: Array(actions.prefix(32)),
+            actions: boundedAXActionNames(actions),
             complete: description.complete && enabled.completeForTraversal && rawLabel == label
                 && (rawIdentifier?.utf8.count ?? 0) <= 1024 && (subrole?.utf8.count ?? 0) <= 1024
-                && value == boundedValue && actions.count <= 32,
-            subrole: subrole, enabledUnsupported: enabled.unsupported)
+                && rawUrl == boundedUrl && value == boundedValue && actions.count <= 32,
+            subrole: subrole, enabledUnsupported: enabled.unsupported, url: boundedUrl)
+    }
+
+    private func decodeBounds(position: CFTypeRef, size: CFTypeRef, allowClippedZeroAxis: Bool = false) -> Rect? {
+        guard CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+        var point = CGPoint.zero
+        var dimensions = CGSize.zero
+        guard AXValueGetValue(position as! AXValue, .cgPoint, &point),
+              AXValueGetValue(size as! AXValue, .cgSize, &dimensions),
+              [point.x, point.y, dimensions.width, dimensions.height].allSatisfy(\.isFinite) else { return nil }
+        if allowClippedZeroAxis {
+            guard dimensions.width >= 0, dimensions.height >= 0 else { return nil }
+            // Chromium clips off-screen scrollable web elements to 0 on the clipped axis; clamp
+            // to 1pt so they stay representable, remain classified as clipped, and can receive AXScrollToVisible.
+            return Rect(x: point.x, y: point.y, width: max(1, dimensions.width), height: max(1, dimensions.height))
+        }
+        guard dimensions.width > 0, dimensions.height > 0 else { return nil }
+        return Rect(x: point.x, y: point.y, width: dimensions.width, height: dimensions.height)
     }
 
     private func prepared(_ object: any AXObject, context: OperationContext) throws -> AXUIElement {
@@ -112,6 +244,12 @@ public struct MacOSAXBackend: AXReading {
         guard let value = try attribute(object, name, context: context) else { return nil }
         if let string = value as? String { return string }
         if let number = value as? NSNumber { return number.stringValue }
+        return nil
+    }
+    private func urlString(_ object: any AXObject, context: OperationContext) throws -> String? {
+        guard let value = try attribute(object, kAXURLAttribute as CFString, context: context) else { return nil }
+        if let url = value as? URL { return url.absoluteString.isEmpty ? nil : url.absoluteString }
+        if let string = value as? String { return string.isEmpty ? nil : string }
         return nil
     }
     private func objectAttribute(_ object: any AXObject, _ name: CFString, context: OperationContext) throws -> (any AXObject)? {
