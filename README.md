@@ -8,6 +8,8 @@ A native **Model Context Protocol (MCP)** server for macOS inspection and deskto
 
 The Rust + Swift rebuild runs alongside the existing Node/Swift server. It now supports semantic observations and a narrow background action path. The [native installation and migration guide](docs/native-delivery.md) covers the standalone universal archive, client configuration, compatibility gaps, rollback and release checks; its end-user binaries require no Node or local compiler.
 
+For a drag-and-drop local install, see the [native disk image and setup instructions](docs/native-delivery.md#install-from-a-disk-image).
+
 - [Legacy baseline and measurement boundaries](docs/baseline.md) (PER-1)
 - [Disposable two-window macOS fixture](docs/fixture.md)
 - [Rust–Swift protocol and conformance contract](docs/protocol.md) (PER-2)

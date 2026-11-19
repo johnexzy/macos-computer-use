@@ -6,6 +6,31 @@ together and configure the absolute path to `cua-host`; its working directory ca
 be anywhere, including a path containing spaces. Installation does not start a
 daemon or replace the existing npm server.
 
+## Install from a disk image
+
+Open the local review DMG and drag **macOS Computer Use.app** into
+**Applications**. Double-click the installed app and choose **Copy MCP
+Configuration**. Merge the copied server entry into your MCP client
+configuration and reconnect the client. The setup window uses the app's actual
+installed path and enables the activity badge and live preview. The MCP client
+launches the runtime when it connects.
+
+The command in the copied configuration is typically
+`/Applications/macOS Computer Use.app/Contents/MacOS/cua-host`. The helper
+ships next to it inside the app. Permission preflight runs in the MCP client's
+launch context. See the permission guidance below if a capability is unavailable.
+
+Build the DMG and its SHA-256 checksum with:
+
+```sh
+sh scripts/package-dmg.sh
+```
+
+The default output directory is `.artifacts/dmg-dist`. The script also accepts a
+different output directory. The image and its app are intended for local
+review. The app is ad-hoc signed. Public distribution requires a Developer ID
+Application identity and [Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
+
 ## Supported targets and evidence
 
 The deployment target remains **macOS 13.0**, on **Apple Silicon and Intel**.
