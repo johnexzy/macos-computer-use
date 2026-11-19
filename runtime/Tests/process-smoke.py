@@ -69,13 +69,18 @@ try:
     assert rejected["body"]["data"]["code"] == "targetNotFound"
     screenshot = call(process, request("screenshot", "observe", {"target": target,
         "includeValues": False, "includeScreenshot": True}, epoch))
-    assert screenshot["body"]["data"]["code"] == "unsupported"
+    assert screenshot["body"]["result"] == "error"
+    assert screenshot["body"]["data"]["code"] == "targetNotFound"
     actions = [{"actionId": name, "operation": {"kind": "press", "params": {"elementRef": "not-a-live-element"}},
                 "precondition": None, "expect": None} for name in ("first", "second")]
     rejected_act = call(process, request("act", "act", {"grantId": "smoke-grant", "observationId": "not-a-live-observation",
         "target": target, "steps": actions}, epoch))["body"]
-    assert rejected_act["result"] == "error"
-    assert rejected_act["data"]["code"] == "staleObservation"
+    assert rejected_act["result"] == "act"
+    refusal = rejected_act["data"]
+    assert refusal["observationId"] == "not-a-live-observation"
+    assert refusal["stopReason"] == "targetStale" and refusal["remainingSteps"] == 1
+    assert refusal["steps"] == [{"actionId": "first", "delivery": "not_dispatched",
+        "verification": "unverified", "reason": "targetStale", "evidence": [], "route": None}]
     stale = call(process, request("stale", "capabilities", {}, "old-epoch"))
     assert stale["body"]["data"]["code"] == "staleEpoch"
     process.stdin.close()

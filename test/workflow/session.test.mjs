@@ -258,6 +258,9 @@ test("fresh references cannot replay an unknown mutation, while a settled visibl
     if (mode === "lost") throw new Error("Helper lost");
     if (mode === "host_refusal") return { isError: true, content: [], structuredContent: { version: 1, route: "rust_host",
       delivery: "not_dispatched", verification: "unverified", error: { code: "deadlineExceeded" } } };
+    if (mode === "stale_refusal") return { ...reply("act", { observationId: args.observationId, remainingSteps: 0, stopReason: "targetStale",
+      steps: [{ actionId: "write", delivery: "not_dispatched", verification: "unverified", reason: "targetStale", evidence: [] }] }), isError: true };
+    if (mode === "bare_stale_error") return { ...reply("error", { code: "staleObservation" }), isError: true };
     if (!state.events.length) state.events.push({ kind: "validation_cleared", id, generation: 1 });
     return reply("act", { observationId: args.observationId, remainingSteps: 0, stopReason: "deadlineExceeded",
       steps: [{ actionId: "write", delivery: "dispatched", verification: "mismatch", reason: "deadlineExceeded", evidence: [{ matched: false }] }] });
@@ -281,4 +284,21 @@ test("fresh references cannot replay an unknown mutation, while a settled visibl
   assert.equal((await attempt(corrected)).structuredContent.body.result, "act");
   assert.equal((await attempt(corrected)).isError, true);
   assert.equal(acts, 4);
+
+  mode = "stale_refusal";
+  const expired = makeLane();
+  assert.equal((await attempt(expired)).isError, true);
+  assert.equal(expired.ledger.get(id).delivery, "not_dispatched");
+  const expiredObservation = expired.calls.at(-1).args.observationId;
+  mode = "dispatched";
+  assert.equal((await attempt(expired)).structuredContent.body.data.steps[0].delivery, "dispatched");
+  assert.notEqual(expired.calls.at(-1).args.observationId, expiredObservation);
+  assert.equal(acts, 6);
+
+  mode = "bare_stale_error";
+  const unproven = makeLane();
+  assert.equal((await attempt(unproven)).isError, true);
+  assert.equal(unproven.ledger.get(id).delivery, "unknown");
+  assert.equal((await attempt(unproven)).isError, true);
+  assert.equal(acts, 7);
 });

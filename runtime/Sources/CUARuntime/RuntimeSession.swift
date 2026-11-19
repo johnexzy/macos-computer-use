@@ -218,7 +218,12 @@ public final class RuntimeSession: @unchecked Sendable {
             if emitProgress == nil && act.steps.count > 1 && act.steps.contains(where: {
                 if case .waitFor = $0.operation { return false }; return true
             }) { return NativeResult(rejectedAct(act, reason: .unsupported, stop: .unsupported)) }
-            let retained = try observations.lookup(act.observationId, epoch: epoch, target: act.target)
+            let retained: RetainedObservation
+            do {
+                retained = try observations.lookup(act.observationId, epoch: epoch, target: act.target)
+            } catch let failure as NativeFailure where failure.code == .staleObservation {
+                return NativeResult(rejectedAct(act, reason: .targetStale, stop: .targetStale))
+            }
             guard let execution else { throw NativeFailure(.nativeFailed, "action state unavailable") }
             let progress: BackgroundActions.ProgressSink?
             if let emitProgress {

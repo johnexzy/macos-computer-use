@@ -270,6 +270,13 @@ that the action produced it. Delivery `unknown` never becomes `dispatched` merel
 because the desired state is present. Fresh wait/observe reconciliation can add
 state evidence without rewriting the original delivery history.
 
+If an `act` observation has expired or does not belong to the requested
+target, the runtime rejects it before execution with a `targetStale` receipt.
+The receipt marks the first step `not_dispatched` and leaves the remaining steps
+unsent. A client can observe the target again and propose those steps using fresh
+references. If an action ran before the target went stale, use its recorded
+delivery and reconcile the observed state before proposing another action.
+
 A successful read-only wait step always has `not_dispatched`, `confirmed`, no
 route, and timed evidence for its own condition. `alreadySatisfied` means the first
 check matched; `conditionSatisfied` means a later check matched. Both are successful
