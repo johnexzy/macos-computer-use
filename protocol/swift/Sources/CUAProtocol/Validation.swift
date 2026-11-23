@@ -30,14 +30,69 @@ private func channelInterval(_ channel: CollectionInterval, within total: Collec
     try require(channel.startedUnixMs >= total.startedUnixMs && channel.finishedUnixMs <= total.finishedUnixMs,
                 "channel interval outside observation")
 }
+private func isForegroundRoute(_ route: DeliveryRoute) -> Bool {
+    switch route {
+    case .foregroundKey, .foregroundClick, .foregroundDoubleClick, .foregroundRightClick,
+         .foregroundHover, .foregroundDrag, .foregroundHotkey, .foregroundTypeKeys:
+        return true
+    default:
+        return false
+    }
+}
+private func isForegroundOperation(_ operation: Operation) -> Bool {
+    switch operation {
+    case .key, .click, .doubleClick, .rightClick, .hover, .drag, .hotkey, .typeKeys:
+        return true
+    default:
+        return false
+    }
+}
+public func isValidHotkeyName(_ key: String) -> Bool {
+    let valid: Set<String> = [
+        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+        "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+        "minus", "equal", "leftBracket", "rightBracket", "backslash", "semicolon",
+        "quote", "comma", "period", "slash", "grave", "space",
+        "return", "tab", "escape", "backspace", "delete",
+        "left", "right", "up", "down", "home", "end", "pageUp", "pageDown",
+        "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+    ]
+    return valid.contains(key)
+}
+private func validOpenUrl(_ url: String) throws {
+    try require(!url.isEmpty && url.utf8.count <= Limits.maxUrlBytes && !url.utf8.contains { $0 <= 0x20 || $0 == 0x7f },
+                "invalid open URL")
+    guard let colon = url.firstIndex(of: ":") else { throw ContractError("open URL requires a scheme") }
+    let scheme = url[..<colon]
+    let rest = url[url.index(after: colon)...]
+    guard let first = scheme.utf8.first, (65...90).contains(first) || (97...122).contains(first),
+          scheme.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 43 || $0 == 45 || $0 == 46 }) else {
+        throw ContractError("invalid open URL scheme")
+    }
+    let lower = scheme.lowercased()
+    try require(lower != "javascript" && lower != "vbscript" && lower != "data", "forbidden open URL scheme")
+    if lower == "http" || lower == "https" {
+        guard rest.hasPrefix("//") else { throw ContractError("http(s) URL requires authority") }
+        let after = rest.dropFirst(2)
+        let host = after.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+        try require(!host.isEmpty, "http(s) URL requires host")
+    } else {
+        try require(!rest.isEmpty, "open URL requires target")
+    }
+}
 private func expectation(_ step: ActionStep, _ receipt: StepReceipt, settled: Bool, foreground: Bool) throws {
     if let route = receipt.route {
         switch (step.operation, route) {
         case (.setValue, .axSetValue), (.typeText, .axSelectedText), (.press, .axPress), (.scroll, .axScroll),
-             (.scrollToVisible, .axScrollToVisible), (.key, .foregroundKey), (.click, .foregroundClick): break
+             (.scrollToVisible, .axScrollToVisible), (.confirm, .axConfirm), (.showMenu, .axShowMenu),
+             (.cancel, .axCancel), (.invokeMenu, .axMenu),
+             (.key, .foregroundKey), (.click, .foregroundClick), (.doubleClick, .foregroundDoubleClick),
+             (.rightClick, .foregroundRightClick), (.hover, .foregroundHover), (.drag, .foregroundDrag),
+             (.hotkey, .foregroundHotkey), (.typeKeys, .foregroundTypeKeys): break
         default: throw ContractError("receipt route does not match operation")
         }
-        try require(foreground == (route == .foregroundKey || route == .foregroundClick),
+        try require(foreground == isForegroundRoute(route),
                     "receipt route does not match requested foreground mode")
     }
     var required: [Condition] = []
@@ -76,8 +131,11 @@ private func expectation(_ step: ActionStep, _ receipt: StepReceipt, settled: Bo
 extension Condition {
     func validate() throws {
         switch self {
-        case .elementExists(let value), .elementAbsent(let value): try identifier(value.selector.role)
+        case .elementExists(let value), .elementAbsent(let value): try validateSelector(value.selector)
         case .valueEquals(let value): try identifier(value.elementRef)
+        case .valueContains(let value):
+            try identifier(value.elementRef)
+            try require(!value.contains.isEmpty && value.contains.utf8.count <= 4096, "invalid value substring condition")
         case .enabled(let value): try identifier(value.elementRef)
         case .urlContains(let value):
             if let ref = value.elementRef { try identifier(ref) }
@@ -185,8 +243,13 @@ extension ObserveRequest {
     func validate() throws {
         try validTarget(target)
         if let selectors = axSelectors { try validateSelectors(selectors) }
+        if scope == .menuBar {
+            try require(eventHistory == nil && !includeScreenshot && !includeOcr && cropWindow == nil && maxImageDimensionPx == nil,
+                        "menuBar scope does not support visual capture or event history")
+        }
         if let history = eventHistory {
             try require(axSelectors != nil, "event history requires explicit AX selectors")
+            try require((scope == nil || scope == .window) && !interactiveOnly, "event history requires full window scope")
             if let cursor = history.cursor {
                 try identifier(cursor.generation)
                 try require(cursor.sequence <= 9_007_199_254_740_991, "event cursor exceeds safe integer range")
@@ -204,21 +267,29 @@ extension ObserveRequest {
         }
     }
 }
+private func validateSelector(_ selector: Selector) throws {
+    try identifier(selector.role)
+    try require((selector.label?.utf8.count ?? 0) <= 1024 && (selector.identifier?.utf8.count ?? 0) <= 1024,
+                "AX selector exceeds string limit")
+    if let contains = selector.labelContains {
+        try require(!contains.isEmpty && contains.utf8.count <= 1024, "invalid AX selector labelContains")
+    }
+}
 private func validateSelectors(_ selectors: [Selector]) throws {
     try require(!selectors.isEmpty && selectors.count <= Limits.maxAxSelectors, "invalid AX selector count")
     for (index, selector) in selectors.enumerated() {
-        try identifier(selector.role)
-        try require((selector.label?.utf8.count ?? 0) <= 1024 && (selector.identifier?.utf8.count ?? 0) <= 1024,
-                    "AX selector exceeds string limit")
+        try validateSelector(selector)
         try require(!selectors.prefix(index).contains(selector), "duplicate AX selector")
     }
 }
 private func selectorMatches(_ element: Element, _ selector: Selector) -> Bool {
     element.role == selector.role && (selector.label == nil || selector.label == element.label) &&
+        (selector.labelContains == nil || (element.label?.contains(selector.labelContains!) == true)) &&
         (selector.identifier == nil || selector.identifier == element.identifier)
 }
 private func historicalMatches(_ control: EventControl, _ selector: Selector) -> Bool {
     control.role == selector.role && (selector.label == nil || selector.label == control.label) &&
+        (selector.labelContains == nil || (control.label?.contains(selector.labelContains!) == true)) &&
         (selector.identifier == nil || selector.identifier == control.identifier)
 }
 extension EventHistory {
@@ -356,6 +427,25 @@ extension Observation {
     }
 }
 
+extension OpenRequest {
+    func validate() throws {
+        try identifier(grantId)
+        try require(bundleId != nil || appName != nil || url != nil, "open requires bundleId, appName, or url")
+        try require(!(bundleId != nil && appName != nil), "specify either bundleId or appName, not both")
+        if let bundleId { try identifier(bundleId) }
+        if let appName {
+            try require(!appName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        && appName.utf8.count <= 256
+                        && !appName.contains("/") && !appName.contains("\\") && !appName.contains("..")
+                        && !appName.utf8.contains { $0 < 0x20 || $0 == 0x7f }, "invalid app name")
+        }
+        if let url { try validOpenUrl(url) }
+        if newInstance {
+            try require(bundleId != nil || appName != nil, "newInstance requires bundleId or appName")
+        }
+    }
+}
+
 extension ActRequest {
     func validate() throws {
         try identifier(grantId)
@@ -365,14 +455,15 @@ extension ActRequest {
         try unique(steps.map(\.actionId))
         if foreground {
             try require(steps.allSatisfy {
-                switch $0.operation { case .key, .click, .waitFor: true; default: false }
-            } && steps.contains {
-                switch $0.operation { case .key, .click: true; default: false }
-            }, "foreground sequences require a key or click and may include waits")
+                if case .waitFor = $0.operation { return true }
+                return isForegroundOperation($0.operation)
+            } && steps.contains { isForegroundOperation($0.operation) },
+            "foreground sequences require a foreground action and may include waits")
         }
         for step in steps {
             switch step.operation {
-            case .press(let value): try identifier(value.elementRef)
+            case .press(let value), .scrollToVisible(let value), .confirm(let value), .showMenu(let value), .cancel(let value):
+                try identifier(value.elementRef)
             case .setValue(let value): try identifier(value.elementRef)
             case .typeText(let value):
                 try identifier(value.elementRef)
@@ -381,9 +472,31 @@ extension ActRequest {
             case .scroll(let value):
                 try identifier(value.elementRef)
                 try require(value.amount != 0 && (-1000...1000).contains(value.amount), "invalid scroll amount")
-            case .scrollToVisible(let value): try identifier(value.elementRef)
-            case .click(let value):
+            case .invokeMenu(let value):
+                try require((2...6).contains(value.path.count), "menu path requires 2 to 6 segments")
+                for segment in value.path {
+                    try require(!segment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && segment.utf8.count <= 256,
+                                "invalid menu path segment")
+                }
+            case .click(let value), .doubleClick(let value), .rightClick(let value), .hover(let value):
                 try require(value.point.x.isFinite && value.point.y.isFinite, "invalid point")
+            case .drag(let value):
+                try require(value.from.x.isFinite && value.from.y.isFinite && value.to.x.isFinite && value.to.y.isFinite
+                            && value.from != value.to, "invalid drag endpoints")
+                if let count = value.steps {
+                    try require((1...50).contains(count), "invalid drag step count")
+                }
+            case .hotkey(let value):
+                if let ref = value.elementRef { try identifier(ref) }
+                try require(isValidHotkeyName(value.key), "invalid hotkey name")
+                try require(value.modifiers.count <= 4, "too many modifiers")
+                for (index, modifier) in value.modifiers.enumerated() {
+                    try require(!value.modifiers.prefix(index).contains(modifier), "duplicate modifier")
+                }
+            case .typeKeys(let value):
+                if let ref = value.elementRef { try identifier(ref) }
+                try require(!value.text.isEmpty && value.text.utf8.count <= 4096 && !value.text.utf8.contains(0),
+                            "invalid foreground text")
             case .waitFor(let value):
                 try value.condition.validate()
                 try require(step.precondition == nil && step.expect == nil, "wait steps cannot carry guards or expectations")
@@ -494,6 +607,8 @@ extension Frame {
                 try identifier(value.observationId)
                 try validTarget(value.target)
                 try value.condition.validate()
+                try require(value.scope != .menuBar, "menuBar scope is not supported for waitFor")
+            case .open(let value): try value.validate()
             case .cancel(let value):
                 try identifier(value.requestId)
                 try require(value.requestId != request.id, "cancel cannot target itself")
@@ -526,6 +641,19 @@ extension Frame {
                 let closed = value.evidence.map { if case .windowAbsent = $0.condition { return $0.matched && $0.collected != nil }; return false } ?? false
                 try require(value.outcome != .satisfied || value.observation != nil || closed, "satisfied wait needs observation or timed window-absence evidence")
                 try value.observation?.validate()
+            case .open(let value):
+                if let pid = value.pid { try require(pid > 0, "open pid must be positive") }
+                if let bundleId = value.bundleId { try identifier(bundleId) }
+                try require(value.targets.count <= Limits.maxTargets, "too many targets")
+                for target in value.targets {
+                    try validTarget(target.key)
+                    if let bundleId = target.bundleId { try identifier(bundleId) }
+                    if let ownerName = target.ownerName {
+                        try require(!ownerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    && ownerName.utf8.count <= 1024, "invalid target owner name")
+                    }
+                    try validRect(target.bounds)
+                }
             case .cancel(let value): try identifier(value.requestId)
             case .error(let value): try require(!value.message.isEmpty, "empty error message")
             case .capabilities: break
@@ -581,6 +709,8 @@ extension Response {
         case (_, .error), (.hello, .hello), (.capabilities, .capabilities), (.targets, .targets): break
         case (.observe(let request), .observe(let observation)):
             try require(request.target == observation.target, "observation target mismatch")
+            let scoped = request.scope == .webArea || request.scope == .menuBar || request.interactiveOnly
+            try require(!scoped || observation.accessibility != .complete, "scoped observation cannot imply a complete window")
             try require(request.includeValues || observation.elements.allSatisfy { $0.value == nil },
                         "observation includes unrequested values")
             try require(request.axSelectors == observation.axSelection?.selectors, "AX selection does not match request")
@@ -653,8 +783,11 @@ extension Response {
             }
             if let observation = result.observation {
                 try require(request.target == observation.target, "wait observation target mismatch")
-                try require(observation.elements.allSatisfy { $0.value == nil }, "wait observation includes private values")
+                try require(request.includeValues || observation.elements.allSatisfy { $0.value == nil }, "wait observation includes private values")
+                try require(request.scope != .webArea || observation.accessibility != .complete, "scoped wait observation cannot imply a complete window")
             }
+        case (.open(let request), .open(let result)):
+            try require(request.activate || !result.activated, "unrequested foreground activation")
         case (.cancel(let request), .cancel(let result)):
             try require(request.requestId == result.requestId, "cancel target mismatch")
         default: throw ContractError("response method mismatch")
@@ -674,6 +807,10 @@ public struct SessionContext: Sendable {
         if case .act(let act) = request.body {
             try require(act.grantId == authority.grantId, "unknown host authority grant")
             try require(!act.foreground || authority.mode == .foregroundAllowed, "operator foreground authority is required")
+        }
+        if case .open(let open) = request.body {
+            try require(open.grantId == authority.grantId, "unknown host authority grant")
+            try require(!open.activate || authority.mode == .foregroundAllowed, "operator foreground authority is required")
         }
     }
 }

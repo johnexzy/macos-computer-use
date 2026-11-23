@@ -64,6 +64,9 @@ public struct AXNodeSnapshot: Sendable {
         if selectedTextSettable { available.append(.typeText) }
         if role == "AXScrollArea", backend is any AXScrolling { available.append(.scroll) }
         if actions.contains("AXScrollToVisible") { available.append(.scrollToVisible) }
+        if actions.contains("AXConfirm") { available.append(.confirm) }
+        if actions.contains("AXShowMenu") { available.append(.showMenu) }
+        if actions.contains("AXCancel") { available.append(.cancel) }
         return available
     }
 }
@@ -72,6 +75,7 @@ public struct AXNodeSnapshot: Sendable {
 public protocol AXReading: Sendable {
     func application(pid: UInt32, context: OperationContext) throws -> any AXObject
     func focusedElement(of application: any AXObject, context: OperationContext) throws -> (any AXObject)?
+    func menuBar(of application: any AXObject, context: OperationContext) throws -> (any AXObject)?
     func windows(of application: any AXObject, context: OperationContext) throws -> AXChildren
     func children(of element: any AXObject, limit: Int, context: OperationContext) throws -> AXChildren
     func parent(of element: any AXObject, context: OperationContext) throws -> (any AXObject)?
@@ -86,6 +90,7 @@ public protocol AXReading: Sendable {
 
 public extension AXReading {
     func focusedElement(of application: any AXObject, context: OperationContext) throws -> (any AXObject)? { nil }
+    func menuBar(of application: any AXObject, context: OperationContext) throws -> (any AXObject)? { nil }
     func bounds(of element: any AXObject, context: OperationContext) throws -> Rect? { nil }
     func prepareBrowserAccessibility(application: any AXObject, bundleId: String?, context: OperationContext) throws -> Bool { false }
 
@@ -155,7 +160,7 @@ public final class SemanticObservationHandle: RetainedNativeHandle, @unchecked S
     public let retainedWindow: any AXObject
     public let observationId: String
     public let includeValues: Bool
-    private let application: any AXObject
+    public let application: any AXObject
     private let catalog: any WindowCatalog
     private let generation: ProcessGeneration?
     private let references: [String: RetainedAXElement]
@@ -263,35 +268,78 @@ public struct SemanticAXObserver: Sendable {
         let application = try backend.application(pid: target.key.pid, context: context)
         let activatedBrowserAX = try backend.prepareBrowserAccessibility(application: application, bundleId: target.bundleId, context: context)
         let window = try associatedWindow(target: target, application: application, backend: backend, catalog: catalog, context: context)
+        let effectiveScope = params.scope ?? .window
+        if effectiveScope == .menuBar {
+            return try observeMenuBar(params: params, observationId: observationId, target: target, application: application,
+                                      window: window, generation: generation, started: started, axStarted: axStarted, context: context)
+        }
         if activatedBrowserAX {
             let webSelector = [CUAProtocol.Selector(role: "AXWebArea", label: nil, identifier: nil)]
             // Cold-started Chromium renderers can take ~1.5-2.0s to publish their first AXWebArea
             // after AXEnhancedUserInterface flips from 0 to 1; warm browsers match immediately.
             let deadline = DispatchTime.now().uptimeNanoseconds + 2_500_000_000
-            var sawWebArea = false
+            var webRoots: [any AXObject] = []
             while DispatchTime.now().uptimeNanoseconds < deadline {
                 try context.check()
                 let probe = try collectTree(window: window, pid: target.key.pid, backend: backend,
                                             includeValues: false, selectors: webSelector, application: application,
                                             visibleIn: target.bounds, context: context)
                 if !probe.nodes.isEmpty {
-                    sawWebArea = true
+                    webRoots = probe.nodes.map(\.object)
                     break
                 }
                 let delay = Double(try context.nativeTimeoutSeconds(maximum: 0.08))
                 if delay > 0 { Thread.sleep(forTimeInterval: delay) }
             }
-            if sawWebArea {
-                // Allow Chromium's newly enabled web accessibility tree one brief settle tick
-                // so web controls publish full action lists (e.g. AXPress) on the first observe.
-                let settle = Double(try context.nativeTimeoutSeconds(maximum: 0.08))
-                if settle > 0 { Thread.sleep(forTimeInterval: settle) }
+            if !webRoots.isEmpty {
+                // Wait briefly until Chromium's web accessibility tree populates interactive actions
+                // (e.g. AXPress / settable AXValue) so the very first observe has full actions.
+                let interactiveSelectors = [
+                    CUAProtocol.Selector(role: "AXButton", label: nil, identifier: nil),
+                    CUAProtocol.Selector(role: "AXLink", label: nil, identifier: nil),
+                    CUAProtocol.Selector(role: "AXCheckBox", label: nil, identifier: nil),
+                    CUAProtocol.Selector(role: "AXTextField", label: nil, identifier: nil),
+                ]
+                let settleStart = DispatchTime.now().uptimeNanoseconds
+                let settleDeadline = settleStart + 500_000_000
+                let emptyDeadline = settleStart + 100_000_000
+                while DispatchTime.now().uptimeNanoseconds < settleDeadline {
+                    try context.check()
+                    let probe = try collectTree(roots: webRoots, window: window, pid: target.key.pid, backend: backend,
+                                                includeValues: false, selectors: interactiveSelectors, application: application,
+                                                visibleIn: target.bounds, context: context)
+                    if probe.nodes.contains(where: { $0.snapshot.actions.contains("AXPress") || $0.snapshot.valueSettable || $0.snapshot.selectedTextSettable }) {
+                        break
+                    }
+                    if probe.nodes.isEmpty && DispatchTime.now().uptimeNanoseconds >= emptyDeadline {
+                        break
+                    }
+                    let delay = Double(try context.nativeTimeoutSeconds(maximum: 0.05))
+                    if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+                }
             }
         }
-        let scan = try collectTree(window: window, pid: target.key.pid, backend: backend,
-                                   includeValues: params.includeValues, selectors: params.axSelectors, application: application,
-                                   visibleIn: target.bounds, context: context)
-        if target.bundleId == nil, params.axSelectors == nil,
+        let scanRoots: [any AXObject]
+        var scopedComplete = true
+        if effectiveScope == .webArea {
+            let webProbe = try collectTree(window: window, pid: target.key.pid, backend: backend,
+                                           includeValues: false, selectors: [CUAProtocol.Selector(role: "AXWebArea", label: nil, identifier: nil)],
+                                           application: application, visibleIn: target.bounds, context: context)
+            scanRoots = webProbe.nodes.map(\.object)
+            scopedComplete = webProbe.complete
+        } else {
+            scanRoots = [window]
+        }
+        let scan: AXTreeSnapshot
+        if scanRoots.isEmpty {
+            scan = AXTreeSnapshot(nodes: [], complete: scopedComplete, visitedNodes: 0)
+        } else {
+            let raw = try collectTree(roots: scanRoots, window: window, pid: target.key.pid, backend: backend,
+                                      includeValues: params.includeValues, selectors: params.axSelectors, application: application,
+                                      visibleIn: target.bounds, context: context)
+            scan = AXTreeSnapshot(nodes: raw.nodes, complete: scopedComplete && raw.complete, visitedNodes: raw.visitedNodes)
+        }
+        if target.bundleId == nil, params.axSelectors == nil, effectiveScope == .window,
            !scan.nodes.contains(where: { $0.snapshot.role != "AXWindow" && $0.snapshot.role != "AXGroup" }) {
             throw AXReadUnavailable()
         }
@@ -300,7 +348,10 @@ public struct SemanticAXObserver: Sendable {
         var complete = scan.complete
         var encodedBytes = 0
         let encoder = JSONEncoder()
-        let eligible = scan.nodes.filter { params.axSelectors != nil || ($0.snapshot.role != "AXWindow" && $0.snapshot.role != "AXGroup") }
+        var eligible = scan.nodes.filter { params.axSelectors != nil || ($0.snapshot.role != "AXWindow" && $0.snapshot.role != "AXGroup") }
+        if params.interactiveOnly {
+            eligible = eligible.filter { isInteractiveElement($0.snapshot) }
+        }
         let selectedNodes: [ResolvedAXElement]
         if params.axSelectors == nil && eligible.count > Limits.maxElements {
             complete = false
@@ -338,13 +389,119 @@ public struct SemanticAXObserver: Sendable {
         try handle.validateWindow(context: context)
         let axFinished = max(axStarted, milliseconds())
         let selection = params.axSelectors.map { selectors in
-            AxSelectionEvidence(selectors: selectors, coverage: scan.complete && elements.count == scan.nodes.count ? .complete : .partial,
-                ambiguous: selectors.contains { selector in scan.nodes.filter { matches($0.snapshot, selector: selector) }.count > 1 },
+            AxSelectionEvidence(selectors: selectors, coverage: scan.complete && elements.count == eligible.count ? .complete : .partial,
+                ambiguous: selectors.contains { selector in eligible.filter { matches($0.snapshot, selector: selector) }.count > 1 },
                 visitedNodes: scan.visitedNodes)
+        }
+        let scoped = effectiveScope != .window || params.interactiveOnly
+        let observation = Observation(observationId: observationId, target: target.key,
+            collected: CollectionInterval(startedUnixMs: started, finishedUnixMs: max(axFinished, milliseconds())),
+            windowBounds: target.bounds, accessibility: params.axSelectors == nil && !scoped && complete ? .complete : .partial,
+            accessibilityCollected: CollectionInterval(startedUnixMs: axStarted, finishedUnixMs: axFinished),
+            elements: elements, screenshot: nil, axSelection: selection)
+        try context.check()
+        return NativeObservation(observation: observation, handle: handle)
+    }
+
+    private func observeMenuBar(params: ObserveRequest, observationId: String, target: Target, application: any AXObject,
+                                window: any AXObject, generation: ProcessGeneration?, started: UInt64, axStarted: UInt64,
+                                context: OperationContext) throws -> NativeObservation {
+        guard let menuBar = try backend.menuBar(of: application, context: context) else {
+            let handle = SemanticObservationHandle(backend: backend, catalog: catalog, application: application,
+                target: target, window: window, observationId: observationId,
+                includeValues: params.includeValues, references: [:], generation: generation)
+            try handle.validateWindow(context: context)
+            let axFinished = max(axStarted, milliseconds())
+            let selection = params.axSelectors.map {
+                AxSelectionEvidence(selectors: $0, coverage: .unavailable, ambiguous: false, visitedNodes: 0)
+            }
+            let observation = Observation(observationId: observationId, target: target.key,
+                collected: CollectionInterval(startedUnixMs: started, finishedUnixMs: max(axFinished, milliseconds())),
+                windowBounds: target.bounds, accessibility: .partial,
+                accessibilityCollected: CollectionInterval(startedUnixMs: axStarted, finishedUnixMs: axFinished),
+                elements: [], screenshot: nil, axSelection: selection)
+            return NativeObservation(observation: observation, handle: handle)
+        }
+
+        var collected: [(object: any AXObject, snapshot: AXNodeSnapshot, pathLabel: String)] = []
+        var visited: UInt32 = 0
+        var complete = true
+        func walkMenu(_ container: any AXObject, prefix: [String], depth: Int) throws {
+            guard depth <= 6 else { complete = false; return }
+            let children = try backend.children(of: container, limit: max(0, maxTreeNodes - Int(visited)), context: context)
+            if !children.complete { complete = false }
+            for child in children.elements {
+                try context.check()
+                guard Int(visited) < maxTreeNodes else { complete = false; return }
+                visited += 1
+                do {
+                    guard let snap = try backend.snapshot(of: child, includeValue: false, context: context) else {
+                        complete = false; continue
+                    }
+                    if snap.role == "AXMenu" {
+                        try walkMenu(child, prefix: prefix, depth: depth)
+                        continue
+                    }
+                    let segment = snap.title ?? snap.label ?? ""
+                    guard !segment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                    let path = prefix + [segment]
+                    if snap.role == "AXMenuItem" && path.count >= 2 {
+                        let pathLabel = path.joined(separator: " > ")
+                        let projected = AXNodeSnapshot(role: snap.role, title: pathLabel, label: pathLabel,
+                            identifier: snap.identifier, bounds: snap.bounds, enabled: snap.enabled,
+                            enabledKnown: snap.enabledKnown, value: nil, actions: snap.actions,
+                            complete: snap.complete, subrole: snap.subrole, enabledUnsupported: snap.enabledUnsupported)
+                        if let selectors = params.axSelectors {
+                            if selectors.contains(where: { matches(projected, selector: $0) }) {
+                                collected.append((child, projected, pathLabel))
+                            }
+                        } else {
+                            collected.append((child, projected, pathLabel))
+                        }
+                    }
+                    if snap.role == "AXMenuBarItem" || snap.role == "AXMenuItem" {
+                        try walkMenu(child, prefix: path, depth: depth + 1)
+                    }
+                } catch is AXReadUnavailable { complete = false }
+                catch let error as NativeFailure where error.code == .staleElement || error.code == .nativeFailed { complete = false }
+            }
+        }
+        try walkMenu(menuBar, prefix: [], depth: 0)
+
+        var elements: [Element] = []
+        var encodedBytes = 0
+        let encoder = JSONEncoder()
+        for item in collected {
+            if elements.count == Limits.maxElements { complete = false; break }
+            let s = item.snapshot
+            let label = bounded(item.pathLabel, bytes: 1024)
+            let identifier = bounded(s.identifier, bytes: 1024)
+            let subrole = bounded(s.subrole, bytes: 1024)
+            if label != item.pathLabel || identifier != s.identifier || subrole != s.subrole {
+                complete = false
+                if label != item.pathLabel, params.axSelectors != nil { continue }
+            }
+            let element = Element(reference: "menu-\(UUID().uuidString)", role: s.role, label: label, value: nil,
+                                  bounds: s.bounds, enabled: s.enabledKnown ? s.enabled : nil, actions: [],
+                                  identifier: identifier, subrole: subrole, url: nil)
+            let size = try encoder.encode(element).count
+            if encodedBytes + size > 2 * 1024 * 1024 { complete = false; break }
+            encodedBytes += size
+            elements.append(element)
+        }
+        let handle = SemanticObservationHandle(backend: backend, catalog: catalog, application: application,
+            target: target, window: window, observationId: observationId,
+            includeValues: params.includeValues, references: [:], generation: generation)
+        try handle.validateWindow(context: context)
+        let axFinished = max(axStarted, milliseconds())
+        let selection = params.axSelectors.map { selectors in
+            AxSelectionEvidence(selectors: selectors, coverage: complete && elements.count == collected.count ? .complete : .partial,
+                ambiguous: selectors.contains { selector in collected.filter { matches($0.snapshot, selector: selector) }.count > 1 },
+                visitedNodes: visited)
         }
         let observation = Observation(observationId: observationId, target: target.key,
             collected: CollectionInterval(startedUnixMs: started, finishedUnixMs: max(axFinished, milliseconds())),
-            windowBounds: target.bounds, accessibility: params.axSelectors == nil && complete ? .complete : .partial,
+            windowBounds: target.bounds, accessibility: .partial,
             accessibilityCollected: CollectionInterval(startedUnixMs: axStarted, finishedUnixMs: axFinished),
             elements: elements, screenshot: nil, axSelection: selection)
         try context.check()
@@ -430,7 +587,7 @@ private func requireOwningWindow(_ object: any AXObject, window: any AXObject, p
     throw NativeFailure(.staleElement, "AX owning-window identity is unavailable")
 }
 
-private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReading,
+private func collectTree(roots: [any AXObject]? = nil, window: any AXObject, pid: UInt32, backend: any AXReading,
                          includeValues: Bool, selectors: [CUAProtocol.Selector]? = nil, application: (any AXObject)? = nil,
                          visibleIn windowBounds: Rect? = nil, context: OperationContext) throws -> AXTreeSnapshot {
     let depthLimit = selectors == nil ? maxTreeDepth : maxSelectiveTreeDepth
@@ -444,7 +601,8 @@ private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReadi
         focusPath = []
     }
     typealias PendingNode = (object: any AXObject, depth: Int)
-    var pending: [PendingNode] = [(window, 0)]
+    let initialRoots = roots ?? [window]
+    var pending: [PendingNode] = initialRoots.reversed().map { ($0, 0) }
     var deferred: [PendingNode] = []
     var seen: [any AXObject] = []
     var nodes: [ResolvedAXElement] = []
@@ -513,7 +671,7 @@ private func collectTree(window: any AXObject, pid: UInt32, backend: any AXReadi
                     if var snapshot = try backend.snapshot(of: object, includeValue: false, context: context) {
                         if snapshot.identity != identity { complete = false }
                         else {
-                            if snapshot.label == nil && !snapshot.complete && candidates.contains(where: { $0.label != nil }) { complete = false }
+                            if snapshot.label == nil && !snapshot.complete && candidates.contains(where: { $0.label != nil || $0.labelContains != nil }) { complete = false }
                             if candidates.contains(where: { matches(snapshot, selector: $0) }) {
                                 if includeValues {
                                     guard let withValue = try backend.snapshot(of: object, includeValue: true, context: context) else {
@@ -560,6 +718,9 @@ private func isInteractiveElement(_ snapshot: AXNodeSnapshot) -> Bool {
         || snapshot.valueSettable
         || snapshot.selectedTextSettable
         || snapshot.actions.contains("AXPress")
+        || snapshot.actions.contains("AXConfirm")
+        || snapshot.actions.contains("AXShowMenu")
+        || snapshot.actions.contains("AXCancel")
 }
 
 /// When an unfiltered observation exceeds `limit`, retain visible interactive controls
@@ -598,6 +759,7 @@ private func isClipped(_ element: Rect, to window: Rect) -> Bool {
 func matches(_ snapshot: AXNodeSnapshot, selector: CUAProtocol.Selector) -> Bool {
     snapshot.role == selector.role && (selector.identifier == nil || selector.identifier == snapshot.identifier)
         && (selector.label == nil || selector.label == snapshot.label)
+        && (selector.labelContains == nil || (snapshot.label?.contains(selector.labelContains!) == true))
 }
 
 /// Membership needs current identities/children, not a second full attribute read of every sibling.

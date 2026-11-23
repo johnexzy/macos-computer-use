@@ -34,6 +34,10 @@ public struct PredicateEvaluator: Sendable {
             reference = value.elementRef
             let snapshot = try handle.resolve(value.elementRef, includeValue: true, context: context).snapshot
             matched = snapshot.value.map { $0 == value.value }
+        case .valueContains(let value):
+            reference = value.elementRef
+            let snapshot = try handle.resolve(value.elementRef, includeValue: true, context: context).snapshot
+            matched = snapshot.value.map { $0.contains(value.contains) }
         case .enabled(let value):
             reference = value.elementRef
             let snapshot = try handle.resolve(value.elementRef, context: context).snapshot
@@ -57,12 +61,7 @@ public struct PredicateEvaluator: Sendable {
         case .elementExists(let value), .elementAbsent(let value):
             reference = nil
             let scan = try handle.scan(context: context)
-            let found = scan.nodes.contains { node in
-                let snapshot = node.snapshot, selector = value.selector
-                return snapshot.role == selector.role
-                    && (selector.label == nil || selector.label == snapshot.label)
-                    && (selector.identifier == nil || selector.identifier == snapshot.identifier)
-            }
+            let found = scan.nodes.contains { matches($0.snapshot, selector: value.selector) }
             let exists: Bool? = found ? true : (scan.complete ? false : nil)
             if case .elementAbsent = condition { matched = exists.map { !$0 } }
             else { matched = exists }

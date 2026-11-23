@@ -1,32 +1,45 @@
 ---
 name: macos-computer-use-native
-description: Use the native macOS Computer Use MCP server for tasks in open Mac apps, such as reading a PDF in Preview, editing a TextEdit document, or working with a dialog. Follow this skill when a task calls for macOS desktop control or specifies this CUA server.
+description: Use the native macOS Computer Use MCP server to launch apps/URLs and inspect or control Mac apps and browsers (background-first, with opt-in foreground input). Follow this skill when a task calls for macOS desktop control or specifies this CUA server.
 ---
 
 # Native macOS computer use
 
-Use the connected server's `capabilities`, `targets`, `observe`, `act`, and `waitFor` tools. Use the client-provided tool schemas for arguments.
+Use the connected server's `capabilities`, `targets`, `open`, `observe`, `act`, and `waitFor` tools. Use the client-provided tool schemas for arguments.
 
-## Find and observe
+## Launch, find, and observe
 
-1. Check `capabilities` for available permissions, actions, and the installed execution mode.
-2. Use `targets` to find the intended open window. Filter by exact `bundleId` when known. If that misses an open app, use `titleContains` or `ownerContains` instead. A launcher child process may own the window without its own bundle ID. For that case, combine a title or owner filter with `unbundledOnly: true`. Pass the returned `key` as `target` with its exact `pid` and `windowId`. Resolve any target ambiguity before observing or acting.
-3. Observe that target close to the action. Use `includeValues: true` when you need to read or verify field values. Use `axSelectors` for known controls when a narrower read suffices. Partial coverage, an omitted value, or `enabled: null` gives incomplete evidence.
-4. Use `includeOcr: true` for visible text that Accessibility omits, such as PDF content. Request `includeScreenshot: true` when layout or image evidence is needed. The live preview and pointer are operator feedback. Use tool results as task evidence.
-5. For windows without a bundle ID, use `observe` as usual. It probes the actual window owner's AX tree. Add window screenshot or OCR when the app omits controls or reports unavailable AX coverage.
+1. Check `capabilities` for available permissions, actions, and the installed execution mode (`backgroundRequired` or `foregroundAllowed`).
+2. Use `targets` to find an open window. Filter by exact `bundleId` when known, or `titleContains` / `ownerContains` (and `unbundledOnly: true` for launcher child processes). Pass the returned `key` as `target` with its exact `pid` and `windowId`. Resolve ambiguity before observing or acting.
+3. Use `open` to launch an app (`bundleId` or `appName`) and/or open a URL (`url`, e.g. `https://...` or `file://...`) in a browser or default handler. By default `open` runs in the background (`activate: false`) without stealing focus and returns the `pid`, `bundleId`, and any visible `targets` ready for `observe`. Setting `activate: true` requires `foregroundAllowed`.
+4. Observe the target close to the action:
+   - Use `scope: "webArea"` on browsers to skip tab strips, toolbars, and window chrome and focus the 256-element cap on the page DOM.
+   - Use `interactiveOnly: true` to return only interactive controls (buttons, links, inputs, checkboxes, menus, scroll areas, web areas).
+   - Use `scope: "menuBar"` to inspect the app's native macOS menu bar items (`"File > New Tab"`, `"History > Back"`, etc.) before calling `invokeMenu`.
+   - Use `axSelectors` (with exact `label`, `identifier`, or substring `labelContains`) when a narrower read suffices.
+   - Use `includeValues: true` when you need to read or verify field/text values.
+   - Use `includeOcr: true` (optionally with `ocrQuery`) for visible text omitted by Accessibility (such as PDFs or `<canvas>`), and `includeScreenshot: true` when visual/pixel evidence or foreground pointer actions are needed.
 
 ## Act and verify
 
-- Keep actions in the background by default. Pass the exact `target`, current `observationId`, and the element's `reference` as `elementRef`. Choose an action the observed element advertises. `setValue` replaces the whole value, `typeText` replaces the current selection, `press` invokes an advertised control, and `scrollToVisible` scrolls a web/list control into view in the background.
-- For browsers (Chrome, Dia, Brave, Edge, Arc, Safari), `observe` exposes live `url` fields on `AXWebArea` and `AXLink` elements, retains visible interactive controls ahead of dense text/cell runs when hitting the 256-element cap, and automatically enables Chromium web accessibility so `<a href>`, `<button>`, `<input>`, and checkboxes work in the background via `press` and `setValue`. Use `waitFor` with `{"kind":"urlContains","params":{"contains":"..."}}` (optionally scoped with `elementRef`) to verify navigation. For non-AX `<canvas>` or image-only controls, escalate to `includeScreenshot: true` + `includeOcr: true` + `ocrQuery`.
-- To scroll, use `operation: {"kind":"scroll","params":{"elementRef":"<scroll area reference>","axis":"vertical","amount":250}}` with a live `AXScrollArea` that advertises `scroll`. Choose `vertical` or `horizontal`. `amount` is a nonzero integer from -1000 to 1000. Positive moves down or right. `250` requests 25% of the scrollbar's full range. Scroll runs in the background and verifies movement. Observe again to find newly revealed content.
-- Each step has an `actionId` and an `operation` with `kind` and `params`. Group up to 16 compatible steps on one target and observation within one `budgetMs`. Observe again after any change that introduces new controls, including an attached sheet. A wait inside `act` uses the original refs. Use standalone `waitFor` for an expected state change.
-- Check each receipt's `delivery` and `verification`, plus `stopReason` and `remainingSteps` for a sequence. Use an observable `expect`, such as `valueEquals` or `urlContains`, or read back the intended result. A confirmed field edit verifies its value. When the task requires a saved file, also verify the save through the app.
-- Use foreground input only when the operator permits it and the connection reports `foregroundAllowed`. Request `foreground: true` on that `act` call. Control-scoped keys (`return`, `tab`, `escape`, `saveAs`) need the exact focused control; window-scoped browser navigation shortcuts (`focusAddressBar`, `reload`, `newTab`, `closeTab`, `navigateBack`, `navigateForward`) target the validated focused browser window. A `click` needs a fresh screenshot-backed observation. When AX is unavailable, the exact window must already be in the foreground with the destination unobscured. Use a coordinate click without AX conditions and observe again to verify the result.
+- Keep actions in the background by default. Pass the exact `target`, current `observationId`, and the element's `reference` as `elementRef`, using only actions advertised by that element:
+  - `setValue` replaces the whole value and verifies readback.
+  - `typeText` replaces the current UTF-16 selection via `AXSelectedText`.
+  - `press` invokes `AXPress` on buttons, links, checkboxes, tabs.
+  - `confirm` invokes `AXConfirm` (submit text/search fields, forms, dialogs).
+  - `showMenu` invokes `AXShowMenu` (open popups, dropdowns, context menus).
+  - `cancel` invokes `AXCancel` (dismiss sheets, popovers, search inputs).
+  - `scrollToVisible` scrolls a web/list control into view in the background.
+  - `scroll` moves a live `AXScrollArea` (`axis`: `vertical` or `horizontal`, nonzero `amount` in `[-1000, 1000]`).
+  - `invokeMenu` executes an exact native macOS `AXMenuBar` path (e.g. `path: ["File", "New Tab"]`, `["History", "Back"]`, `["Edit", "Copy"]`) in the background without stealing focus.
+- Each step has an `actionId` and an `operation` with `kind` and `params`. Group up to 16 compatible steps on one target and observation within one `budgetMs`.
+- Use `waitFor` with `elementExists` / `elementAbsent` (supporting `labelContains`), `valueEquals`, `valueContains`, `enabled`, `urlContains`, or `windowAbsent`. Pass `includeValues: true` and/or `scope: "webArea"` on `waitFor` when you want values or page-scoped elements directly in the returned satisfied observation.
+- Use foreground input only when `capabilities` reports `foregroundAllowed`, setting `foreground: true` on `act`:
+  - Pointer actions (`click`, `doubleClick`, `rightClick`, `hover`, `drag`) require a fresh screenshot-backed observation (`includeScreenshot: true`) and verify target pixels/hit-testing before dispatch.
+  - Keyboard actions include `key` (control-scoped or browser shortcuts), `hotkey` (arbitrary canonical key name like `"a"`–`"z"`, `"0"`–`"9"`, `"return"`, `"tab"`, `"escape"`, `"delete"`, `"space"`, `"f1"`–`"f12"` with `modifiers`: `["command", "control", "option", "shift"]` and optional `elementRef`), and `typeKeys` (Unicode text typing into the focused window/control).
 
 ## Recover from interrupted input
 
 - For `not_dispatched` with `alreadySatisfied` and confirmed evidence, continue from the verified state.
-- For a scroll that returns `verificationFailed` with `not_dispatched`, check the current scroll area's position and visible content before deciding what to do next. A scrollbar at the requested boundary cannot move farther. `unsupported` means the selected axis has no usable Accessibility scrollbar for this route.
-- For `not_dispatched` with a stale target or reference, find the same intended window again if needed, observe it, then retry the unapplied step with a fresh reference.
-- For `unknown`, a lost receipt, or `dispatched` with uncertain effect, observe the current state before any further input. Keep earlier settled effects. Repeat an action only if fresh evidence shows it is still needed and safe to repeat. Report any unresolved effect.
+- For `not_dispatched` with `targetStale`, re-find the window if needed, observe again, and retry with fresh references.
+- For `unknown`, a lost receipt, or `dispatched` with uncertain effect, observe current state before repeating any mutation.

@@ -28,7 +28,13 @@ func readAXActionNames(_ element: AXUIElement, context: OperationContext) throws
 func boundedAXActionNames(_ actions: [String]) -> [String] {
     let limit = 32
     guard actions.count > limit else { return actions }
-    let priority = [kAXPressAction as String, "AXScrollToVisible"].filter { actions.contains($0) }
+    let priority = [
+        kAXPressAction as String,
+        "AXScrollToVisible",
+        kAXConfirmAction as String,
+        kAXShowMenuAction as String,
+        kAXCancelAction as String,
+    ].filter { actions.contains($0) }
     var selected: [String] = []
     for name in priority where !selected.contains(name) { selected.append(name) }
     for name in actions where !selected.contains(name) {
@@ -119,6 +125,9 @@ public struct MacOSAXBackend: AXReading, AXScrolling {
     public func focusedElement(of application: any AXObject, context: OperationContext) throws -> (any AXObject)? {
         try objectAttribute(application, kAXFocusedUIElementAttribute as CFString, context: context)
     }
+    public func menuBar(of application: any AXObject, context: OperationContext) throws -> (any AXObject)? {
+        try objectAttribute(application, kAXMenuBarAttribute as CFString, context: context)
+    }
     public func window(of element: any AXObject, context: OperationContext) throws -> (any AXObject)? {
         try objectAttribute(element, kAXWindowAttribute as CFString, context: context)
     }
@@ -166,12 +175,21 @@ public struct MacOSAXBackend: AXReading, AXScrolling {
     }
 
     public func snapshot(of element: any AXObject, includeValue: Bool, context: OperationContext) throws -> AXNodeSnapshot? {
-        guard let role = try string(element, kAXRoleAttribute as CFString, context: context),
-              let position = try attribute(element, kAXPositionAttribute as CFString, context: context),
-              let size = try attribute(element, kAXSizeAttribute as CFString, context: context) else { return nil }
+        guard let role = try string(element, kAXRoleAttribute as CFString, context: context) else { return nil }
+        let isMenuRole = role == "AXMenuItem" || role == "AXMenuBarItem" || role == "AXMenu" || role == "AXMenuBar"
+        let position = try attribute(element, kAXPositionAttribute as CFString, context: context)
+        let size = try attribute(element, kAXSizeAttribute as CFString, context: context)
         let actions = try readAXActionNames(prepared(element, context: context), context: context)
-        let allowClippedZeroAxis = role != "AXWindow" && actions.contains("AXScrollToVisible")
-        guard let bounds = decodeBounds(position: position, size: size, allowClippedZeroAxis: allowClippedZeroAxis) else { return nil }
+        let allowClippedZeroAxis = role != "AXWindow" && (actions.contains("AXScrollToVisible") || isMenuRole)
+        let bounds: Rect
+        if let position, let size, let decoded = decodeBounds(position: position, size: size, allowClippedZeroAxis: allowClippedZeroAxis) {
+            bounds = decoded
+        } else if isMenuRole {
+            // Closed macOS menu items can omit AXPosition/AXSize while remaining inspectable.
+            bounds = Rect(x: 0, y: 0, width: 1, height: 1)
+        } else {
+            return nil
+        }
         let title = try string(element, kAXTitleAttribute as CFString, context: context)
         var descriptionValue: CFTypeRef?
         let descriptionResult = AXUIElementCopyAttributeValue(try prepared(element, context: context),

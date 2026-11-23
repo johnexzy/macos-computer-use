@@ -24,7 +24,7 @@ fn shared_valid_fixtures_decode_and_round_trip() {
     let paths = fixtures("valid");
     assert_eq!(
         paths.len(),
-        66,
+        73,
         "keep the shared fixture inventory deliberate"
     );
     for path in paths {
@@ -61,6 +61,8 @@ fn absent_visual_options_keep_the_legacy_ax_wire_shape() {
         "maxImageDimensionPx",
         "axSelectors",
         "eventHistory",
+        "scope",
+        "interactiveOnly",
     ] {
         assert!(params.get(name).is_none(), "unexpected {name}");
     }
@@ -132,7 +134,7 @@ fn ocr_budget_accounts_for_json_escaping_not_only_text_bytes() {
 #[test]
 fn shared_invalid_fixtures_are_rejected() {
     let paths = fixtures("invalid");
-    assert_eq!(paths.len(), 94);
+    assert_eq!(paths.len(), 107);
     for path in paths {
         assert!(
             decode_line(&fs::read(&path).unwrap()).is_err(),
@@ -461,6 +463,91 @@ fn observations_expose_independent_channel_times_and_capabilities_include_click(
     };
     assert!(capabilities.actions.contains(&ActionKind::Click));
     assert!(serde_json::from_str::<ElementAction>("\"click\"").is_err());
+}
+
+#[test]
+fn open_wait_and_scoped_observe_enforce_authority_and_correlation() {
+    let Frame::Request(mut open_req) = fixture("open-request") else {
+        panic!()
+    };
+    let Frame::Response(mut open_res) = fixture("open-response") else {
+        panic!()
+    };
+    let bg = SessionContext {
+        epoch: "helper-epoch-1".into(),
+        authority: Authority {
+            grant_id: "host-grant-1".into(),
+            mode: ExecutionMode::BackgroundRequired,
+        },
+    };
+    let fg = SessionContext {
+        epoch: "helper-epoch-1".into(),
+        authority: Authority {
+            grant_id: "host-grant-1".into(),
+            mode: ExecutionMode::ForegroundAllowed,
+        },
+    };
+    bg.authorize(&open_req).unwrap();
+    open_res.validate_for(&open_req, "helper-epoch-1").unwrap();
+    if let ResponseBody::Open(data) = &mut open_res.body {
+        data.activated = true;
+    }
+    assert!(open_res.validate_for(&open_req, "helper-epoch-1").is_err());
+    if let RequestBody::Open(open) = &mut open_req.body {
+        open.activate = true;
+    }
+    assert!(bg.authorize(&open_req).is_err());
+    fg.authorize(&open_req).unwrap();
+    open_res.validate_for(&open_req, "helper-epoch-1").unwrap();
+
+    // Wait with includeValues: true allows private values; false rejects them.
+    let Frame::Request(mut wait_req) = fixture("wait-values-request") else {
+        panic!()
+    };
+    let Frame::Response(Response {
+        body: ResponseBody::Observe(mut obs),
+        ..
+    }) = fixture("observe-partial-response")
+    else {
+        panic!()
+    };
+    obs.screenshot = None;
+    obs.elements[0].value = Some("SAVED:Ada".into());
+    let wait_res = Response {
+        version: VERSION,
+        id: wait_req.id.clone(),
+        epoch: "helper-epoch-1".into(),
+        body: ResponseBody::WaitFor(WaitResult {
+            outcome: WaitOutcome::Satisfied,
+            already_satisfied: false,
+            observation: Some(obs.clone()),
+            evidence: None,
+        }),
+    };
+    wait_res.validate_for(&wait_req, "helper-epoch-1").unwrap();
+    if let RequestBody::WaitFor(wait) = &mut wait_req.body {
+        wait.include_values = false;
+    }
+    assert!(wait_res.validate_for(&wait_req, "helper-epoch-1").is_err());
+
+    // Scoped observe cannot report Complete window coverage.
+    let Frame::Request(scoped_req) = fixture("observe-scoped-request") else {
+        panic!()
+    };
+    let mut complete_obs = obs;
+    complete_obs.accessibility = Coverage::Complete;
+    complete_obs.elements[0].value = None;
+    let complete_res = Response {
+        version: VERSION,
+        id: scoped_req.id.clone(),
+        epoch: "helper-epoch-1".into(),
+        body: ResponseBody::Observe(complete_obs),
+    };
+    assert!(
+        complete_res
+            .validate_for(&scoped_req, "helper-epoch-1")
+            .is_err()
+    );
 }
 
 #[cfg(feature = "schema")]

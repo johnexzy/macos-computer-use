@@ -12,9 +12,15 @@ struct ForegroundSample: Equatable, Sendable {
     let inputHeld: Bool
 }
 
-enum ForegroundInput: Sendable {
+enum ForegroundInput: Equatable, Sendable {
     case key(Key)
+    case hotkey(key: String, modifiers: [Modifier])
+    case typeKeys(String)
     case click(Point)
+    case doubleClick(Point)
+    case rightClick(Point)
+    case hover(Point)
+    case drag(from: Point, to: Point, steps: Int)
 }
 
 struct ForegroundStopped: Error, Sendable {
@@ -188,16 +194,27 @@ final class ForegroundControl {
         try checkContext()
         guard permissionAvailable() else { throw stop(.permissionUnavailable) }
         // Resolve coordinates from the original image before making any activation request.
+        let visualOnly: Bool
+        if case .visual = target { visualOnly = true } else { visualOnly = false }
         let click: ClickWitness?
+        let dragEnd: Point?
         switch operation {
-        case .click(let value):
-            let visualOnly: Bool
-            if case .visual = target { visualOnly = true } else { visualOnly = false }
-            guard let value = ClickWitness(operation: value, observation: observation, visualOnly: visualOnly) else {
+        case .click(let value), .doubleClick(let value), .rightClick(let value), .hover(let value):
+            guard let witness = ClickWitness(point: value.point, space: value.space, observation: observation, visualOnly: visualOnly) else {
                 throw stop(.frameChanged)
             }
-            click = value
-        case .key: click = nil
+            click = witness
+            dragEnd = nil
+        case .drag(let value):
+            guard let startWitness = ClickWitness(point: value.from, space: value.space, observation: observation, visualOnly: visualOnly),
+                  let endScreen = ClickWitness.mapToScreen(point: value.to, space: value.space, observation: observation, visualOnly: visualOnly) else {
+                throw stop(.frameChanged)
+            }
+            click = startWitness
+            dragEnd = endScreen
+        case .key, .hotkey, .typeKeys:
+            click = nil
+            dragEnd = nil
         default: throw NativeFailure(.unsupported, "foreground operation is not implemented")
         }
 
@@ -207,7 +224,13 @@ final class ForegroundControl {
         case .key(let value):
             try checkKeyTarget(value)
             input = .key(value.key)
-        case .click:
+        case .hotkey(let value):
+            try checkWindowTextOrKeyTarget(elementRef: value.elementRef)
+            input = .hotkey(key: value.key, modifiers: value.modifiers)
+        case .typeKeys(let value):
+            try checkWindowTextOrKeyTarget(elementRef: value.elementRef)
+            input = .typeKeys(value.text)
+        case .click, .doubleClick, .rightClick, .hover, .drag:
             guard let click else { throw stop(.frameChanged) }
             if let beforeClick {
                 try beforeClick(click.screen)
@@ -216,7 +239,16 @@ final class ForegroundControl {
             do { try click.validate(capture: capture, target: window, context: context) }
             catch is ForegroundStopped { throw stop(.frameChanged) }
             catch is VisualCaptureFailure { throw stop(.frameChanged) }
-            input = .click(click.screen)
+            switch operation {
+            case .click: input = .click(click.screen)
+            case .doubleClick: input = .doubleClick(click.screen)
+            case .rightClick: input = .rightClick(click.screen)
+            case .hover: input = .hover(click.screen)
+            case .drag(let value):
+                guard let dragEnd else { throw stop(.frameChanged) }
+                input = .drag(from: click.screen, to: dragEnd, steps: Int(value.steps ?? 12))
+            default: throw NativeFailure(.unsupported, "foreground operation is not implemented")
+            }
         default: throw NativeFailure(.unsupported, "foreground operation is not implemented")
         }
         try platform.post(input) {
@@ -229,12 +261,38 @@ final class ForegroundControl {
                 case .visual: hits = try platform.visualHitTest(click.screen, in: window, context: context)
                 }
                 guard hits else { throw stop(.windowChanged) }
+                if let dragEnd {
+                    let b = window.bounds
+                    guard dragEnd.x >= b.x && dragEnd.x < b.x + b.width && dragEnd.y >= b.y && dragEnd.y < b.y + b.height else {
+                        throw stop(.windowChanged)
+                    }
+                }
             }
-            if case .key(let value) = operation { try checkKeyTarget(value) }
+            switch operation {
+            case .key(let value): try checkKeyTarget(value)
+            case .hotkey(let value): try checkWindowTextOrKeyTarget(elementRef: value.elementRef)
+            case .typeKeys(let value): try checkWindowTextOrKeyTarget(elementRef: value.elementRef)
+            default: break
+            }
             // Final lightweight sample follows window/element reads. macOS does not offer atomic validate-and-post.
             try checkInterference()
             guard last.pid == window.key.pid else { throw stop(.focusChanged) }
             try willDispatch()
+        }
+    }
+
+    private func checkWindowTextOrKeyTarget(elementRef: String?) throws {
+        guard case .semantic(let handle) = target else { throw stop(.windowChanged) }
+        if let elementRef {
+            let resolved = try handle.resolve(elementRef, context: context)
+            let snapshot = resolved.snapshot
+            guard (snapshot.enabledKnown && snapshot.enabled) || snapshot.enabledUnsupported else {
+                throw stop(.windowChanged)
+            }
+        }
+        if let focused = try platform.focusedElement(pid: window.key.pid, context: context) {
+            do { try handle.validateOwner(of: focused, context: context) }
+            catch { throw stop(.windowChanged) }
         }
     }
 
@@ -465,8 +523,6 @@ struct NativeForegroundPlatform: ForegroundPlatform {
     func post(_ input: ForegroundInput, willDispatch: () throws -> Void) throws {
         guard let source = CGEventSource(stateID: .privateState) else { throw NativeFailure(.nativeFailed, "event source unavailable") }
         source.localEventsSuppressionInterval = 0
-        let down: CGEvent?
-        let up: CGEvent?
         switch input {
         case .key(let key):
             let code: Int
@@ -488,21 +544,239 @@ struct NativeForegroundPlatform: ForegroundPlatform {
             case .navigateBack: code = kVK_ANSI_LeftBracket; flags = [.maskCommand]
             case .navigateForward: code = kVK_ANSI_RightBracket; flags = [.maskCommand]
             }
-            down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: true)
-            up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: false)
-            down?.flags = flags
-            up?.flags = flags
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: false) else {
+                throw NativeFailure(.nativeFailed, "input event creation failed")
+            }
+            down.flags = flags
+            up.flags = flags
+            try willDispatch()
+            down.post(tap: .cgSessionEventTap)
+            up.post(tap: .cgSessionEventTap)
+        case .hotkey(let key, let modifiers):
+            guard let code = Self.virtualKeyCode(for: key) else {
+                throw NativeFailure(.invalidRequest, "unknown hotkey name")
+            }
+            var flags: CGEventFlags = []
+            for modifier in modifiers {
+                switch modifier {
+                case .command: flags.insert(.maskCommand)
+                case .control: flags.insert(.maskControl)
+                case .option: flags.insert(.maskAlternate)
+                case .shift: flags.insert(.maskShift)
+                }
+            }
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: false) else {
+                throw NativeFailure(.nativeFailed, "hotkey event creation failed")
+            }
+            down.flags = flags
+            up.flags = flags
+            try willDispatch()
+            down.post(tap: .cgSessionEventTap)
+            up.post(tap: .cgSessionEventTap)
+        case .typeKeys(let text):
+            var events: [CGEvent] = []
+            let scalars = Array(text.unicodeScalars)
+            var buffer: [UniChar] = []
+            func flushBuffer() throws {
+                guard !buffer.isEmpty else { return }
+                var offset = 0
+                while offset < buffer.count {
+                    let end = min(offset + 16, buffer.count)
+                    var chunk = Array(buffer[offset..<end])
+                    guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                          let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
+                        throw NativeFailure(.nativeFailed, "text input event creation failed")
+                    }
+                    down.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: &chunk)
+                    up.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: &chunk)
+                    events.append(down)
+                    events.append(up)
+                    offset = end
+                }
+                buffer.removeAll(keepingCapacity: true)
+            }
+            func appendKey(_ code: Int) throws {
+                try flushBuffer()
+                guard let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: true),
+                      let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: false) else {
+                    throw NativeFailure(.nativeFailed, "text control key creation failed")
+                }
+                events.append(down)
+                events.append(up)
+            }
+            for scalar in scalars {
+                if scalar == "\r" { continue }
+                if scalar == "\n" { try appendKey(kVK_Return) }
+                else if scalar == "\t" { try appendKey(kVK_Tab) }
+                else { buffer.append(contentsOf: scalar.utf16) }
+            }
+            try flushBuffer()
+            try willDispatch()
+            for (index, event) in events.enumerated() {
+                event.post(tap: .cgSessionEventTap)
+                if index % 2 == 1 && index + 1 < events.count {
+                    Thread.sleep(forTimeInterval: 0.002)
+                }
+            }
         case .click(let point):
             let location = CGPoint(x: point.x, y: point.y)
-            down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: location, mouseButton: .left)
-            up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: location, mouseButton: .left)
-            down?.setIntegerValueField(.mouseEventClickState, value: 1)
-            up?.setIntegerValueField(.mouseEventClickState, value: 1)
+            guard let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: location, mouseButton: .left),
+                  let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: location, mouseButton: .left) else {
+                throw NativeFailure(.nativeFailed, "input event creation failed")
+            }
+            down.setIntegerValueField(.mouseEventClickState, value: 1)
+            up.setIntegerValueField(.mouseEventClickState, value: 1)
+            try willDispatch()
+            down.post(tap: .cgSessionEventTap)
+            up.post(tap: .cgSessionEventTap)
+        case .doubleClick(let point):
+            let location = CGPoint(x: point.x, y: point.y)
+            guard let down1 = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: location, mouseButton: .left),
+                  let up1 = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: location, mouseButton: .left),
+                  let down2 = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: location, mouseButton: .left),
+                  let up2 = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: location, mouseButton: .left) else {
+                throw NativeFailure(.nativeFailed, "double-click event creation failed")
+            }
+            down1.setIntegerValueField(.mouseEventClickState, value: 1)
+            up1.setIntegerValueField(.mouseEventClickState, value: 1)
+            down2.setIntegerValueField(.mouseEventClickState, value: 2)
+            up2.setIntegerValueField(.mouseEventClickState, value: 2)
+            try willDispatch()
+            down1.post(tap: .cgSessionEventTap)
+            up1.post(tap: .cgSessionEventTap)
+            Thread.sleep(forTimeInterval: 0.02)
+            down2.post(tap: .cgSessionEventTap)
+            up2.post(tap: .cgSessionEventTap)
+        case .rightClick(let point):
+            let location = CGPoint(x: point.x, y: point.y)
+            guard let down = CGEvent(mouseEventSource: source, mouseType: .rightMouseDown, mouseCursorPosition: location, mouseButton: .right),
+                  let up = CGEvent(mouseEventSource: source, mouseType: .rightMouseUp, mouseCursorPosition: location, mouseButton: .right) else {
+                throw NativeFailure(.nativeFailed, "right-click event creation failed")
+            }
+            down.setIntegerValueField(.mouseEventClickState, value: 1)
+            up.setIntegerValueField(.mouseEventClickState, value: 1)
+            try willDispatch()
+            down.post(tap: .cgSessionEventTap)
+            up.post(tap: .cgSessionEventTap)
+        case .hover(let point):
+            let location = CGPoint(x: point.x, y: point.y)
+            guard let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: location, mouseButton: .left) else {
+                throw NativeFailure(.nativeFailed, "hover event creation failed")
+            }
+            try willDispatch()
+            move.post(tap: .cgSessionEventTap)
+        case .drag(let from, let to, let steps):
+            let start = CGPoint(x: from.x, y: from.y)
+            let end = CGPoint(x: to.x, y: to.y)
+            let count = max(1, min(50, steps))
+            guard let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: start, mouseButton: .left),
+                  let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left),
+                  let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left) else {
+                throw NativeFailure(.nativeFailed, "drag event creation failed")
+            }
+            down.setIntegerValueField(.mouseEventClickState, value: 1)
+            up.setIntegerValueField(.mouseEventClickState, value: 1)
+            var moves: [CGEvent] = []
+            moves.reserveCapacity(count)
+            for i in 1...count {
+                let t = Double(i) / Double(count)
+                let pos = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
+                guard let dragged = CGEvent(mouseEventSource: source, mouseType: .leftMouseDragged, mouseCursorPosition: pos, mouseButton: .left) else {
+                    throw NativeFailure(.nativeFailed, "drag motion event creation failed")
+                }
+                moves.append(dragged)
+            }
+            try willDispatch()
+            move.post(tap: .cgSessionEventTap)
+            down.post(tap: .cgSessionEventTap)
+            defer { up.post(tap: .cgSessionEventTap) }
+            for dragged in moves {
+                Thread.sleep(forTimeInterval: 0.008)
+                dragged.post(tap: .cgSessionEventTap)
+            }
+            Thread.sleep(forTimeInterval: 0.008)
         }
-        guard let down, let up else { throw NativeFailure(.nativeFailed, "input event creation failed") }
-        try willDispatch()
-        down.post(tap: .cgSessionEventTap)
-        up.post(tap: .cgSessionEventTap)
+    }
+
+    static func virtualKeyCode(for key: String) -> Int? {
+        switch key {
+        case "a": kVK_ANSI_A
+        case "b": kVK_ANSI_B
+        case "c": kVK_ANSI_C
+        case "d": kVK_ANSI_D
+        case "e": kVK_ANSI_E
+        case "f": kVK_ANSI_F
+        case "g": kVK_ANSI_G
+        case "h": kVK_ANSI_H
+        case "i": kVK_ANSI_I
+        case "j": kVK_ANSI_J
+        case "k": kVK_ANSI_K
+        case "l": kVK_ANSI_L
+        case "m": kVK_ANSI_M
+        case "n": kVK_ANSI_N
+        case "o": kVK_ANSI_O
+        case "p": kVK_ANSI_P
+        case "q": kVK_ANSI_Q
+        case "r": kVK_ANSI_R
+        case "s": kVK_ANSI_S
+        case "t": kVK_ANSI_T
+        case "u": kVK_ANSI_U
+        case "v": kVK_ANSI_V
+        case "w": kVK_ANSI_W
+        case "x": kVK_ANSI_X
+        case "y": kVK_ANSI_Y
+        case "z": kVK_ANSI_Z
+        case "0": kVK_ANSI_0
+        case "1": kVK_ANSI_1
+        case "2": kVK_ANSI_2
+        case "3": kVK_ANSI_3
+        case "4": kVK_ANSI_4
+        case "5": kVK_ANSI_5
+        case "6": kVK_ANSI_6
+        case "7": kVK_ANSI_7
+        case "8": kVK_ANSI_8
+        case "9": kVK_ANSI_9
+        case "minus": kVK_ANSI_Minus
+        case "equal": kVK_ANSI_Equal
+        case "leftBracket": kVK_ANSI_LeftBracket
+        case "rightBracket": kVK_ANSI_RightBracket
+        case "backslash": kVK_ANSI_Backslash
+        case "semicolon": kVK_ANSI_Semicolon
+        case "quote": kVK_ANSI_Quote
+        case "comma": kVK_ANSI_Comma
+        case "period": kVK_ANSI_Period
+        case "slash": kVK_ANSI_Slash
+        case "grave": kVK_ANSI_Grave
+        case "space": kVK_Space
+        case "return": kVK_Return
+        case "tab": kVK_Tab
+        case "escape": kVK_Escape
+        case "backspace": kVK_Delete
+        case "delete": kVK_ForwardDelete
+        case "left": kVK_LeftArrow
+        case "right": kVK_RightArrow
+        case "up": kVK_UpArrow
+        case "down": kVK_DownArrow
+        case "home": kVK_Home
+        case "end": kVK_End
+        case "pageUp": kVK_PageUp
+        case "pageDown": kVK_PageDown
+        case "f1": kVK_F1
+        case "f2": kVK_F2
+        case "f3": kVK_F3
+        case "f4": kVK_F4
+        case "f5": kVK_F5
+        case "f6": kVK_F6
+        case "f7": kVK_F7
+        case "f8": kVK_F8
+        case "f9": kVK_F9
+        case "f10": kVK_F10
+        case "f11": kVK_F11
+        case "f12": kVK_F12
+        default: nil
+        }
     }
 
     private func readObject(_ attribute: String, pid: UInt32, context: OperationContext) throws -> (any AXObject)? {
@@ -525,7 +799,7 @@ struct ClickWitness {
     private let original: CGImage
     private let region: CGRect
 
-    init?(operation: ClickOperation, observation: Observation, visualOnly: Bool) {
+    init?(point: Point, space: CoordinateSpace, observation: Observation, visualOnly: Bool) {
         guard let frame = observation.visual?.frame, let screenshot = observation.screenshot,
               observation.visual?.captureStatus == .captured,
               visualOnly
@@ -534,21 +808,33 @@ struct ClickWitness {
                 : observation.visual?.geometryMatchesAX == true,
               let data = Data(base64Encoded: screenshot.dataBase64),
               let original = Self.decode(data), original.width == frame.widthPx, original.height == frame.heightPx else { return nil }
-        let image: Point
-        switch operation.space {
-        case .imagePixels: image = operation.point
-        case .screenPoints:
-            image = Point(x: (operation.point.x - frame.imageToScreen.offsetX) / frame.imageToScreen.scaleX,
-                          y: (operation.point.y - frame.imageToScreen.offsetY) / frame.imageToScreen.scaleY)
-        case .windowPoints:
-            image = Point(x: (operation.point.x - frame.imageToWindow.offsetX) / frame.imageToWindow.scaleX,
-                          y: (operation.point.y - frame.imageToWindow.offsetY) / frame.imageToWindow.scaleY)
-        }
+        let image = Self.toImage(point: point, space: space, frame: frame)
         guard let screen = try? frame.imageToScreen.toScreen(image) else { return nil }
         let raster = CGRect(x: 0, y: 0, width: original.width, height: original.height)
         let region = CGRect(x: floor(image.x) - 12, y: floor(image.y) - 12, width: 25, height: 25).intersection(raster)
         guard region.width >= 8, region.height >= 8 else { return nil }
         self.screen = screen; self.frame = frame; self.original = original; self.region = region
+    }
+
+    static func mapToScreen(point: Point, space: CoordinateSpace, observation: Observation, visualOnly: Bool) -> Point? {
+        guard let frame = observation.visual?.frame, observation.visual?.captureStatus == .captured,
+              visualOnly
+                ? observation.accessibility == .unavailable && observation.visual?.geometryMatchesAX == nil
+                    && observation.windowBounds == frame.captureWindowBounds
+                : observation.visual?.geometryMatchesAX == true else { return nil }
+        return try? frame.imageToScreen.toScreen(toImage(point: point, space: space, frame: frame))
+    }
+
+    private static func toImage(point: Point, space: CoordinateSpace, frame: VisualFrame) -> Point {
+        switch space {
+        case .imagePixels: return point
+        case .screenPoints:
+            return Point(x: (point.x - frame.imageToScreen.offsetX) / frame.imageToScreen.scaleX,
+                         y: (point.y - frame.imageToScreen.offsetY) / frame.imageToScreen.scaleY)
+        case .windowPoints:
+            return Point(x: (point.x - frame.imageToWindow.offsetX) / frame.imageToWindow.scaleX,
+                         y: (point.y - frame.imageToWindow.offsetY) / frame.imageToWindow.scaleY)
+        }
     }
 
     func validate(capture: any VisualCapturing, target: Target, context: OperationContext) throws {

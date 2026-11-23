@@ -232,12 +232,16 @@ public final class RuntimeSession: @unchecked Sendable {
             let permissions = try system.permissions(context: context)
             var supported = system.supportedActions(permissions: permissions)
             if mode == .foregroundAllowed && permissions.inputPosting {
-                if permissions.accessibility { supported.append(.key) }
-                if #available(macOS 14.0, *), permissions.screenRecording { supported.append(.click) }
+                if permissions.accessibility { supported.append(contentsOf: [.key, .hotkey, .typeKeys]) }
+                if #available(macOS 14.0, *), permissions.screenRecording {
+                    supported.append(contentsOf: [.click, .doubleClick, .rightClick, .hover, .drag])
+                }
             }
             return NativeResult(.capabilities(Capabilities(permissions: permissions, mode: mode, actions: supported)))
         case .targets(let params):
             return NativeResult(.targets(try system.targets(params, context: context)))
+        case .open(let params):
+            return NativeResult(.open(try system.open(params, context: context)))
         case .observe(let params):
             activityOverlay?.beginObservation(params.target)
             let native = try system.observe(params: params, observationId: nextObservationID(), context: context)
@@ -287,7 +291,8 @@ public final class RuntimeSession: @unchecked Sendable {
                 return NativeResult(.waitFor(WaitResult(outcome: .satisfied, alreadySatisfied: evaluated.alreadySatisfied,
                     observation: nil, evidence: evaluated.evidence)))
             }
-            let native = try system.observe(params: ObserveRequest(target: wait.target, includeScreenshot: false, includeValues: false),
+            let native = try system.observe(params: ObserveRequest(target: wait.target, includeScreenshot: false,
+                                                                   includeValues: wait.includeValues, scope: wait.scope),
                 observationId: nextObservationID(), context: context)
             let original = native.observation
             let finished = max(started, original.collected.finishedUnixMs)

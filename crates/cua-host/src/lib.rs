@@ -63,6 +63,9 @@ pub struct ObserveArgs {
     #[schemars(length(min = 1, max = 16))]
     pub ax_selectors: Option<Vec<Selector>>,
     pub event_history: Option<EventHistoryRequest>,
+    pub scope: Option<ObserveScope>,
+    #[serde(default)]
+    pub interactive_only: bool,
     #[serde(default)]
     pub include_values: bool,
     #[serde(default = "default_budget")]
@@ -91,6 +94,26 @@ pub struct WaitArgs {
     pub observation_id: String,
     pub target: TargetKey,
     pub condition: Condition,
+    #[serde(default)]
+    pub include_values: bool,
+    pub scope: Option<ObserveScope>,
+    #[serde(default = "default_budget")]
+    #[schemars(range(min = 1, max = 60000))]
+    pub budget_ms: u32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OpenArgs {
+    pub bundle_id: Option<String>,
+    #[schemars(length(min = 1, max = 256))]
+    pub app_name: Option<String>,
+    #[schemars(length(min = 1, max = 2048))]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub new_instance: bool,
+    #[serde(default)]
+    pub activate: bool,
     #[serde(default = "default_budget")]
     #[schemars(range(min = 1, max = 60000))]
     pub budget_ms: u32,
@@ -121,6 +144,9 @@ fn validate_public(body: &RequestBody, budget_ms: u32) -> Result<(), McpError> {
     let mut body = body.clone();
     if let RequestBody::Act(act) = &mut body {
         act.grant_id = "host-validation".into();
+    }
+    if let RequestBody::Open(open) = &mut body {
+        open.grant_id = "host-validation".into();
     }
     Frame::Request(Request {
         version: VERSION,
@@ -192,7 +218,8 @@ impl Host {
             ));
         };
         validate_public(&body, budget_ms)?;
-        if matches!(&body, RequestBody::Act(act) if act.foreground)
+        if (matches!(&body, RequestBody::Act(act) if act.foreground)
+            || matches!(&body, RequestBody::Open(open) if open.activate))
             && self.client.execution_mode() != ExecutionMode::ForegroundAllowed
         {
             return Ok(before_native_error(
@@ -206,6 +233,7 @@ impl Host {
             RequestBody::Observe(_) => "observe",
             RequestBody::Act(_) => "act",
             RequestBody::WaitFor(_) => "waitFor",
+            RequestBody::Open(_) => "open",
             _ => unreachable!("only public operations are routed"),
         };
         let token = self.disconnected.child_token();
@@ -313,7 +341,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Observe one exact window, including Accessibility controls exposed by owners without a bundle ID. Request screenshots or OCR for controls or windows without usable AX coverage. Optional axSelectors reads matching AX controls and reports query coverage separately from window coverage. Optional eventHistory retains bounded selected-state changes between observations; historical controls have no actionable refs. Values, screenshots, and Vision OCR are opt-in. cropWindow uses window-local points. Partial coverage cannot prove absence; history can be stale or overrun."
+        description = "Observe one exact window, including Accessibility controls exposed by owners without a bundle ID. Request screenshots or OCR for controls or windows without usable AX coverage. Optional scope narrows AX reads to 'webArea' (skipping browser tabs/chrome) or 'menuBar' (inspecting native app menu items for invokeMenu). Optional interactiveOnly keeps only interactive controls. Optional axSelectors (supporting exact label or labelContains substring) reads matching AX controls and reports query coverage separately from window coverage. Optional eventHistory retains bounded selected-state changes between observations; historical controls have no actionable refs. Values, screenshots, and Vision OCR are opt-in. cropWindow uses window-local points. Partial coverage cannot prove absence; history can be stale or overrun."
     )]
     async fn observe(
         &self,
@@ -331,6 +359,8 @@ impl Host {
                 max_image_dimension_px: args.max_image_dimension_px,
                 ax_selectors: args.ax_selectors,
                 event_history: args.event_history,
+                scope: args.scope,
+                interactive_only: args.interactive_only,
             }),
             args.budget_ms,
             context,
@@ -339,7 +369,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Run 1-16 ordered typed background actions and predicate waits within one budget. Supports background setValue, selection replacement, press, scroll, and scrollToVisible on live references. Scroll uses an AXScrollArea that advertises scroll; scrollToVisible uses any live element advertising scrollToVisible (such as browser web controls). Use axis vertical or horizontal and a nonzero amount from -1000 to 1000. Positive moves down or right, and 250 requests 25% of the full range. Observe again after movement. Foreground keys (including browser shortcuts) and clicks require operator authority and foreground: true. Stops at the first failed requirement. Optional feedback returns requested control updates tied to the base observation. No rollback or automatic replay."
+        description = "Run 1-16 ordered typed actions and predicate waits within one budget. Background mode supports setValue, typeText (selection replacement), press, confirm (AXConfirm), showMenu (AXShowMenu), cancel (AXCancel), invokeMenu (native AXMenuBar path), scroll (AXScrollArea), and scrollToVisible on live references. Foreground mode (requires operator foregroundAllowed grant and foreground: true) supports click, doubleClick, rightClick, hover, drag, key, hotkey (arbitrary key + command/control/option/shift modifiers), and typeKeys (focused Unicode text input). Stops at the first failed requirement. Optional feedback returns requested control updates tied to the base observation. No rollback or automatic replay."
     )]
     async fn act(
         &self,
@@ -363,7 +393,7 @@ impl Host {
 
     #[tool(
         name = "waitFor",
-        description = "Wait within one budget for an exact value, enabled state, element presence/absence, web URL substring (urlContains), or disappearance of the exact window identity. Partial reads cannot prove absence. Window disappearance returns timestamped evidence without creating a replacement target."
+        description = "Wait within one budget for an exact value, valueContains substring, enabled state, element presence/absence (supporting exact label or labelContains), web URL substring (urlContains), or disappearance of the exact window identity. Optional includeValues and scope ('window' or 'webArea') control the fresh observation returned on satisfaction. Partial reads cannot prove absence. Window disappearance returns timestamped evidence without creating a replacement target."
     )]
     async fn wait_for(
         &self,
@@ -375,6 +405,31 @@ impl Host {
                 observation_id: args.observation_id,
                 target: args.target,
                 condition: args.condition,
+                include_values: args.include_values,
+                scope: args.scope,
+            }),
+            args.budget_ms,
+            context,
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Launch an application by bundleId or appName and/or open a URL (http/https/file/mailto/custom scheme). Runs in the background by default (activate: false) without stealing foreground focus, returning the launched process PID and any visible window targets ready for observe. Setting activate: true requires an operator foregroundAllowed grant."
+    )]
+    async fn open(
+        &self,
+        Parameters(args): Parameters<OpenArgs>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        self.execute(
+            RequestBody::Open(OpenRequest {
+                grant_id: String::new(),
+                bundle_id: args.bundle_id,
+                app_name: args.app_name,
+                url: args.url,
+                new_instance: args.new_instance,
+                activate: args.activate,
             }),
             args.budget_ms,
             context,
@@ -388,7 +443,7 @@ impl ServerHandler for Host {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("macos-computer-use", env!("CARGO_PKG_VERSION")))
-            .with_instructions("Background authority is installed by the operator. Read capabilities before acting. Observations establish provenance, not freshness. Unknown delivery must be reconciled before retrying. Use only actions advertised by the live element. This runtime accepts up to 16 typed steps per act request under one deadline. Waits send no input. Requested feedback uses the original references; invalidated references require a fresh observation. The foreground route requires an operator grant and explicit foreground: true on act. Foreground clicks require fresh image-backed evidence.")
+            .with_instructions("Background authority is installed by the operator. Read capabilities before acting. Use open to launch apps or open URLs in the background (activate: true requires foregroundAllowed). Use observe (optionally with scope: webArea/menuBar, interactiveOnly, or axSelectors with labelContains) to establish provenance. Unknown delivery must be reconciled before retrying. Use only actions advertised by the live element. This runtime accepts up to 16 typed steps per act request under one deadline. Waits send no input. Requested feedback uses the original references; invalidated references require a fresh observation. The foreground route requires an operator grant and explicit foreground: true on act. Foreground pointer operations require fresh image-backed evidence.")
     }
 }
 
@@ -406,6 +461,12 @@ mod tests {
             serde_json::from_value::<ActArgs>(
                 json!({"observationId":"o","target":{"pid":1,"windowId":1},
             "steps":[],"grantId":"forged"})
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<OpenArgs>(
+                json!({"bundleId":"com.apple.TextEdit","grantId":"forged"})
             )
             .is_err()
         );
@@ -470,6 +531,22 @@ mod tests {
                     max_image_dimension_px: None,
                     ax_selectors: None,
                     event_history: None,
+                    scope: None,
+                    interactive_only: false,
+                }),
+                5000
+            )
+            .is_err()
+        );
+        assert!(
+            validate_public(
+                &RequestBody::Open(OpenRequest {
+                    grant_id: String::new(),
+                    bundle_id: None,
+                    app_name: None,
+                    url: None,
+                    new_instance: false,
+                    activate: false,
                 }),
                 5000
             )

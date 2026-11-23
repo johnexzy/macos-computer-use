@@ -1,0 +1,1 @@
+{"kind":"request","message":{"version":1,"id":"request-1","epoch":"helper-epoch-1","budgetMs":5000,"body":{"method":"observe","params":{"target":{"pid":42,"windowId":7},"includeScreenshot":false,"includeValues":false,"scope":"webArea","interactiveOnly":true,"axSelectors":[{"role":"AXButton","label":null,"identifier":null,"labelContains":"Save"}]}}}}

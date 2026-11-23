@@ -108,9 +108,10 @@ sends no input; mixed sequences preserve the same boundary before later mutation
 | --- | --- |
 | `capabilities` | Read-only permission booleans, installed mode, and actual supported action kinds. It does not request permission. |
 | `targets` | Return exact window/process keys, titles, logical bounds, and bundle ID and owner name when available. Optional filters are exact `bundleId`, case-insensitive `titleContains` and `ownerContains`, and `unbundledOnly`. All supplied filters must match before the result cap applies. `truncated` makes the bound visible. |
-| `observe` | Exact target; explicit value, screenshot, and OCR inclusion flags; optional exact `axSelectors` and `eventHistory` cursor. Visual collection accepts a window-local crop and image dimension limit. |
-| `act` | Installed grant, observation, exact target, and 1–16 ordered steps. No arbitrary scripts or execution-mode override. |
-| `waitFor` | Evaluate a typed condition for the same exact target within the request deadline. It never mutates. |
+| `open` | Installed grant plus `bundleId` or `appName` and/or validated `url`, with optional `newInstance` and `activate` (default `false`; `activate: true` requires `foregroundAllowed`). Returns optional `pid`, `bundleId`, `activated`, and bounded visible `targets`. |
+| `observe` | Exact target; explicit value, screenshot, and OCR inclusion flags; optional `scope` (`window`, `webArea`, `menuBar`), `interactiveOnly`, `axSelectors` (supporting `label`, `labelContains`, `identifier`), and `eventHistory` cursor. Visual collection accepts a window-local crop and image dimension limit. Scoped or filtered observations never claim `complete` window coverage. |
+| `act` | Installed grant, observation, exact target, and 1–16 ordered steps (`setValue`, `typeText`, `press`, `confirm`, `showMenu`, `cancel`, `invokeMenu`, `scroll`, `scrollToVisible`, `waitFor` in background; `click`, `doubleClick`, `rightClick`, `hover`, `drag`, `key`, `hotkey`, `typeKeys`, `waitFor` under `foreground: true` with `foregroundAllowed`). No arbitrary scripts or execution-mode override. |
+| `waitFor` | Evaluate a typed condition (`elementExists`, `elementAbsent`, `valueEquals`, `valueContains`, `enabled`, `urlContains`, `windowAbsent`) for the same exact target within the request deadline, with optional `includeValues` and `scope` (`window` or `webArea`) for the returned observation. It never mutates. |
 
 The current runtime implements AX and opt-in visual `observe` and bounded linear
 `act` sequences combining `setValue`, `typeText`, `press`, `scroll`, and a read-only

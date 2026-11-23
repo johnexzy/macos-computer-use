@@ -7,6 +7,10 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
+public protocol AppOpening: Sendable {
+    func open(_ request: OpenRequest, catalog: any WindowCatalog, context: OperationContext) throws -> OpenResult
+}
+
 public protocol NativeSystem: Sendable {
     func permissions(context: OperationContext) throws -> Permissions
     func supportedActions(permissions: Permissions) -> [ActionKind]
@@ -14,12 +18,16 @@ public protocol NativeSystem: Sendable {
     func window(_ key: TargetKey, context: OperationContext) throws -> Target
     func retainApplication(pid: UInt32, timeoutSeconds: Float, context: OperationContext) throws -> (any RetainedNativeHandle)?
     func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation
+    func open(_ request: OpenRequest, context: OperationContext) throws -> OpenResult
     func configureObservationWorker(_ queue: DispatchQueue)
     func shutdownObservations()
 }
 
 public extension NativeSystem {
     func supportedActions(permissions: Permissions) -> [ActionKind] { [] }
+    func open(_ request: OpenRequest, context: OperationContext) throws -> OpenResult {
+        throw NativeFailure(.unsupported, "open is unavailable for this backend")
+    }
     func configureObservationWorker(_ queue: DispatchQueue) {}
     func shutdownObservations() {}
     func observe(params: ObserveRequest, observationId: String, context: OperationContext) throws -> NativeObservation {
@@ -41,17 +49,21 @@ public struct MacOSSystem: NativeSystem {
     private let backend: any AXReading
     private let catalog: any WindowCatalog
     private let visual: any VisualCapturing
+    private let opener: any AppOpening
     private let isAXTrusted: @Sendable () -> Bool
     private let eventRegistry = TargetEventRegistry()
 
     public init(backend: any AXReading = MacOSAXBackend(), catalog: any WindowCatalog = MacOSWindowCatalog()) {
-        self.init(backend: backend, catalog: catalog, visual: ScreenWindowCapture(), isAXTrusted: { AXIsProcessTrusted() })
+        self.init(backend: backend, catalog: catalog, visual: ScreenWindowCapture(), opener: MacOSAppOpener(),
+                  isAXTrusted: { AXIsProcessTrusted() })
     }
 
-    init(backend: any AXReading, catalog: any WindowCatalog, visual: any VisualCapturing, isAXTrusted: @escaping @Sendable () -> Bool) {
+    init(backend: any AXReading, catalog: any WindowCatalog, visual: any VisualCapturing,
+         opener: any AppOpening = MacOSAppOpener(), isAXTrusted: @escaping @Sendable () -> Bool) {
         self.backend = backend
         self.catalog = catalog
         self.visual = visual
+        self.opener = opener
         self.isAXTrusted = isAXTrusted
     }
     public func permissions(context: OperationContext) throws -> Permissions {
@@ -63,9 +75,14 @@ public struct MacOSSystem: NativeSystem {
     }
     public func supportedActions(permissions: Permissions) -> [ActionKind] {
         guard permissions.accessibility else { return [] }
-        var supported: [ActionKind] = backend is any AXMutating ? [.setValue, .press, .typeText, .scrollToVisible] : []
+        var supported: [ActionKind] = backend is any AXMutating
+            ? [.setValue, .press, .typeText, .scrollToVisible, .confirm, .showMenu, .cancel, .invokeMenu]
+            : []
         if backend is any AXScrolling { supported.append(.scroll) }
         return supported
+    }
+    public func open(_ request: OpenRequest, context: OperationContext) throws -> OpenResult {
+        try opener.open(request, catalog: catalog, context: context)
     }
     public func shutdownObservations() { eventRegistry.shutdown() }
     public func configureObservationWorker(_ queue: DispatchQueue) { eventRegistry.configure(worker: queue) }
@@ -81,7 +98,8 @@ public struct MacOSSystem: NativeSystem {
         let window = try catalog.windowSnapshot(params.target, context: context)
         let semantic: NativeObservation
         if isAXTrusted() {
-            let ax = ObserveRequest(target: params.target, includeScreenshot: false, includeValues: params.includeValues, axSelectors: params.axSelectors)
+            let ax = ObserveRequest(target: params.target, includeScreenshot: false, includeValues: params.includeValues,
+                                    axSelectors: params.axSelectors, scope: params.scope, interactiveOnly: params.interactiveOnly)
             do {
                 semantic = try SemanticAXObserver(backend: backend, catalog: catalog).observe(
                     params: ax, observationId: observationId, target: window.target,
@@ -429,6 +447,129 @@ public struct MacOSWindowCatalog: WindowCatalog {
                       title: record[kCGWindowName as String] as? String ?? "",
                       bounds: Rect(x: x, y: y, width: width, height: height),
                       ownerName: bundleId == nil ? ownerName.flatMap { (1...1024).contains($0.utf8.count) ? $0 : nil } : nil)
+    }
+}
+
+private final class OpenBox: @unchecked Sendable {
+    private let lock = NSLock()
+    var app: NSRunningApplication?
+    var error: Error?
+    func set(app: NSRunningApplication?, error: Error?) {
+        lock.lock(); self.app = app; self.error = error; lock.unlock()
+    }
+    func read() -> (NSRunningApplication?, Error?) {
+        lock.lock(); defer { lock.unlock() }; return (app, error)
+    }
+}
+
+public struct MacOSAppOpener: AppOpening {
+    public init() {}
+
+    public func open(_ request: OpenRequest, catalog: any WindowCatalog, context: OperationContext) throws -> OpenResult {
+        try context.check()
+        let appURL: URL?
+        if let bundleId = request.bundleId {
+            guard let found = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else {
+                throw NativeFailure(.targetNotFound, "application bundle not found")
+            }
+            appURL = found
+        } else if let appName = request.appName {
+            guard let found = Self.resolveAppURL(named: appName) else {
+                throw NativeFailure(.targetNotFound, "application not found")
+            }
+            appURL = found
+        } else {
+            appURL = nil
+        }
+
+        let targetURL: URL?
+        if let rawUrl = request.url {
+            guard let parsed = URL(string: rawUrl) else {
+                throw NativeFailure(.invalidRequest, "invalid URL")
+            }
+            targetURL = parsed
+        } else {
+            targetURL = nil
+        }
+
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = request.activate
+        config.createsNewApplicationInstance = request.newInstance
+
+        let sem = DispatchSemaphore(value: 0)
+        let box = OpenBox()
+        let completion: @Sendable (NSRunningApplication?, Error?) -> Void = { app, error in
+            box.set(app: app, error: error)
+            sem.signal()
+        }
+
+        try context.check()
+        if let appURL, let targetURL {
+            NSWorkspace.shared.open([targetURL], withApplicationAt: appURL, configuration: config, completionHandler: completion)
+        } else if let appURL {
+            NSWorkspace.shared.openApplication(at: appURL, configuration: config, completionHandler: completion)
+        } else if let targetURL {
+            NSWorkspace.shared.open(targetURL, configuration: config, completionHandler: completion)
+        } else {
+            throw NativeFailure(.invalidRequest, "open requires bundleId, appName, or url")
+        }
+
+        while sem.wait(timeout: .now() + .milliseconds(25)) != .success {
+            try context.check()
+        }
+        try context.check()
+        let (launched, error) = box.read()
+        if error != nil {
+            throw NativeFailure(.nativeFailed, "macOS failed to open target")
+        }
+
+        let pid: UInt32? = launched.flatMap { $0.processIdentifier > 0 ? UInt32($0.processIdentifier) : nil }
+        let bundleId = launched?.bundleIdentifier ?? request.bundleId
+        var windows: [Target] = []
+        if let pid {
+            let windowDeadline = min(context.deadlineNanoseconds, DispatchTime.now().uptimeNanoseconds + 800_000_000)
+            while true {
+                try context.check()
+                if let list = try? catalog.processWindows(pid: pid, context: context), !list.isEmpty {
+                    windows = Array(list.prefix(Limits.maxTargets))
+                    break
+                }
+                if DispatchTime.now().uptimeNanoseconds >= windowDeadline { break }
+                let delay = Double(try context.nativeTimeoutSeconds(maximum: 0.05))
+                if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+            }
+        }
+        return OpenResult(pid: pid, bundleId: bundleId, activated: request.activate, targets: windows)
+    }
+
+    private static func resolveAppURL(named name: String) -> URL? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let candidates = trimmed.hasSuffix(".app") ? [trimmed] : ["\(trimmed).app", trimmed]
+        let homeApps = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path
+        let roots = ["/Applications", homeApps, "/System/Applications", "/System/Applications/Utilities"]
+        let fm = FileManager.default
+        for root in roots {
+            for candidate in candidates {
+                let path = (root as NSString).appendingPathComponent(candidate)
+                var isDir: ObjCBool = false
+                if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue {
+                    return URL(fileURLWithPath: path)
+                }
+            }
+        }
+        let lower = trimmed.lowercased()
+        let running = NSWorkspace.shared.runningApplications
+        for app in running {
+            if let localized = app.localizedName, localized.lowercased() == lower, let url = app.bundleURL {
+                return url
+            }
+            if let url = app.bundleURL {
+                let stem = url.deletingPathExtension().lastPathComponent.lowercased()
+                if stem == lower { return url }
+            }
+        }
+        return nil
     }
 }
 

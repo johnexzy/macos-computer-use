@@ -141,6 +141,7 @@ impl Shared {
             RequestBody::Observe(_) => "observe",
             RequestBody::Act(_) => "act",
             RequestBody::WaitFor(_) => "waitFor",
+            RequestBody::Open(_) => "open",
             RequestBody::Cancel(_) => "cancel",
         };
         let (outcome, delivery, verification) = match result {
@@ -311,6 +312,17 @@ impl Client {
                 ));
             }
             act.grant_id = self.authority.grant_id.clone();
+        }
+        if let RequestBody::Open(open) = &mut body {
+            if open.activate
+                && self.authority.mode != cua_protocol::ExecutionMode::ForegroundAllowed
+            {
+                return Err(ClientError::new(
+                    ClientErrorKind::ForbiddenControl,
+                    "operator foreground authority is required",
+                ));
+            }
+            open.grant_id = self.authority.grant_id.clone();
         }
         let started = Instant::now();
         let deadline = started + budget;

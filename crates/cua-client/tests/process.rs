@@ -224,6 +224,8 @@ async fn a_correlated_wait_timeout_survives_host_deadline_reconciliation_but_lat
                 element_ref: "element-1".into(),
                 value: "ready".into(),
             }),
+            include_values: false,
+            scope: None,
         });
         let result = client
             .call(request, Duration::from_millis(25), CancellationToken::new())
@@ -256,6 +258,8 @@ async fn host_deadline_classifies_cooperative_wait_cancellation_without_losing_e
                     window_id: 7,
                 },
                 condition: condition.clone(),
+                include_values: false,
+                scope: None,
             }),
             Duration::from_millis(50),
             CancellationToken::new(),
@@ -320,6 +324,8 @@ async fn explicit_user_wait_cancellation_remains_cancelled_and_reusable() {
                     element_ref: "element-1".into(),
                     value: "ready".into(),
                 }),
+                include_values: false,
+                scope: None,
             }),
             Duration::from_secs(1),
             cancellation,

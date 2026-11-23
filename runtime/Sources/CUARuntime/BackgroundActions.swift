@@ -13,12 +13,36 @@ public protocol AXMutating: Sendable {
                              willDispatch: @Sendable () throws -> Void) throws
     func scrollToVisible(_ object: any AXObject, context: OperationContext,
                          willDispatch: @Sendable () throws -> Void) throws
+    func confirm(_ object: any AXObject, context: OperationContext,
+                 willDispatch: @Sendable () throws -> Void) throws
+    func showMenu(_ object: any AXObject, context: OperationContext,
+                  willDispatch: @Sendable () throws -> Void) throws
+    func cancel(_ object: any AXObject, context: OperationContext,
+                willDispatch: @Sendable () throws -> Void) throws
+    func invokeMenu(_ path: [String], on application: any AXObject, context: OperationContext,
+                    willDispatch: @Sendable () throws -> Void) throws
 }
 
 public extension AXMutating {
     func scrollToVisible(_ object: any AXObject, context: OperationContext,
                          willDispatch: @Sendable () throws -> Void) throws {
         throw NativeFailure(.unsupported, "AXScrollToVisible is not supported by this backend")
+    }
+    func confirm(_ object: any AXObject, context: OperationContext,
+                 willDispatch: @Sendable () throws -> Void) throws {
+        throw NativeFailure(.unsupported, "AXConfirm is not supported by this backend")
+    }
+    func showMenu(_ object: any AXObject, context: OperationContext,
+                  willDispatch: @Sendable () throws -> Void) throws {
+        throw NativeFailure(.unsupported, "AXShowMenu is not supported by this backend")
+    }
+    func cancel(_ object: any AXObject, context: OperationContext,
+                willDispatch: @Sendable () throws -> Void) throws {
+        throw NativeFailure(.unsupported, "AXCancel is not supported by this backend")
+    }
+    func invokeMenu(_ path: [String], on application: any AXObject, context: OperationContext,
+                    willDispatch: @Sendable () throws -> Void) throws {
+        throw NativeFailure(.unsupported, "AXMenuBar invocation is not supported by this backend")
     }
 }
 
@@ -91,10 +115,14 @@ public struct BackgroundActions: Sendable {
                     throw NativeFailure(.staleObservation, "visual observation does not belong to this request")
                 }
                 guard request.steps.allSatisfy({ step in
-                    if case .click = step.operation { return step.precondition == nil && step.expect == nil }
-                    return false
+                    switch step.operation {
+                    case .click, .doubleClick, .rightClick, .hover, .drag:
+                        return step.precondition == nil && step.expect == nil
+                    default:
+                        return false
+                    }
                 }) else {
-                    throw NativeFailure(.unsupported, "visual observations support only foreground clicks without AX conditions")
+                    throw NativeFailure(.unsupported, "visual observations support only foreground pointer actions without AX conditions")
                 }
                 handle = nil
                 foreground = try ForegroundControl(platform: foregroundPlatform, capture: coordinateCapture,
@@ -192,7 +220,13 @@ public struct BackgroundActions: Sendable {
         let route: DeliveryRoute
         switch step.operation {
         case .click: route = .foregroundClick
+        case .doubleClick: route = .foregroundDoubleClick
+        case .rightClick: route = .foregroundRightClick
+        case .hover: route = .foregroundHover
+        case .drag: route = .foregroundDrag
         case .key: route = .foregroundKey
+        case .hotkey: route = .foregroundHotkey
+        case .typeKeys: route = .foregroundTypeKeys
         default: throw NativeFailure(.unsupported, "foreground operation is not available")
         }
         func checkGuard() throws {
@@ -240,6 +274,12 @@ public struct BackgroundActions: Sendable {
                          state: ActionExecutionState, before: UInt32?, activityOverlay: DesktopActivityOverlay?) throws -> Bool {
         try context.check()
         guard let writer = handle.backend as? any AXMutating else { throw NativeFailure(.unsupported, "semantic mutation backend unavailable") }
+
+        if case .invokeMenu(let menu) = step.operation {
+            return try executeInvokeMenu(menu, step: step, entry: entry, handle: handle, writer: writer,
+                                         context: context, state: state, before: before)
+        }
+
         let reference: String
         let route: DeliveryRoute
         switch step.operation {
@@ -248,9 +288,13 @@ public struct BackgroundActions: Sendable {
         case .typeText(let value): reference = value.elementRef; route = .axSelectedText
         case .scroll(let value): reference = value.elementRef; route = .axScroll
         case .scrollToVisible(let value): reference = value.elementRef; route = .axScrollToVisible
+        case .confirm(let value): reference = value.elementRef; route = .axConfirm
+        case .showMenu(let value): reference = value.elementRef; route = .axShowMenu
+        case .cancel(let value): reference = value.elementRef; route = .axCancel
         default: throw NativeFailure(.unsupported, "background operation is not implemented")
         }
-        let resolved = try handle.resolve(reference, includeValue: route != .axScroll && route != .axScrollToVisible, context: context)
+        let needsValue = route == .axSetValue || route == .axSelectedText
+        let resolved = try handle.resolve(reference, includeValue: needsValue, context: context)
         if route == .axScroll {
             guard resolved.snapshot.availableActions(backend: handle.backend).contains(.scroll),
                   !resolved.snapshot.enabledKnown || resolved.snapshot.enabled else {
@@ -262,12 +306,16 @@ public struct BackgroundActions: Sendable {
                 throw NativeFailure(.unsupported, "AXScrollToVisible is not advertised or target is disabled")
             }
         } else {
-            try requireEnabledSnapshot(resolved.snapshot, allowUnsupported: route != .axPress)
+            let allowUnsupportedEnabled = route == .axSetValue || route == .axSelectedText || route == .axConfirm || route == .axCancel
+            try requireEnabledSnapshot(resolved.snapshot, allowUnsupported: allowUnsupportedEnabled)
         }
         switch step.operation {
         case .setValue: guard resolved.snapshot.valueSettable else { throw NativeFailure(.unsupported, "AXValue is not settable") }
         case .press: guard resolved.snapshot.actions.contains(kAXPressAction as String) else { throw NativeFailure(.unsupported, "AXPress is not advertised") }
         case .typeText: guard resolved.snapshot.selectedTextSettable else { throw NativeFailure(.unsupported, "AXSelectedText is not settable") }
+        case .confirm: guard resolved.snapshot.actions.contains(kAXConfirmAction as String) else { throw NativeFailure(.unsupported, "AXConfirm is not advertised") }
+        case .showMenu: guard resolved.snapshot.actions.contains(kAXShowMenuAction as String) else { throw NativeFailure(.unsupported, "AXShowMenu is not advertised") }
+        case .cancel: guard resolved.snapshot.actions.contains(kAXCancelAction as String) else { throw NativeFailure(.unsupported, "AXCancel is not advertised") }
         default: break
         }
         if let condition = step.precondition {
@@ -327,7 +375,8 @@ public struct BackgroundActions: Sendable {
                 throw NativeFailure(.unsupported, "scroll target is disabled")
             }
         } else {
-            try requireEnabledSnapshot(live.snapshot, allowUnsupported: route != .axPress)
+            let allowUnsupportedEnabled = route == .axSetValue || route == .axSelectedText || route == .axConfirm || route == .axCancel
+            try requireEnabledSnapshot(live.snapshot, allowUnsupported: allowUnsupportedEnabled)
         }
         if typing && (live.snapshot.value != resolved.snapshot.value || live.snapshot.selectedRange != resolved.snapshot.selectedRange) {
             throw NativeFailure(.staleElement, "text value or selection changed before dispatch")
@@ -366,6 +415,12 @@ public struct BackgroundActions: Sendable {
                 }
             case .scrollToVisible:
                 try writer.scrollToVisible(resolved.object, context: context, willDispatch: handoff)
+            case .confirm:
+                try writer.confirm(resolved.object, context: context, willDispatch: handoff)
+            case .showMenu:
+                try writer.showMenu(resolved.object, context: context, willDispatch: handoff)
+            case .cancel:
+                try writer.cancel(resolved.object, context: context, willDispatch: handoff)
             default: break
             }
             if route != .axScroll { state.returnedSuccessfully() }
@@ -393,6 +448,71 @@ public struct BackgroundActions: Sendable {
                 if checks.count == required.count && checks.allSatisfy(\.matched) && privateMatched { return false }
             } catch is AXReadUnavailable {
                 // Only effect reads may repeat. An actual setter error must still stop this action.
+                if let mutationFailure { throw mutationFailure }
+                try checkForeground(before, targetPID: handle.target.key.pid)
+            }
+            try pause(context)
+        }
+    }
+
+    private func executeInvokeMenu(_ menu: InvokeMenuOperation, step: ActionStep, entry: RetainedObservation,
+                                   handle: SemanticObservationHandle, writer: any AXMutating, context: OperationContext,
+                                   state: ActionExecutionState, before: UInt32?) throws -> Bool {
+        try handle.validateWindow(context: context)
+        if let condition = step.precondition {
+            guard let check = try evaluate(condition, handle: handle, context: context) else {
+                throw NativeFailure(.unsupported, "precondition cannot be read")
+            }
+            if !check.matched {
+                state.checked([check], verification: .unverified)
+                state.finish(reason: .preconditionFailed, stop: .preconditionFailed)
+                return false
+            }
+        }
+        if let expected = step.expect, let check = try evaluate(expected, handle: handle, context: context), check.matched {
+            state.checked([check], verification: .confirmed)
+            return true
+        }
+        try checkForeground(before, targetPID: handle.target.key.pid)
+        try context.check()
+        let handoff: @Sendable () throws -> Void = {
+            try checkLifetime(entry)
+            try handle.validateWindow(context: context)
+            if let condition = step.precondition {
+                guard let check = try evaluate(condition, handle: handle, context: context) else {
+                    throw NativeFailure(.unsupported, "precondition cannot be read before dispatch")
+                }
+                if !check.matched {
+                    state.checked([check], verification: .unverified)
+                    state.finish(reason: .preconditionFailed, stop: .preconditionFailed)
+                    throw NativeFailure(.nativeFailed, "precondition changed before dispatch")
+                }
+            }
+            try checkForeground(before, targetPID: handle.target.key.pid)
+            try checkLifetime(entry)
+            try state.beginDispatch(context: context, route: .axMenu)
+        }
+        var mutationFailure: NativeFailure?
+        do {
+            try writer.invokeMenu(menu.path, on: handle.application, context: context, willDispatch: handoff)
+            state.returnedSuccessfully()
+        } catch let error as NativeFailure { mutationFailure = error }
+        catch { mutationFailure = NativeFailure(.nativeFailed, "native menu invocation returned an error") }
+        if !state.hasEnteredDispatch, let mutationFailure { throw mutationFailure }
+        guard let expected = step.expect else {
+            try checkForeground(before, targetPID: handle.target.key.pid)
+            if let mutationFailure { throw mutationFailure }
+            return false
+        }
+        while true {
+            try context.check()
+            try checkLifetime(entry)
+            do {
+                let checks = try recordChecks([expected], handle: handle, context: context, state: state)
+                try checkForeground(before, targetPID: handle.target.key.pid)
+                if let mutationFailure { throw mutationFailure }
+                if checks.first?.matched == true { return false }
+            } catch is AXReadUnavailable {
                 if let mutationFailure { throw mutationFailure }
                 try checkForeground(before, targetPID: handle.target.key.pid)
             }
@@ -504,23 +624,13 @@ extension MacOSAXBackend: AXMutating {
         try requireSettable(kAXValueAttribute as CFString, element: element, context: context)
         try installTimeout(element, context: context)
         try willDispatch()
-        guard AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, value as CFString) == .success else {
-            throw NativeFailure(.nativeFailed, "AXSetValue returned an error")
-        }
+        try checkAXMutation(AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, value as CFString),
+                            action: "AXSetValue", context: context)
     }
     public func press(_ object: any AXObject, context: OperationContext,
                       willDispatch: @Sendable () throws -> Void) throws {
-        let element = try nativeElement(object, context: context)
-        try requireEnabled(element, allowUnsupported: false, context: context)
-        try installTimeout(element, context: context)
-        guard try readAXActionNames(element, context: context).contains(kAXPressAction as String) else {
-            throw NativeFailure(.unsupported, "AXPress is not currently advertised")
-        }
-        try installTimeout(element, context: context)
-        try willDispatch()
-        guard AXUIElementPerformAction(element, kAXPressAction as CFString) == .success else {
-            throw NativeFailure(.nativeFailed, "AXPress returned an error")
-        }
+        try performAXAction(kAXPressAction as String, on: object, allowUnsupportedEnabled: false,
+                            context: context, willDispatch: willDispatch)
     }
     public func replaceSelectedText(_ text: String, on object: any AXObject, context: OperationContext,
                                     willDispatch: @Sendable () throws -> Void) throws {
@@ -529,9 +639,8 @@ extension MacOSAXBackend: AXMutating {
         try requireSettable(kAXSelectedTextAttribute as CFString, element: element, context: context)
         try installTimeout(element, context: context)
         try willDispatch()
-        guard AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) == .success else {
-            throw NativeFailure(.nativeFailed, "AXSelectedText replacement returned an error")
-        }
+        try checkAXMutation(AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString),
+                            action: "AXSelectedText", context: context)
     }
     public func scrollToVisible(_ object: any AXObject, context: OperationContext,
                                 willDispatch: @Sendable () throws -> Void) throws {
@@ -549,9 +658,114 @@ extension MacOSAXBackend: AXMutating {
         }
         try installTimeout(element, context: context)
         try willDispatch()
-        guard AXUIElementPerformAction(element, "AXScrollToVisible" as CFString) == .success else {
-            throw NativeFailure(.nativeFailed, "AXScrollToVisible returned an error")
+        try checkAXMutation(AXUIElementPerformAction(element, "AXScrollToVisible" as CFString),
+                            action: "AXScrollToVisible", context: context)
+    }
+    public func confirm(_ object: any AXObject, context: OperationContext,
+                        willDispatch: @Sendable () throws -> Void) throws {
+        try performAXAction(kAXConfirmAction as String, on: object, allowUnsupportedEnabled: true,
+                            context: context, willDispatch: willDispatch)
+    }
+    public func showMenu(_ object: any AXObject, context: OperationContext,
+                         willDispatch: @Sendable () throws -> Void) throws {
+        try performAXAction(kAXShowMenuAction as String, on: object, allowUnsupportedEnabled: false,
+                            context: context, willDispatch: willDispatch)
+    }
+    public func cancel(_ object: any AXObject, context: OperationContext,
+                       willDispatch: @Sendable () throws -> Void) throws {
+        try performAXAction(kAXCancelAction as String, on: object, allowUnsupportedEnabled: true,
+                            context: context, willDispatch: willDispatch)
+    }
+    public func invokeMenu(_ path: [String], on application: any AXObject, context: OperationContext,
+                           willDispatch: @Sendable () throws -> Void) throws {
+        guard path.count >= 2 else { throw NativeFailure(.invalidRequest, "menu path requires at least two segments") }
+        guard let barObj = try menuBar(of: application, context: context) else {
+            throw NativeFailure(.unsupported, "application menu bar is unavailable")
         }
+        var current: AXUIElement = try nativeElement(barObj, context: context)
+        var leaf: AXUIElement?
+        for (index, segment) in path.enumerated() {
+            try context.check()
+            let children = try menuChildren(of: current, context: context)
+            var matches: [AXUIElement] = []
+            for child in children {
+                if try menuTitle(of: child, context: context) == segment {
+                    matches.append(child)
+                }
+            }
+            guard !matches.isEmpty else {
+                throw NativeFailure(.targetNotFound, "menu item '\(segment)' not found")
+            }
+            guard matches.count == 1 else {
+                throw NativeFailure(.ambiguousTarget, "multiple menu items match '\(segment)'")
+            }
+            let item = matches[0]
+            if index + 1 == path.count {
+                leaf = item
+            } else {
+                // Top-level AXMenuBarItem or submenu AXMenuItem wraps an AXMenu child.
+                let sub = try menuChildren(of: item, context: context)
+                guard let submenu = sub.first else {
+                    throw NativeFailure(.targetNotFound, "submenu unavailable under '\(segment)'")
+                }
+                current = submenu
+            }
+        }
+        guard let targetItem = leaf else { throw NativeFailure(.targetNotFound, "menu item not found") }
+        try requireEnabled(targetItem, allowUnsupported: false, context: context)
+        try installTimeout(targetItem, context: context)
+        guard try readAXActionNames(targetItem, context: context).contains(kAXPressAction as String) else {
+            throw NativeFailure(.unsupported, "menu item does not advertise AXPress")
+        }
+        try installTimeout(targetItem, context: context)
+        try willDispatch()
+        try checkAXMutation(AXUIElementPerformAction(targetItem, kAXPressAction as CFString),
+                            action: "AXMenuPress", context: context)
+    }
+
+    private func performAXAction(_ actionName: String, on object: any AXObject, allowUnsupportedEnabled: Bool,
+                                 context: OperationContext, willDispatch: @Sendable () throws -> Void) throws {
+        let element = try nativeElement(object, context: context)
+        try requireEnabled(element, allowUnsupported: allowUnsupportedEnabled, context: context)
+        try installTimeout(element, context: context)
+        guard try readAXActionNames(element, context: context).contains(actionName) else {
+            throw NativeFailure(.unsupported, "\(actionName) is not currently advertised")
+        }
+        try installTimeout(element, context: context)
+        try willDispatch()
+        try checkAXMutation(AXUIElementPerformAction(element, actionName as CFString),
+                            action: actionName, context: context)
+    }
+
+    private func menuChildren(of element: AXUIElement, context: OperationContext) throws -> [AXUIElement] {
+        try installTimeout(element, context: context)
+        var raw: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &raw)
+        try checkAXRead(result, context: context, allowMissing: true)
+        return result == .success ? (raw as? [AXUIElement] ?? []) : []
+    }
+
+    private func menuTitle(of element: AXUIElement, context: OperationContext) throws -> String? {
+        try installTimeout(element, context: context)
+        var raw: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &raw)
+        try checkAXRead(result, context: context, allowMissing: true)
+        return result == .success ? (raw as? String) : nil
+    }
+}
+
+private func checkAXMutation(_ result: AXError, action: String, context: OperationContext) throws {
+    try context.check()
+    switch result {
+    case .success: return
+    case .invalidUIElement:
+        throw NativeFailure(.staleElement, "\(action): AX object is no longer valid")
+    case .apiDisabled:
+        throw NativeFailure(.permissionDenied, "Accessibility permission is unavailable")
+    case .actionUnsupported, .attributeUnsupported, .notImplemented:
+        throw NativeFailure(.unsupported, "\(action) is not supported on this AX object")
+    default:
+        throw NativeFailure(.nativeFailed, "\(action) failed (AXError \(result.rawValue))")
     }
 }
 
@@ -562,9 +776,7 @@ private func nativeElement(_ object: any AXObject, context: OperationContext) th
 }
 private func installTimeout(_ element: AXUIElement, context: OperationContext) throws {
     let timeout = try context.nativeTimeoutSeconds()
-    guard AXUIElementSetMessagingTimeout(element, timeout) == .success else {
-        throw NativeFailure(.nativeFailed, "could not install exact-object AX timeout")
-    }
+    try checkAXRead(AXUIElementSetMessagingTimeout(element, timeout), context: context)
 }
 private func requireSettable(_ attribute: CFString, element: AXUIElement, context: OperationContext) throws {
     try installTimeout(element, context: context)

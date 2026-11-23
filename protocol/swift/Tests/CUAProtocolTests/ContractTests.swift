@@ -16,7 +16,7 @@ final class ContractTests: XCTestCase {
     }
     func testSharedValidFixturesDecodeAndRoundTrip() throws {
         let paths = try fixtures("valid")
-        XCTAssertEqual(paths.count, 66)
+        XCTAssertEqual(paths.count, 73)
         for path in paths {
             let frame = try Frame.decodeLine(Data(contentsOf: path))
             let encoded = try frame.encodeLine()
@@ -44,7 +44,7 @@ final class ContractTests: XCTestCase {
         let message = try XCTUnwrap(object["message"] as? [String: Any])
         let body = try XCTUnwrap(message["body"] as? [String: Any])
         let params = try XCTUnwrap(body["params"] as? [String: Any])
-        for name in ["includeOcr", "ocrQuery", "cropWindow", "maxImageDimensionPx", "axSelectors", "eventHistory"] { XCTAssertNil(params[name], name) }
+        for name in ["includeOcr", "ocrQuery", "cropWindow", "maxImageDimensionPx", "axSelectors", "eventHistory", "scope", "interactiveOnly"] { XCTAssertNil(params[name], name) }
         let old = try fixture("observe-partial-response")
         let response = try XCTUnwrap(JSONSerialization.jsonObject(with: old.encodeLine()) as? [String: Any])
         let responseMessage = try XCTUnwrap(response["message"] as? [String: Any])
@@ -76,7 +76,7 @@ final class ContractTests: XCTestCase {
     }
     func testSharedInvalidFixturesAreRejected() throws {
         let paths = try fixtures("invalid")
-        XCTAssertEqual(paths.count, 94)
+        XCTAssertEqual(paths.count, 107)
         for path in paths {
             XCTAssertThrowsError(try Frame.decodeLine(Data(contentsOf: path)), path.lastPathComponent)
         }
@@ -267,5 +267,44 @@ final class ContractTests: XCTestCase {
               case .capabilities(let caps) = capsResponse.body else { return XCTFail() }
         XCTAssertTrue(caps.actions.contains(.click))
         XCTAssertThrowsError(try JSONDecoder().decode(ElementAction.self, from: Data("\"click\"".utf8)))
+    }
+
+    func testOpenWaitValuesAndScopedObserveEnforceAuthorityAndCorrelation() throws {
+        guard case .request(let openReq) = try fixture("open-request"),
+              case .response(let openRes) = try fixture("open-response"),
+              case .open(let openReqBody) = openReq.body,
+              case .open(let openResBody) = openRes.body else { return XCTFail() }
+        let bg = SessionContext(epoch: "helper-epoch-1", authority: Authority(grantId: "host-grant-1", mode: .backgroundRequired))
+        let fg = SessionContext(epoch: "helper-epoch-1", authority: Authority(grantId: "host-grant-1", mode: .foregroundAllowed))
+        try bg.authorize(openReq)
+        try openRes.validateFor(openReq, expectedEpoch: "helper-epoch-1")
+
+        let activatedRes = Response(version: openRes.version, id: openRes.id, epoch: openRes.epoch,
+            body: .open(OpenResult(pid: openResBody.pid, bundleId: openResBody.bundleId, activated: true, targets: openResBody.targets)))
+        XCTAssertThrowsError(try activatedRes.validateFor(openReq, expectedEpoch: "helper-epoch-1"))
+
+        let fgOpenReq = Request(version: openReq.version, id: openReq.id, epoch: openReq.epoch, budgetMs: openReq.budgetMs,
+            body: .open(OpenRequest(grantId: openReqBody.grantId, bundleId: openReqBody.bundleId, url: openReqBody.url, activate: true)))
+        XCTAssertThrowsError(try bg.authorize(fgOpenReq))
+        try fg.authorize(fgOpenReq)
+        try activatedRes.validateFor(fgOpenReq, expectedEpoch: "helper-epoch-1")
+
+        guard case .request(let waitReq) = try fixture("wait-values-request"),
+              case .waitFor(let waitBody) = waitReq.body,
+              case .response(let obsRes) = try fixture("observe-partial-response"),
+              case .observe(let obs) = obsRes.body else { return XCTFail() }
+        let elem = obs.elements[0]
+        let valued = Observation(observationId: obs.observationId, target: obs.target, collected: obs.collected,
+            windowBounds: obs.windowBounds, accessibility: .partial, accessibilityCollected: obs.accessibilityCollected,
+            elements: [Element(reference: elem.reference, role: elem.role, label: elem.label, value: "SAVED:Ada",
+                               bounds: elem.bounds, enabled: elem.enabled, actions: elem.actions)],
+            screenshot: nil)
+        let waitRes = Response(version: 1, id: waitReq.id, epoch: "helper-epoch-1",
+            body: .waitFor(WaitResult(outcome: .satisfied, alreadySatisfied: false, observation: valued)))
+        try waitRes.validateFor(waitReq, expectedEpoch: "helper-epoch-1")
+        let privateWaitReq = Request(version: 1, id: waitReq.id, epoch: waitReq.epoch, budgetMs: waitReq.budgetMs,
+            body: .waitFor(WaitRequest(observationId: waitBody.observationId, target: waitBody.target, condition: waitBody.condition,
+                                       includeValues: false, scope: waitBody.scope)))
+        XCTAssertThrowsError(try waitRes.validateFor(privateWaitReq, expectedEpoch: "helper-epoch-1"))
     }
 }

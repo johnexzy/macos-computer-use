@@ -180,14 +180,17 @@ try {
   assert.ok(webUrls.some((u) => u === `${baseUrl}/frame`), `Missing iframe webArea URL in ${JSON.stringify(webUrls)}`);
   metrics.scenario4WebAreas = webUrls;
 
-  // Scenario 5: 100% Background link click + waitFor(urlContains).
+  // Scenario 5: 100% Background link click + waitFor(urlContains, includeValues, scope: webArea).
   const t4 = Date.now();
   const navObs = unwrap(await session.tool("observe", {
     target: target.key,
-    axSelectors: [{ role: "AXLink", label: "Proceed to Checkout" }],
+    scope: "webArea",
+    interactiveOnly: true,
+    axSelectors: [{ role: "AXLink", label: null, identifier: null, labelContains: "Checkout" }],
   }));
   const liveLink = navObs.elements[0];
-  assert.ok(liveLink, "Checkout link should be observable");
+  assert.ok(liveLink, "Checkout link should be observable via webArea + labelContains");
+  assert.equal(navObs.accessibility, "partial");
   const navAct = unwrap(await session.tool("act", {
     target: target.key,
     observationId: navObs.observationId,
@@ -199,9 +202,15 @@ try {
   const waited = unwrap(await session.tool("waitFor", {
     target: target.key,
     observationId: navObs.observationId,
+    includeValues: true,
+    scope: "webArea",
     condition: { kind: "urlContains", params: { contains: "/checkout" } },
   }));
   assert.equal(waited.outcome, "satisfied", `waitFor(urlContains) failed: ${JSON.stringify(waited)}`);
+  assert.ok(waited.observation.elements.some((e) => e.value === "Checkout Ready" || e.label === "Checkout Ready"),
+    "waitFor(includeValues: true, scope: webArea) should return Checkout Ready content directly");
+  assert.ok(!waited.observation.elements.some((e) => e.role === "AXTabButton"),
+    "scope: webArea must exclude browser tab strip chrome");
   metrics.scenario5BackgroundNavWaitMs = Date.now() - t4;
 
   // Scenario 6: Hybrid visual grounding fallback on non-AX <canvas> ("PAY NOW").
@@ -217,6 +226,26 @@ try {
     `Expected Vision OCR match for canvas PAY NOW, got: ${JSON.stringify(ocrMatches)}`);
   metrics.scenario6VisualCanvasMs = Date.now() - t5;
   metrics.scenario6OcrMatches = ocrMatches.map((m) => ({ text: m.text, imageBounds: m.imageBounds }));
+
+  // Scenario 7: Background AXMenuBar discovery (scope: menuBar) and invokeMenu(["File", "New Tab"]).
+  const t6 = Date.now();
+  const menuObs = unwrap(await session.tool("observe", {
+    target: target.key,
+    scope: "menuBar",
+    axSelectors: [{ role: "AXMenuItem", label: null, identifier: null, labelContains: "New Tab" }],
+  }));
+  assert.ok(menuObs.elements.some((e) => e.label === "File > New Tab"),
+    `Expected File > New Tab in menuBar observation, got: ${JSON.stringify(menuObs.elements.map((e) => e.label))}`);
+  const menuAct = unwrap(await session.tool("act", {
+    target: target.key,
+    observationId: menuObs.observationId,
+    steps: [
+      { actionId: "new-tab-menu", operation: { kind: "invokeMenu", params: { path: ["File", "New Tab"] } } },
+    ],
+  }));
+  assert.equal(menuAct.stopReason, "completed", `Background invokeMenu failed: ${JSON.stringify(menuAct)}`);
+  assert.equal(menuAct.steps[0].route, "axMenu");
+  metrics.scenario7BackgroundMenuMs = Date.now() - t6;
 
   console.log("BROWSER_LIVE_BENCHMARK_PASS:", JSON.stringify(metrics, null, 2));
 } finally {
