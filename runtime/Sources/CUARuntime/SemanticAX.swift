@@ -502,6 +502,7 @@ public struct SemanticAXObserver: Sendable {
         var elements: [Element] = []
         var encodedBytes = 0
         let encoder = JSONEncoder()
+        let menuGen = refGenerationCounter.next()
         for item in collected {
             if elements.count == Limits.maxElements { complete = false; break }
             let s = item.snapshot
@@ -512,7 +513,7 @@ public struct SemanticAXObserver: Sendable {
                 complete = false
                 if label != item.pathLabel, params.axSelectors != nil { continue }
             }
-            let element = Element(reference: "menu-\(UUID().uuidString)", role: s.role, label: label, value: nil,
+            let element = Element(reference: "m\(menuGen).\(elements.count + 1)", role: s.role, label: label, value: nil,
                                   bounds: s.bounds, enabled: s.enabledKnown ? s.enabled : nil, actions: [],
                                   identifier: identifier, subrole: subrole, url: nil)
             let size = try encoder.encode(element).count
@@ -586,6 +587,27 @@ private func associatedWindow(target: Target, application: any AXObject, backend
               snapshot.bounds == target.bounds, axTitleCompatible(axTitle: snapshot.title, cgTitle: target.title) else { continue }
         matches.append(ResolvedAXElement(object: window, snapshot: snapshot))
     }
+    if matches.isEmpty {
+        // Native macOS sheets (e.g. NSOpenPanel / NSSavePanel) appear in CGWindowList as standalone
+        // windows while AX attaches them as AXSheet children of their parent AXWindow.
+        for window in windows.elements {
+            try context.check()
+            guard let children = try? backend.children(of: window, limit: 32, context: context) else { continue }
+            for child in children.elements {
+                try context.check()
+                guard try backend.ownerPID(of: child, context: context) == target.key.pid,
+                      let snapshot = try backend.snapshot(of: child, includeValue: false, context: context),
+                      snapshot.role == "AXSheet",
+                      snapshot.bounds == target.bounds else { continue }
+                let sheetTitle = snapshot.title ?? snapshot.label
+                if sheetTitle == nil || target.title.isEmpty
+                    || axTitleCompatible(axTitle: sheetTitle, cgTitle: target.title)
+                    || sheetTitle?.caseInsensitiveCompare(target.title) == .orderedSame {
+                    matches.append(ResolvedAXElement(object: child, snapshot: snapshot))
+                }
+            }
+        }
+    }
     guard matches.count == 1 else {
         throw NativeFailure(matches.isEmpty ? .targetNotFound : .ambiguousTarget,
                             matches.isEmpty ? "no exact AX window metadata association" : "multiple AX windows have matching metadata")
@@ -604,8 +626,15 @@ private func requireOwningWindow(_ object: any AXObject, window: any AXObject, p
     guard try backend.ownerPID(of: object, context: context) == pid else { throw NativeFailure(.staleElement, "AX object belongs to another process") }
     if backend.same(object, window) { return }
     if let owner = try backend.window(of: object, context: context) {
-        guard backend.same(owner, window) else { throw NativeFailure(.staleElement, "AX object belongs to another window") }
-        return
+        if backend.same(owner, window) { return }
+        // For AXSheet targets, sheet descendants report the sheet's parent AXWindow as kAXWindowAttribute.
+        // Only fall through to ancestor-chain verification when `owner` is the direct parent of `window`.
+        if let sheetParent = try backend.parent(of: window, context: context),
+           backend.same(owner, sheetParent) {
+            // Verified sheet parent; confirm `window` itself is an ancestor below.
+        } else {
+            throw NativeFailure(.staleElement, "AX object belongs to another window")
+        }
     }
     var ancestors: [any AXObject] = [object]
     var current = object
@@ -615,7 +644,7 @@ private func requireOwningWindow(_ object: any AXObject, window: any AXObject, p
         if backend.same(parent, window) { return }
         ancestors.append(parent); current = parent
     }
-    throw NativeFailure(.staleElement, "AX owning-window identity is unavailable")
+    throw NativeFailure(.staleElement, "AX object belongs to another window")
 }
 
 private func collectTree(roots: [any AXObject]? = nil, window: any AXObject, pid: UInt32, backend: any AXReading,

@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import CUAProtocol
 import Foundation
@@ -60,12 +61,33 @@ private final class BrowserAccessibilityRegistry: @unchecked Sendable {
         "com.vivaldi.Vivaldi",
         "com.kagi.kagimacOS",
     ]
+    private static let electronKnownBundles: Set<String> = [
+        "com.google.antigravity",
+        "com.microsoft.VSCode",
+        "com.microsoft.VSCodeInsiders",
+        "com.todesktop.230313mzl4w4u92",
+        "com.tinyspeck.slackmacgap",
+        "com.hnc.Discord",
+        "notion.id",
+        "com.linear",
+        "md.obsidian",
+        "com.anthropic.claudefordesktop",
+        "com.figma.Desktop",
+        "com.postmanlabs.mac",
+    ]
     private let lock = NSLock()
     private var preparedPIDs: Set<UInt32> = []
 
     static func isChromiumBrowser(_ bundleId: String?) -> Bool {
         guard let bundleId else { return false }
         return chromiumBrowserBundles.contains(bundleId)
+    }
+
+    static func isElectronApp(pid: UInt32, bundleId: String?) -> Bool {
+        if let bundleId, electronKnownBundles.contains(bundleId) { return true }
+        guard let bundleURL = NSRunningApplication(processIdentifier: pid_t(pid))?.bundleURL else { return false }
+        let electronFramework = bundleURL.appendingPathComponent("Contents/Frameworks/Electron Framework.framework")
+        return FileManager.default.fileExists(atPath: electronFramework.path)
     }
 
     func alreadyPrepared(_ pid: UInt32) -> Bool {
@@ -84,19 +106,25 @@ public struct MacOSAXBackend: AXReading, AXScrolling {
     public init() {}
     public func prepareBrowserAccessibility(application: any AXObject, bundleId: String?, context: OperationContext) throws -> Bool {
         try context.check()
-        guard BrowserAccessibilityRegistry.isChromiumBrowser(bundleId) else { return false }
         let pid = try ownerPID(of: application, context: context)
+        let isChromium = BrowserAccessibilityRegistry.isChromiumBrowser(bundleId)
+        let isElectron = !isChromium && BrowserAccessibilityRegistry.isElectronApp(pid: pid, bundleId: bundleId)
+        guard isChromium || isElectron else { return false }
         if BrowserAccessibilityRegistry.shared.alreadyPrepared(pid) { return false }
         let app = try prepared(application, context: context)
+        let attr: CFString = isElectron ? ("AXManualAccessibility" as CFString) : ("AXEnhancedUserInterface" as CFString)
         var current: CFTypeRef?
-        let readResult = AXUIElementCopyAttributeValue(app, "AXEnhancedUserInterface" as CFString, &current)
+        let readResult = AXUIElementCopyAttributeValue(app, attr, &current)
         if readResult == .success, let flag = current as? NSNumber, flag.boolValue {
             BrowserAccessibilityRegistry.shared.markPrepared(pid)
             return false
         }
-        let setResult = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
-        // Chromium's BrowserCrApplication enables full web accessibility on AXEnhancedUserInterface
-        // and may return .success or .notImplemented/.attributeUnsupported.
+        let setResult = AXUIElementSetAttributeValue(app, attr, kCFBooleanTrue)
+        if isElectron {
+            _ = AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
+        // Chromium / Electron apps enable full web accessibility lazily on AXEnhancedUserInterface /
+        // AXManualAccessibility and may return .success or .notImplemented/.attributeUnsupported.
         switch setResult {
         case .success, .notImplemented, .attributeUnsupported:
             BrowserAccessibilityRegistry.shared.markPrepared(pid)

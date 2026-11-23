@@ -883,4 +883,33 @@ final class GeneralPurposeCUATests: XCTestCase {
         guard case .act(let acted2) = actRes2.body else { return XCTFail("expected second act result") }
         XCTAssertEqual(acted2.stopReason, .completed)
     }
+
+    func testAXSheetTargetAssociatesWithParentWindowSheetAndResolvesControls() throws {
+        let winBounds = Rect(x: 0, y: 39, width: 1400, height: 900)
+        let sheetBounds = Rect(x: 260, y: 114, width: 880, height: 600)
+        let backend = GPBackend()
+        let parentTarget = Target(key: TargetKey(pid: 9115, windowId: 40), bundleId: "com.google.Chrome", title: "Extensions", bounds: winBounds)
+        let sheetTarget = Target(key: TargetKey(pid: 9115, windowId: 41), bundleId: "com.google.Chrome", title: "Open", bounds: sheetBounds)
+        backend.records = [parentTarget, sheetTarget]
+
+        let win = GPNode("w", role: "AXWindow", title: "Extensions", bounds: winBounds)
+        let sheet = GPNode("sheet", role: "AXSheet", title: "open", bounds: sheetBounds)
+        let selectBtn = GPNode("ok", role: "AXButton", title: "Select", identifier: "OKButton",
+                               bounds: Rect(x: 1020, y: 670, width: 90, height: 28))
+        selectBtn.actions = ["AXPress"]
+        selectBtn.parent = sheet; selectBtn.owner = win // AppKit AXWindow of a sheet child points to parent window!
+        sheet.children = [selectBtn]; sheet.parent = win; sheet.owner = win
+        win.children = [sheet]
+        backend.appWindows = [win]
+
+        let observer = SemanticAXObserver(backend: backend, catalog: backend)
+        let obs = try observer.observe(
+            params: ObserveRequest(target: sheetTarget.key, includeScreenshot: false, includeValues: false),
+            observationId: "obs-sheet", context: OperationContext(budgetMs: 2000))
+        let foundSelect = try XCTUnwrap(obs.observation.elements.first { $0.label == "Select" })
+        XCTAssertTrue(foundSelect.actions.contains(.press))
+        let handle = try XCTUnwrap(obs.handle as? SemanticObservationHandle)
+        let resolved = try handle.resolve(foundSelect.reference, context: OperationContext(budgetMs: 2000))
+        XCTAssertTrue(backend.same(resolved.object, selectBtn))
+    }
 }
