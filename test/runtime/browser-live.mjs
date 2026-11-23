@@ -213,7 +213,7 @@ try {
     "scope: webArea must exclude browser tab strip chrome");
   metrics.scenario5BackgroundNavWaitMs = Date.now() - t4;
 
-  // Scenario 6: Hybrid visual grounding fallback on non-AX <canvas> ("PAY NOW").
+    // Scenario 6: Hybrid visual grounding fallback on non-AX <canvas> ("PAY NOW") + waitFor(ocrContains).
   const t5 = Date.now();
   const canvasObs = unwrap(await session.tool("observe", {
     target: target.key,
@@ -224,18 +224,71 @@ try {
   const ocrMatches = canvasObs.visual?.ocr?.matches ?? [];
   assert.ok(ocrMatches.some((m) => m.text.includes("PAY NOW")),
     `Expected Vision OCR match for canvas PAY NOW, got: ${JSON.stringify(ocrMatches)}`);
+  const ocrWait = unwrap(await session.tool("waitFor", {
+    target: target.key,
+    observationId: canvasObs.observationId,
+    condition: { kind: "ocrContains", params: { contains: "PAY NOW" } },
+  }));
+  assert.equal(ocrWait.outcome, "satisfied", `waitFor(ocrContains) failed: ${JSON.stringify(ocrWait)}`);
   metrics.scenario6VisualCanvasMs = Date.now() - t5;
   metrics.scenario6OcrMatches = ocrMatches.map((m) => ({ text: m.text, imageBounds: m.imageBounds }));
 
-  // Scenario 7: Background AXMenuBar discovery (scope: menuBar) and invokeMenu(["File", "New Tab"]).
+  // Scenario 7: Observe query, role-less selector, menuBar query, unified targets discovery,
+  // and background setWindowFrame without stealing focus (while keeping AXWebArea live).
   const t6 = Date.now();
+  const queryObs = unwrap(await session.tool("observe", {
+    target: target.key,
+    scope: "webArea",
+    query: "checkout",
+  }));
+  assert.equal(queryObs.accessibility, "partial");
+  assert.ok(queryObs.elements.some((e) => e.label?.toLowerCase().includes("checkout") || e.url?.includes("/checkout")),
+    `Expected checkout match from observe.query, got: ${JSON.stringify(queryObs.elements.map((e) => e.label))}`);
+  const rolelessObs = unwrap(await session.tool("observe", {
+    target: target.key,
+    axSelectors: [{ labelContains: "Checkout" }],
+  }));
+  assert.ok(rolelessObs.elements.length >= 1, "Role-less selector should find Checkout element(s)");
+  const discovered = unwrap(await session.tool("targets", {
+    bundleId: "com.google.Chrome",
+    includeOffscreen: true,
+    includeApps: true,
+    includeDisplays: true,
+  }));
+  const liveWin = discovered.targets.find((w) => w.key.pid === chrome.pid && w.key.windowId === target.key.windowId);
+  assert.equal(liveWin?.onScreen, true, "Active Chrome window should report onScreen: true when includeOffscreen is set");
+  assert.ok(discovered.apps.some((a) => a.bundleId === "com.google.Chrome" && a.running), "Running Chrome should appear in apps");
+  assert.ok(discovered.displays.some((d) => d.isPrimary && d.bounds.width > 0), "Primary display should appear in displays");
+  const preFrameObs = unwrap(await session.tool("observe", { target: target.key, scope: "webArea", interactiveOnly: true }));
+  assert.ok(preFrameObs.elements.some((e) => e.role === "AXWebArea"), "Checkout AXWebArea must be observable before setWindowFrame");
+  const frameAct = unwrap(await session.tool("act", {
+    target: target.key,
+    observationId: preFrameObs.observationId,
+    steps: [
+      { actionId: "move-resize", operation: { kind: "setWindowFrame", params: { bounds: { x: 140, y: 100, width: 900, height: 680 } } } },
+    ],
+  }));
+  assert.equal(frameAct.stopReason, "completed", `Background setWindowFrame failed: ${JSON.stringify(frameAct)}`);
+  assert.equal(frameAct.steps[0].route, "axWindowFrame");
+  const afterFrameTargets = unwrap(await session.tool("targets", { bundleId: "com.google.Chrome" }));
+  const movedWin = afterFrameTargets.targets.find((w) => w.key.pid === chrome.pid && w.key.windowId === target.key.windowId);
+  assert.equal(movedWin?.bounds.x, 140);
+  assert.equal(movedWin?.bounds.y, 100);
+  assert.equal(movedWin?.bounds.width, 900);
+  assert.equal(movedWin?.bounds.height, 680);
+  const postFrameObs = unwrap(await session.tool("observe", { target: target.key, scope: "webArea" }));
+  assert.ok(postFrameObs.elements.some((e) => e.role === "AXWebArea"), "Chrome AXWebArea must remain immediately observable after setWindowFrame");
+  metrics.scenario7QueryTargetsFrameMs = Date.now() - t6;
+
+  // Scenario 8: Background menuBar query discovery + invokeMenu(["File", "New Tab"]).
+  const t7 = Date.now();
   const menuObs = unwrap(await session.tool("observe", {
     target: target.key,
     scope: "menuBar",
-    axSelectors: [{ role: "AXMenuItem", label: null, identifier: null, labelContains: "New Tab" }],
+    query: "new tab",
   }));
   assert.ok(menuObs.elements.some((e) => e.label === "File > New Tab"),
-    `Expected File > New Tab in menuBar observation, got: ${JSON.stringify(menuObs.elements.map((e) => e.label))}`);
+    `Expected File > New Tab in menuBar query observation, got: ${JSON.stringify(menuObs.elements.map((e) => e.label))}`);
   const menuAct = unwrap(await session.tool("act", {
     target: target.key,
     observationId: menuObs.observationId,
@@ -245,7 +298,7 @@ try {
   }));
   assert.equal(menuAct.stopReason, "completed", `Background invokeMenu failed: ${JSON.stringify(menuAct)}`);
   assert.equal(menuAct.steps[0].route, "axMenu");
-  metrics.scenario7BackgroundMenuMs = Date.now() - t6;
+  metrics.scenario8BackgroundMenuMs = Date.now() - t7;
 
   console.log("BROWSER_LIVE_BENCHMARK_PASS:", JSON.stringify(metrics, null, 2));
 } finally {

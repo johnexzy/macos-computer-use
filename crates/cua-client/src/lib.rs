@@ -142,6 +142,7 @@ impl Shared {
             RequestBody::Act(_) => "act",
             RequestBody::WaitFor(_) => "waitFor",
             RequestBody::Open(_) => "open",
+            RequestBody::Clipboard(_) => "clipboard",
             RequestBody::Cancel(_) => "cancel",
         };
         let (outcome, delivery, verification) = match result {
@@ -323,6 +324,9 @@ impl Client {
                 ));
             }
             open.grant_id = self.authority.grant_id.clone();
+        }
+        if let RequestBody::Clipboard(clipboard) = &mut body {
+            clipboard.grant_id = self.authority.grant_id.clone();
         }
         let started = Instant::now();
         let deadline = started + budget;

@@ -107,11 +107,12 @@ sends no input; mixed sequences preserve the same boundary before later mutation
 | Method | Contract |
 | --- | --- |
 | `capabilities` | Read-only permission booleans, installed mode, and actual supported action kinds. It does not request permission. |
-| `targets` | Return exact window/process keys, titles, logical bounds, and bundle ID and owner name when available. Optional filters are exact `bundleId`, case-insensitive `titleContains` and `ownerContains`, and `unbundledOnly`. All supplied filters must match before the result cap applies. `truncated` makes the bound visible. |
+| `targets` | Return exact window/process keys, titles, logical bounds, and bundle ID and owner name when available. Optional filters are exact `bundleId`, case-insensitive `titleContains` and `ownerContains`, and `unbundledOnly`. Optional discovery flags are `includeOffscreen` (includes minimized/hidden/other-Space windows with an `onScreen` flag), `includeApps` (running and installed apps), and `includeDisplays` (active displays in top-left logical coordinates with `scaleFactor` and `isPrimary`). All supplied filters must match before the result cap applies. `truncated` makes the bound visible. |
 | `open` | Installed grant plus `bundleId` or `appName` and/or validated `url`, with optional `newInstance` and `activate` (default `false`; `activate: true` requires `foregroundAllowed`). Returns optional `pid`, `bundleId`, `activated`, and bounded visible `targets`. |
-| `observe` | Exact target; explicit value, screenshot, and OCR inclusion flags; optional `scope` (`window`, `webArea`, `menuBar`), `interactiveOnly`, `axSelectors` (supporting `label`, `labelContains`, `identifier`), and `eventHistory` cursor. Visual collection accepts a window-local crop and image dimension limit. Scoped or filtered observations never claim `complete` window coverage. |
-| `act` | Installed grant, observation, exact target, and 1–16 ordered steps (`setValue`, `typeText`, `press`, `confirm`, `showMenu`, `cancel`, `invokeMenu`, `scroll`, `scrollToVisible`, `waitFor` in background; `click`, `doubleClick`, `rightClick`, `hover`, `drag`, `key`, `hotkey`, `typeKeys`, `waitFor` under `foreground: true` with `foregroundAllowed`). No arbitrary scripts or execution-mode override. |
-| `waitFor` | Evaluate a typed condition (`elementExists`, `elementAbsent`, `valueEquals`, `valueContains`, `enabled`, `urlContains`, `windowAbsent`) for the same exact target within the request deadline, with optional `includeValues` and `scope` (`window` or `webArea`) for the returned observation. It never mutates. |
+| `clipboard` | Installed grant plus `action` (`read`, `write`, `clear`). Privacy-gated: `read` returns `changeCount`, UTI `types`, and optional `textBytes` without `text` unless `includeText: true` is set. `write` requires exactly one of `text` (bounded to 256 KiB), `filePath`, or `imagePath` (absolute local path without `..`). `clear` empties the pasteboard. |
+| `observe` | Exact target; explicit value, screenshot, and OCR inclusion flags; optional `scope` (`window`, `webArea`, `menuBar`), `interactiveOnly`, case-insensitive free-text `query` (searching label, identifier, subrole, url, and value only when `includeValues: true`), role-optional `axSelectors` (requiring at least one of `role`, `label`, `labelContains`, `identifier`), and `eventHistory` cursor. Visual collection accepts a window-local crop and image dimension limit. Scoped or filtered observations never claim `complete` window coverage. |
+| `act` | Installed grant, observation, exact target, and 1–16 ordered steps (`setValue`, `typeText`, `press`, `confirm`, `showMenu`, `cancel`, `invokeMenu`, `setWindowFrame`, `windowAction`, `scroll`, `scrollToVisible`, `waitFor` in background; `click`, `doubleClick`, `rightClick`, `hover`, `drag`, `scrollWheel`, `focusWindow`, `key`, `hotkey`, `typeKeys`, `waitFor` under `foreground: true` with `foregroundAllowed`). No arbitrary scripts or execution-mode override. |
+| `waitFor` | Evaluate a typed condition (`elementExists`, `elementAbsent`, `valueEquals`, `valueContains`, `enabled`, `urlContains`, `ocrContains`, `windowAbsent`) for the same exact target within the request deadline, with optional `includeValues` and `scope` (`window` or `webArea`) for the returned observation. `ocrContains` and `windowAbsent` also work on visual-only observations when AX is unavailable. It never mutates. |
 
 The current runtime implements AX and opt-in visual `observe` and bounded linear
 `act` sequences combining `setValue`, `typeText`, `press`, `scroll`, and a read-only
@@ -164,9 +165,7 @@ destination immediately before dispatch. Keys and AX conditions still require
 a semantic observation. A frame that disagrees with known AX geometry is stale
 for coordinate input.
 
-Existence selectors require a role and may constrain label
-or identifier. They are conditions, not action locators. Actions use retained refs
-or explicitly mapped points; an existence check does not resolve ambiguous labels.
+Existence and selection selectors require at least one of `role`, `label`, `labelContains`, or `identifier`. They are conditions and filters, not action locators. Actions use retained refs or explicitly mapped points; an existence check does not resolve ambiguous labels.
 There is no expression language, branching DSL, or rollback API.
 
 `windowAbsent` uses `params: {}` and refers to the request's exact `(pid, windowId)`.

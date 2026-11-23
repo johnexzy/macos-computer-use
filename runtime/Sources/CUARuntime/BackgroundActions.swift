@@ -21,6 +21,10 @@ public protocol AXMutating: Sendable {
                 willDispatch: @Sendable () throws -> Void) throws
     func invokeMenu(_ path: [String], on application: any AXObject, context: OperationContext,
                     willDispatch: @Sendable () throws -> Void) throws
+    func setWindowFrame(_ bounds: Rect, on window: any AXObject, windowId: UInt32, context: OperationContext,
+                        willDispatch: @Sendable () throws -> Void) throws
+    func windowAction(_ action: WindowActionKind, on window: any AXObject, context: OperationContext,
+                      willDispatch: @Sendable () throws -> Void) throws
 }
 
 public extension AXMutating {
@@ -43,6 +47,14 @@ public extension AXMutating {
     func invokeMenu(_ path: [String], on application: any AXObject, context: OperationContext,
                     willDispatch: @Sendable () throws -> Void) throws {
         throw NativeFailure(.unsupported, "AXMenuBar invocation is not supported by this backend")
+    }
+    func setWindowFrame(_ bounds: Rect, on window: any AXObject, windowId: UInt32, context: OperationContext,
+                        willDispatch: @Sendable () throws -> Void) throws {
+        throw NativeFailure(.unsupported, "AX window frame mutation is not supported by this backend")
+    }
+    func windowAction(_ action: WindowActionKind, on window: any AXObject, context: OperationContext,
+                      willDispatch: @Sendable () throws -> Void) throws {
+        throw NativeFailure(.unsupported, "AX window actions are not supported by this backend")
     }
 }
 
@@ -116,7 +128,7 @@ public struct BackgroundActions: Sendable {
                 }
                 guard request.steps.allSatisfy({ step in
                     switch step.operation {
-                    case .click, .doubleClick, .rightClick, .hover, .drag:
+                    case .click, .doubleClick, .rightClick, .hover, .drag, .scrollWheel:
                         return step.precondition == nil && step.expect == nil
                     default:
                         return false
@@ -180,6 +192,23 @@ public struct BackgroundActions: Sendable {
     }
 
     public func wait(_ request: WaitRequest, entry: RetainedObservation, context: OperationContext) throws -> WaitEvaluation {
+        if let visual = entry.handle as? VisualObservationHandle {
+            guard entry.observation.observationId == request.observationId, entry.observation.target == request.target,
+                  visual.observationId == request.observationId, visual.target.key == request.target else {
+                throw NativeFailure(.staleObservation, "visual observation is unavailable or belongs to another target")
+            }
+            var first = true
+            while true {
+                try context.check()
+                try checkLifetime(entry)
+                let evaluation = try predicates.evaluate(request.condition, visualHandle: visual, context: context)
+                if evaluation.matched == true {
+                    return WaitEvaluation(outcome: .satisfied, alreadySatisfied: first, evidence: evaluation.evidence)
+                }
+                first = false
+                try pause(context, for: request.condition)
+            }
+        }
         let handle = try semanticHandle(entry, observationId: request.observationId, target: request.target)
         var first = true
         while true {
@@ -192,7 +221,7 @@ public struct BackgroundActions: Sendable {
                 }
             } catch is AXReadUnavailable { /* No state evidence; sample again within this budget. */ }
             first = false
-            try pause(context)
+            try pause(context, for: request.condition)
         }
     }
 
@@ -210,7 +239,7 @@ public struct BackgroundActions: Sendable {
                 }
             } catch is AXReadUnavailable { /* Keep the last genuine witness, if any. */ }
             first = false
-            try pause(context)
+            try pause(context, for: condition)
         }
     }
 
@@ -224,6 +253,8 @@ public struct BackgroundActions: Sendable {
         case .rightClick: route = .foregroundRightClick
         case .hover: route = .foregroundHover
         case .drag: route = .foregroundDrag
+        case .scrollWheel: route = .foregroundScrollWheel
+        case .focusWindow: route = .foregroundFocus
         case .key: route = .foregroundKey
         case .hotkey: route = .foregroundHotkey
         case .typeKeys: route = .foregroundTypeKeys
@@ -266,7 +297,7 @@ public struct BackgroundActions: Sendable {
                 if checks.first?.matched == true { return false }
             } catch is AXReadUnavailable { /* No usable observation at this sample. */ }
             try control.checkContext()
-            try pause(context)
+            try pause(context, for: expected)
         }
     }
 
@@ -276,8 +307,23 @@ public struct BackgroundActions: Sendable {
         guard let writer = handle.backend as? any AXMutating else { throw NativeFailure(.unsupported, "semantic mutation backend unavailable") }
 
         if case .invokeMenu(let menu) = step.operation {
-            return try executeInvokeMenu(menu, step: step, entry: entry, handle: handle, writer: writer,
-                                         context: context, state: state, before: before)
+            return try executeWindowOperation(route: .axMenu, step: step, entry: entry, handle: handle,
+                                              context: context, state: state, before: before) { handoff in
+                try writer.invokeMenu(menu.path, on: handle.application, context: context, willDispatch: handoff)
+            }
+        }
+        if case .setWindowFrame(let frame) = step.operation {
+            return try executeWindowOperation(route: .axWindowFrame, step: step, entry: entry, handle: handle,
+                                              context: context, state: state, before: before) { handoff in
+                try writer.setWindowFrame(frame.bounds, on: handle.retainedWindow, windowId: handle.target.key.windowId,
+                                          context: context, willDispatch: handoff)
+            }
+        }
+        if case .windowAction(let winAction) = step.operation {
+            return try executeWindowOperation(route: .axWindowAction, step: step, entry: entry, handle: handle,
+                                              context: context, state: state, before: before) { handoff in
+                try writer.windowAction(winAction.action, on: handle.retainedWindow, context: context, willDispatch: handoff)
+            }
         }
 
         let reference: String
@@ -451,13 +497,14 @@ public struct BackgroundActions: Sendable {
                 if let mutationFailure { throw mutationFailure }
                 try checkForeground(before, targetPID: handle.target.key.pid)
             }
-            try pause(context)
+            try pause(context, for: step.expect)
         }
     }
 
-    private func executeInvokeMenu(_ menu: InvokeMenuOperation, step: ActionStep, entry: RetainedObservation,
-                                   handle: SemanticObservationHandle, writer: any AXMutating, context: OperationContext,
-                                   state: ActionExecutionState, before: UInt32?) throws -> Bool {
+    private func executeWindowOperation(route: DeliveryRoute, step: ActionStep, entry: RetainedObservation,
+                                        handle: SemanticObservationHandle, context: OperationContext,
+                                        state: ActionExecutionState, before: UInt32?,
+                                        perform: (@Sendable () throws -> Void) throws -> Void) throws -> Bool {
         try handle.validateWindow(context: context)
         if let condition = step.precondition {
             guard let check = try evaluate(condition, handle: handle, context: context) else {
@@ -490,14 +537,14 @@ public struct BackgroundActions: Sendable {
             }
             try checkForeground(before, targetPID: handle.target.key.pid)
             try checkLifetime(entry)
-            try state.beginDispatch(context: context, route: .axMenu)
+            try state.beginDispatch(context: context, route: route)
         }
         var mutationFailure: NativeFailure?
         do {
-            try writer.invokeMenu(menu.path, on: handle.application, context: context, willDispatch: handoff)
+            try perform(handoff)
             state.returnedSuccessfully()
         } catch let error as NativeFailure { mutationFailure = error }
-        catch { mutationFailure = NativeFailure(.nativeFailed, "native menu invocation returned an error") }
+        catch { mutationFailure = NativeFailure(.nativeFailed, "native window operation returned an error") }
         if !state.hasEnteredDispatch, let mutationFailure { throw mutationFailure }
         guard let expected = step.expect else {
             try checkForeground(before, targetPID: handle.target.key.pid)
@@ -516,7 +563,7 @@ public struct BackgroundActions: Sendable {
                 if let mutationFailure { throw mutationFailure }
                 try checkForeground(before, targetPID: handle.target.key.pid)
             }
-            try pause(context)
+            try pause(context, for: expected)
         }
     }
 
@@ -592,8 +639,10 @@ public struct BackgroundActions: Sendable {
         return value.replacingCharacters(in: range, with: text)
     }
 
-    private func pause(_ context: OperationContext) throws {
-        Thread.sleep(forTimeInterval: Double(try context.nativeTimeoutSeconds(maximum: 0.005)))
+    private func pause(_ context: OperationContext, for condition: Condition? = nil) throws {
+        let maxDelay: Double
+        if case .ocrContains = condition { maxDelay = 0.1 } else { maxDelay = 0.005 }
+        Thread.sleep(forTimeInterval: Double(try context.nativeTimeoutSeconds(maximum: maxDelay)))
     }
     private func checkForeground(_ before: UInt32?, targetPID: UInt32) throws {
         guard let current = foreground() else { throw NativeFailure(.unsupported, "foreground state is unavailable") }
@@ -721,6 +770,97 @@ extension MacOSAXBackend: AXMutating {
         try willDispatch()
         try checkAXMutation(AXUIElementPerformAction(targetItem, kAXPressAction as CFString),
                             action: "AXMenuPress", context: context)
+    }
+
+    public func setWindowFrame(_ bounds: Rect, on window: any AXObject, windowId: UInt32, context: OperationContext,
+                               willDispatch: @Sendable () throws -> Void) throws {
+        let element = try nativeElement(window, context: context)
+        try requireSettable(kAXPositionAttribute as CFString, element: element, context: context)
+        try requireSettable(kAXSizeAttribute as CFString, element: element, context: context)
+        var origin = CGPoint(x: bounds.x, y: bounds.y)
+        var size = CGSize(width: bounds.width, height: bounds.height)
+        guard let posValue = AXValueCreate(.cgPoint, &origin),
+              let sizeValue = AXValueCreate(.cgSize, &size) else {
+            throw NativeFailure(.nativeFailed, "unable to encode window frame AXValue")
+        }
+        func readCGRect() -> CGRect? {
+            guard windowId > 0,
+                  let rows = CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(windowId)) as? [[String: Any]],
+                  let b = rows.first?[kCGWindowBounds as String] as? [String: Double],
+                  let x = b["X"], let y = b["Y"], let w = b["Width"], let h = b["Height"] else { return nil }
+            return CGRect(x: x, y: y, width: w, height: h)
+        }
+        // Poll the live WindowServer bounds (O(1) per-window lookup) rather than AXPosition/AXSize,
+        // because apps with AXEnhancedUserInterface report target AX values immediately while AppKit
+        // still animates the window frame asynchronously (~150-200ms). Waiting for live bounds to
+        // settle prevents AXSize from colliding with an in-flight AXPosition animation.
+        func settle<T: Equatable>(_ read: () -> T?, initial: T?, target: T) {
+            let deadline = min(context.deadlineNanoseconds, DispatchTime.now().uptimeNanoseconds + 500_000_000)
+            var last = read()
+            if last == target { return }
+            var stable = 0
+            while DispatchTime.now().uptimeNanoseconds < deadline, context.interruption == nil {
+                Thread.sleep(forTimeInterval: 0.025)
+                let cur = read()
+                if cur == target { return }
+                if cur == last {
+                    stable += 1
+                    if cur != initial && stable >= 3 { return }
+                    if cur == initial && stable >= 8 { return }
+                } else {
+                    stable = 0
+                    last = cur
+                }
+            }
+        }
+        let initialRect = readCGRect()
+        try installTimeout(element, context: context)
+        try willDispatch()
+        try checkAXMutation(AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, posValue),
+                            action: "AXSetWindowPosition", context: context)
+        settle({ readCGRect()?.origin }, initial: initialRect?.origin, target: origin)
+        let midRect = readCGRect()
+        try installTimeout(element, context: context)
+        try checkAXMutation(AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, sizeValue),
+                            action: "AXSetWindowSize", context: context)
+        settle({ readCGRect()?.size }, initial: midRect?.size ?? initialRect?.size, target: size)
+        // Re-apply position only if resizing or screen-edge clamping shifted origin away from target.
+        if let afterPos = readCGRect()?.origin, afterPos != origin {
+            try installTimeout(element, context: context)
+            _ = AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, posValue)
+            settle({ readCGRect()?.origin }, initial: afterPos, target: origin)
+        }
+    }
+
+    public func windowAction(_ action: WindowActionKind, on window: any AXObject, context: OperationContext,
+                             willDispatch: @Sendable () throws -> Void) throws {
+        let element = try nativeElement(window, context: context)
+        switch action {
+        case .minimize:
+            try requireSettable(kAXMinimizedAttribute as CFString, element: element, context: context)
+            try installTimeout(element, context: context)
+            try willDispatch()
+            try checkAXMutation(AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, kCFBooleanTrue),
+                                action: "AXMinimize", context: context)
+        case .close:
+            try installTimeout(element, context: context)
+            var rawButton: CFTypeRef?
+            let readResult = AXUIElementCopyAttributeValue(element, kAXCloseButtonAttribute as CFString, &rawButton)
+            try checkAXRead(readResult, context: context, allowMissing: true)
+            guard readResult == .success, let rawButton, CFGetTypeID(rawButton) == AXUIElementGetTypeID() else {
+                throw NativeFailure(.unsupported, "AXCloseButton is unavailable on this window")
+            }
+            let closeButton = unsafeDowncast(rawButton, to: AXUIElement.self)
+            try requireEnabled(closeButton, allowUnsupported: false, context: context)
+            try installTimeout(closeButton, context: context)
+            guard try readAXActionNames(closeButton, context: context).contains(kAXPressAction as String) else {
+                throw NativeFailure(.unsupported, "AXCloseButton does not advertise AXPress")
+            }
+            try installTimeout(closeButton, context: context)
+            try willDispatch()
+            try checkAXMutation(AXUIElementPerformAction(closeButton, kAXPressAction as CFString),
+                                action: "AXClose", context: context)
+        }
     }
 
     private func performAXAction(_ actionName: String, on object: any AXObject, allowUnsupportedEnabled: Bool,

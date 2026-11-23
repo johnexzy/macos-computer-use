@@ -21,6 +21,8 @@ enum ForegroundInput: Equatable, Sendable {
     case rightClick(Point)
     case hover(Point)
     case drag(from: Point, to: Point, steps: Int)
+    case scrollWheel(point: Point, deltaX: Int, deltaY: Int)
+    case focusWindow
 }
 
 struct ForegroundStopped: Error, Sendable {
@@ -129,6 +131,7 @@ final class ForegroundControl {
     private var last: ForegroundSample
     private var activationRequested = false
     private var ownsFocus = false
+    private var keepFocus = false
     private var inputActivity = false
     private var externalActivation = false
     private var interruption: ForegroundInterruption?
@@ -205,6 +208,12 @@ final class ForegroundControl {
             }
             click = witness
             dragEnd = nil
+        case .scrollWheel(let value):
+            guard let witness = ClickWitness(point: value.point, space: value.space, observation: observation, visualOnly: visualOnly) else {
+                throw stop(.frameChanged)
+            }
+            click = witness
+            dragEnd = nil
         case .drag(let value):
             guard let startWitness = ClickWitness(point: value.from, space: value.space, observation: observation, visualOnly: visualOnly),
                   let endScreen = ClickWitness.mapToScreen(point: value.to, space: value.space, observation: observation, visualOnly: visualOnly) else {
@@ -212,7 +221,7 @@ final class ForegroundControl {
             }
             click = startWitness
             dragEnd = endScreen
-        case .key, .hotkey, .typeKeys:
+        case .key, .hotkey, .typeKeys, .focusWindow:
             click = nil
             dragEnd = nil
         default: throw NativeFailure(.unsupported, "foreground operation is not implemented")
@@ -230,7 +239,9 @@ final class ForegroundControl {
         case .typeKeys(let value):
             try checkWindowTextOrKeyTarget(elementRef: value.elementRef)
             input = .typeKeys(value.text)
-        case .click, .doubleClick, .rightClick, .hover, .drag:
+        case .focusWindow:
+            input = .focusWindow
+        case .click, .doubleClick, .rightClick, .hover, .drag, .scrollWheel:
             guard let click else { throw stop(.frameChanged) }
             if let beforeClick {
                 try beforeClick(click.screen)
@@ -247,6 +258,8 @@ final class ForegroundControl {
             case .drag(let value):
                 guard let dragEnd else { throw stop(.frameChanged) }
                 input = .drag(from: click.screen, to: dragEnd, steps: Int(value.steps ?? 12))
+            case .scrollWheel(let value):
+                input = .scrollWheel(point: click.screen, deltaX: Int(value.deltaX), deltaY: Int(value.deltaY))
             default: throw NativeFailure(.unsupported, "foreground operation is not implemented")
             }
         default: throw NativeFailure(.unsupported, "foreground operation is not implemented")
@@ -278,6 +291,11 @@ final class ForegroundControl {
             try checkInterference()
             guard last.pid == window.key.pid else { throw stop(.focusChanged) }
             try willDispatch()
+        }
+        if case .focusWindow = operation {
+            keepFocus = true
+            restoration = .notNeeded
+            publish()
         }
     }
 
@@ -365,7 +383,7 @@ final class ForegroundControl {
 
     /// Restore only while the original route still owns focus and the original hardware baseline.
     func restore() {
-        guard activationRequested, restoration == .pending else { return }
+        guard activationRequested, restoration == .pending, !keepFocus else { return }
         guard case .semantic(let target) = target else { return }
         defer { publish() }
         if context.interruption != nil || inputActivity || externalActivation || interruption == .windowChanged {
@@ -697,6 +715,42 @@ struct NativeForegroundPlatform: ForegroundPlatform {
                 dragged.post(tap: .cgSessionEventTap)
             }
             Thread.sleep(forTimeInterval: 0.008)
+        case .scrollWheel(let point, let deltaX, let deltaY):
+            let location = CGPoint(x: point.x, y: point.y)
+            guard let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: location, mouseButton: .left) else {
+                throw NativeFailure(.nativeFailed, "scroll wheel cursor event creation failed")
+            }
+            let maxAxis = max(abs(deltaX), abs(deltaY))
+            let steps = max(1, min(10, (maxAxis + 39) / 40))
+            var events: [CGEvent] = []
+            events.reserveCapacity(steps)
+            var sentX = 0
+            var sentY = 0
+            for i in 1...steps {
+                let targetX = i == steps ? deltaX : (deltaX * i) / steps
+                let targetY = i == steps ? deltaY : (deltaY * i) / steps
+                let stepX = targetX - sentX
+                let stepY = targetY - sentY
+                sentX = targetX
+                sentY = targetY
+                guard stepX != 0 || stepY != 0 else { continue }
+                // Protocol positive deltaY = scroll down, positive deltaX = scroll right.
+                // macOS CGEvent pixel scroll uses negative wheel1 for down and negative wheel2 for right.
+                guard let scroll = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
+                                           wheel1: Int32(-stepY), wheel2: Int32(-stepX), wheel3: 0) else {
+                    throw NativeFailure(.nativeFailed, "scroll wheel event creation failed")
+                }
+                scroll.location = location
+                events.append(scroll)
+            }
+            try willDispatch()
+            move.post(tap: .cgSessionEventTap)
+            for (index, event) in events.enumerated() {
+                event.post(tap: .cgSessionEventTap)
+                if index + 1 < events.count { Thread.sleep(forTimeInterval: 0.008) }
+            }
+        case .focusWindow:
+            try willDispatch()
         }
     }
 

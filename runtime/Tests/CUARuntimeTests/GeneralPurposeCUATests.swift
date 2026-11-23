@@ -10,6 +10,8 @@ private final class GPNode: AXObject, @unchecked Sendable {
     var role: String
     var title: String?
     var label: String?
+    var identifier: String?
+    var subrole: String?
     var value: String?
     var url: String?
     var bounds: Rect
@@ -22,12 +24,15 @@ private final class GPNode: AXObject, @unchecked Sendable {
     weak var parent: GPNode?
     weak var owner: GPNode?
 
-    init(_ id: String, role: String, title: String? = nil, label: String? = nil, value: String? = nil,
+    init(_ id: String, role: String, title: String? = nil, label: String? = nil, identifier: String? = nil,
+         subrole: String? = nil, value: String? = nil,
          url: String? = nil, bounds: Rect = Rect(x: 10, y: 10, width: 100, height: 24)) {
         self.id = id
         self.role = role
         self.title = title
         self.label = label ?? title
+        self.identifier = identifier
+        self.subrole = subrole
         self.value = value
         self.url = url
         self.bounds = bounds
@@ -48,6 +53,9 @@ private final class GPBackend: AXReading, AXMutating, WindowCatalog, @unchecked 
     var showMenuCalls = 0
     var cancelCalls = 0
     var invokedMenuPaths: [[String]] = []
+    var setFrames: [Rect] = []
+    var windowActions: [WindowActionKind] = []
+    var onWindowAction: ((WindowActionKind) -> Void)?
 
     func prepareBrowserAccessibility(application: any AXObject, bundleId: String?, context: OperationContext) throws -> Bool {
         try context.check()
@@ -88,9 +96,9 @@ private final class GPBackend: AXReading, AXMutating, WindowCatalog, @unchecked 
         let actions = node.actions
         let val = includeValue ? node.value : nil
         lock.unlock()
-        return AXNodeSnapshot(role: node.role, title: node.title, label: node.label, bounds: node.bounds,
+        return AXNodeSnapshot(role: node.role, title: node.title, label: node.label, identifier: node.identifier, bounds: node.bounds,
                               enabled: node.enabled, enabledKnown: node.enabledKnown, value: val,
-                              valueSettable: node.valueSettable, actions: actions, complete: node.complete, url: node.url)
+                              valueSettable: node.valueSettable, actions: actions, complete: node.complete, subrole: node.subrole, url: node.url)
     }
     func same(_ lhs: any AXObject, _ rhs: any AXObject) -> Bool { (lhs as! GPNode) === (rhs as! GPNode) }
     func setValue(_ value: String, on object: any AXObject, context: OperationContext, willDispatch: @Sendable () throws -> Void) throws {
@@ -118,6 +126,15 @@ private final class GPBackend: AXReading, AXMutating, WindowCatalog, @unchecked 
         try willDispatch()
         lock.lock(); invokedMenuPaths.append(path); lock.unlock()
     }
+    func setWindowFrame(_ bounds: Rect, on window: any AXObject, windowId: UInt32, context: OperationContext, willDispatch: @Sendable () throws -> Void) throws {
+        try willDispatch()
+        lock.lock(); setFrames.append(bounds); lock.unlock()
+    }
+    func windowAction(_ action: WindowActionKind, on window: any AXObject, context: OperationContext, willDispatch: @Sendable () throws -> Void) throws {
+        try willDispatch()
+        lock.lock(); windowActions.append(action); let hook = onWindowAction; lock.unlock()
+        hook?(action)
+    }
     func targets(_ request: TargetsRequest, context: OperationContext) throws -> TargetsResult {
         try context.check(); return TargetsResult(targets: records, truncated: false)
     }
@@ -136,6 +153,7 @@ private final class GPForegroundPlatform: ForegroundPlatform, @unchecked Sendabl
     var focusedWin: (any AXObject)?
     var focusedEl: (any AXObject)?
     var posted: [ForegroundInput] = []
+    var activations: [UInt32] = []
 
     func permissionAvailable() -> Bool { true }
     func visualPermissionAvailable() -> Bool { true }
@@ -145,12 +163,48 @@ private final class GPForegroundPlatform: ForegroundPlatform, @unchecked Sendabl
     func focusedElement(pid: UInt32, context: OperationContext) throws -> (any AXObject)? { focusedEl }
     func activate(pid: UInt32, window: any AXObject, context: OperationContext, willChangeFocus: () throws -> Void) throws {
         try willChangeFocus()
+        self.pid = pid
+        self.focusedWin = window
+        activations.append(pid)
     }
     func hitTest(_ point: Point, in target: SemanticObservationHandle, context: OperationContext) throws -> Bool { true }
     func visualHitTest(_ point: Point, in target: Target, context: OperationContext) throws -> Bool { true }
     func post(_ input: ForegroundInput, willDispatch: () throws -> Void) throws {
         try willDispatch()
         posted.append(input)
+    }
+}
+
+private final class FakeClipboardManager: ClipboardManaging, @unchecked Sendable {
+    private let lock = NSLock()
+    private var changeCount: UInt64 = 1
+    private var content: String?
+    private var types: [String] = []
+
+    func perform(_ request: ClipboardRequest, context: OperationContext) throws -> ClipboardResult {
+        try context.check()
+        lock.lock(); defer { lock.unlock() }
+        switch request.action {
+        case .read:
+            let bytes = content.map { UInt32($0.utf8.count) }
+            return ClipboardResult(changeCount: changeCount, types: types,
+                                   text: request.includeText ? content : nil, textBytes: bytes)
+        case .write:
+            changeCount += 1
+            if let text = request.text {
+                content = text; types = ["public.utf8-plain-text"]
+            } else if request.filePath != nil {
+                content = nil; types = ["public.file-url"]
+            } else if request.imagePath != nil {
+                content = nil; types = ["public.png"]
+            }
+            let bytes = content.map { UInt32($0.utf8.count) }
+            return ClipboardResult(changeCount: changeCount, types: types, text: nil, textBytes: bytes)
+        case .clear:
+            changeCount += 1
+            content = nil; types = []
+            return ClipboardResult(changeCount: changeCount, types: [], text: nil, textBytes: nil)
+        }
     }
 }
 
@@ -457,5 +511,291 @@ final class GeneralPurposeCUATests: XCTestCase {
         XCTAssertEqual(waited.outcome, .satisfied)
         XCTAssertEqual(waitedObs.accessibility, .partial)
         XCTAssertTrue(waitedObs.elements.contains { $0.value == "DONE:42" })
+    }
+
+    func testObserveQueryRespectsValuePrivacyAndRolelessSelectorMatchesAcrossRoles() throws {
+        let bounds = Rect(x: 0, y: 0, width: 1000, height: 700)
+        let backend = GPBackend()
+        let target = Target(key: TargetKey(pid: 9115, windowId: 20), bundleId: "com.google.Chrome", title: "Shop", bounds: bounds)
+        backend.records = [target]
+
+        let win = GPNode("w", role: "AXWindow", title: "Shop", bounds: bounds)
+        let btn = GPNode("b", role: "AXButton", title: "Proceed to Checkout", identifier: "btn-checkout", bounds: Rect(x: 20, y: 100, width: 140, height: 32))
+        btn.actions = ["AXPress"]; btn.parent = win; btn.owner = win
+        let link = GPNode("l", role: "AXLink", title: "Express Checkout", url: "https://shop.example/pay", bounds: Rect(x: 20, y: 150, width: 140, height: 24))
+        link.actions = ["AXPress"]; link.parent = win; link.owner = win
+        let secret = GPNode("s", role: "AXTextField", title: "Coupon", value: "SECRET-VIP-CODE", bounds: Rect(x: 20, y: 200, width: 200, height: 28))
+        secret.valueSettable = true; secret.parent = win; secret.owner = win
+        win.children = [btn, link, secret]
+        backend.appWindows = [win]
+
+        let observer = SemanticAXObserver(backend: backend, catalog: backend)
+        let ctx = OperationContext(budgetMs: 2000)
+
+        // Case-insensitive query matches label, URL, and identifier; marks accessibility partial.
+        let byQuery = try observer.observe(
+            params: ObserveRequest(target: target.key, includeScreenshot: false, includeValues: false, query: "CHECKOUT"),
+            observationId: "o-q1", context: ctx)
+        XCTAssertEqual(byQuery.observation.accessibility, .partial)
+        XCTAssertEqual(Set(byQuery.observation.elements.compactMap(\.label)), ["Proceed to Checkout", "Express Checkout"])
+
+        // Query matches URL even when label doesn't contain it.
+        let byUrl = try observer.observe(
+            params: ObserveRequest(target: target.key, includeScreenshot: false, includeValues: false, query: "/pay"),
+            observationId: "o-q2", context: ctx)
+        XCTAssertEqual(byUrl.observation.elements.compactMap(\.label), ["Express Checkout"])
+
+        // Privacy: query must NOT match element value when includeValues is false!
+        let hiddenSecret = try observer.observe(
+            params: ObserveRequest(target: target.key, includeScreenshot: false, includeValues: false, query: "SECRET-VIP"),
+            observationId: "o-q3", context: ctx)
+        XCTAssertTrue(hiddenSecret.observation.elements.isEmpty)
+
+        // With includeValues: true, query matches value too.
+        let visibleSecret = try observer.observe(
+            params: ObserveRequest(target: target.key, includeScreenshot: false, includeValues: true, query: "SECRET-VIP"),
+            observationId: "o-q4", context: ctx)
+        XCTAssertEqual(visibleSecret.observation.elements.compactMap(\.label), ["Coupon"])
+
+        // Role-optional Selector matches BOTH AXButton and AXLink without specifying role.
+        let roleless = try observer.observe(
+            params: ObserveRequest(target: target.key, includeScreenshot: false, includeValues: false,
+                                   axSelectors: [CUAProtocol.Selector(role: nil, label: nil, identifier: nil, labelContains: "Checkout")]),
+            observationId: "o-rl", context: ctx)
+        XCTAssertEqual(Set(roleless.observation.elements.map(\.role)), ["AXButton", "AXLink"])
+        XCTAssertEqual(roleless.observation.axSelection?.ambiguous, true)
+    }
+
+    func testUnifiedTargetsDiscoveryIncludesOffscreenAppsAndDisplays() throws {
+        @Sendable func makeRecord(id: UInt32, title: String, x: Double, y: Double) -> [String: Any] {
+            [
+                kCGWindowOwnerPID as String: UInt32(42),
+                kCGWindowNumber as String: id,
+                kCGWindowLayer as String: 0,
+                kCGWindowName as String: title,
+                kCGWindowOwnerName as String: "Notes",
+                kCGWindowBounds as String: ["X": x, "Y": y, "Width": 800.0, "Height": 600.0],
+            ]
+        }
+        let gen = ProcessGeneration(startAbstime: 10, executableUUID: UUID())
+        let catalog = MacOSWindowCatalog(
+            windowRecords: { [makeRecord(id: 101, title: "Visible Window", x: 0, y: 25)] },
+            processOwners: { _ in [42: WindowProcessOwner(generation: gen, bundleId: "com.apple.Notes")] },
+            allWindowRecords: { [
+                makeRecord(id: 101, title: "Visible Window", x: 0, y: 25),
+                makeRecord(id: 102, title: "Minimized Window", x: 10, y: 30),
+            ] },
+            apps: { [
+                AppInfo(pid: 42, bundleId: "com.apple.Notes", name: "Notes", running: true, active: true, hidden: false),
+                AppInfo(pid: nil, bundleId: "com.apple.Safari", name: "Safari", running: false, active: false, hidden: false),
+            ] },
+            displays: { [
+                DisplayInfo(displayId: 1, bounds: Rect(x: 0, y: 0, width: 1440, height: 900), scaleFactor: 2.0, isPrimary: true),
+            ] }
+        )
+        let ctx = OperationContext(budgetMs: 2000)
+
+        // Default request omits onScreen, apps, displays.
+        let basic = try catalog.targets(TargetsRequest(), context: ctx)
+        XCTAssertEqual(basic.targets.count, 1)
+        XCTAssertNil(basic.targets[0].onScreen)
+        XCTAssertNil(basic.apps)
+        XCTAssertNil(basic.displays)
+
+        // Full discovery includes offscreen with onScreen flags, apps, and displays.
+        let full = try catalog.targets(TargetsRequest(includeOffscreen: true, includeApps: true, includeDisplays: true), context: ctx)
+        XCTAssertEqual(full.targets.count, 2)
+        XCTAssertEqual(full.targets.first(where: { $0.key.windowId == 101 })?.onScreen, true)
+        XCTAssertEqual(full.targets.first(where: { $0.key.windowId == 102 })?.onScreen, false)
+        XCTAssertEqual(full.apps?.count, 2)
+        XCTAssertEqual(full.displays?.first?.isPrimary, true)
+
+        // Filtering by bundleId also filters apps list.
+        let filtered = try catalog.targets(TargetsRequest(bundleId: "com.apple.Safari", includeApps: true), context: ctx)
+        XCTAssertTrue(filtered.targets.isEmpty)
+        XCTAssertEqual(filtered.apps?.map(\.name), ["Safari"])
+    }
+
+    func testBackgroundWindowFrameAndWindowActionCloseWithWindowAbsentExpectation() throws {
+        let bounds = Rect(x: 0, y: 0, width: 800, height: 600)
+        let backend = GPBackend()
+        let target = Target(key: TargetKey(pid: 9115, windowId: 21), bundleId: "com.example.App", title: "Doc", bounds: bounds)
+        backend.records = [target]
+        let win = GPNode("w", role: "AXWindow", title: "Doc", bounds: bounds)
+        let btn = GPNode("b", role: "AXButton", title: "Save", bounds: Rect(x: 20, y: 40, width: 80, height: 24))
+        btn.actions = ["AXPress"]; btn.parent = win; btn.owner = win
+        win.children = [btn]
+        backend.appWindows = [win]
+
+        let ctx = OperationContext(budgetMs: 2000)
+        let native = try SemanticAXObserver(backend: backend, catalog: backend).observe(
+            params: ObserveRequest(target: target.key, includeScreenshot: false, includeValues: false),
+            observationId: "o-win", context: ctx)
+        let retained = RetainedObservation(observation: native.observation, handle: native.handle, createdAt: 0)
+
+        final class FlagBox: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = false
+            func set(_ v: Bool) { lock.lock(); value = v; lock.unlock() }
+            func get() -> Bool { lock.lock(); defer { lock.unlock() }; return value }
+        }
+        let windowClosed = FlagBox()
+        backend.onWindowAction = { action in
+            if action == .close { windowClosed.set(true) }
+        }
+        let actions = BackgroundActions(
+            predicates: PredicateEvaluator(windowPresent: { _, _ in !windowClosed.get() }),
+            now: { 0 }, foreground: { 100 })
+        let nextBounds = Rect(x: 120, y: 80, width: 960, height: 640)
+        let req = ActRequest(grantId: "g", observationId: "o-win", target: target.key, steps: [
+            ActionStep(actionId: "f1", operation: .setWindowFrame(SetWindowFrameOperation(bounds: nextBounds)), precondition: nil, expect: nil),
+            ActionStep(actionId: "w1", operation: .windowAction(WindowActionOperation(action: .minimize)), precondition: nil, expect: nil),
+            ActionStep(actionId: "w2", operation: .windowAction(WindowActionOperation(action: .close)),
+                       precondition: nil, expect: .windowAbsent(Empty())),
+        ])
+        let res = actions.act(req, entry: retained, context: ctx, state: ActionExecutionState(act: req), progress: { _, _ in })
+        XCTAssertEqual(res.stopReason, .completed)
+        XCTAssertEqual(res.steps.map(\.route), [.axWindowFrame, .axWindowAction, .axWindowAction])
+        XCTAssertEqual(res.steps[2].verification, .confirmed)
+        XCTAssertEqual(backend.setFrames, [nextBounds])
+        XCTAssertEqual(backend.windowActions, [.minimize, .close])
+    }
+
+    func testForegroundScrollWheelAndPersistentFocusWindowSkipRestore() throws {
+        let bounds = Rect(x: 0, y: 0, width: 400, height: 300)
+        let backend = GPBackend()
+        let target = Target(key: TargetKey(pid: 9115, windowId: 22), bundleId: "com.google.Chrome", title: "Canvas", bounds: bounds)
+        backend.records = [target]
+        let win = GPNode("w", role: "AXWindow", title: "Canvas", bounds: bounds)
+        let web = GPNode("web", role: "AXWebArea", title: "Canvas", bounds: bounds)
+        web.parent = win; web.owner = win
+        win.children = [web]
+        backend.appWindows = [win]
+
+        let img = makeSolidImage(width: 400, height: 300)
+        let identity = ImageTransform(scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0, validImageBounds: bounds, coverage: .complete)
+        let frame = VisualFrame(widthPx: 400, heightPx: 300, captureWindowBounds: bounds, captureScreenBounds: bounds,
+                                imageToScreen: identity, imageToWindow: identity)
+        let capture = SolidVisualCapture(image: img, frame: frame)
+        let system = MacOSSystem(backend: backend, catalog: backend, visual: capture, isAXTrusted: { true })
+        let ctx = OperationContext(budgetMs: 2500)
+        let native = try system.observe(
+            params: ObserveRequest(target: target.key, includeScreenshot: true, includeValues: false),
+            observationId: "o-fg2", context: ctx)
+        let retained = RetainedObservation(observation: native.observation, handle: native.handle, createdAt: 0)
+
+        let priorWin = GPNode("prior", role: "AXWindow", title: "Terminal", bounds: bounds)
+        let platform = GPForegroundPlatform()
+        platform.pid = 777 // Different app starts in foreground!
+        platform.focusedWin = priorWin
+        platform.focusedEl = web
+
+        let actions = BackgroundActions(now: { 0 }, foreground: { 777 }, foregroundPlatform: platform, coordinateCapture: capture)
+        let req = ActRequest(grantId: "g", observationId: "o-fg2", target: target.key, steps: [
+            ActionStep(actionId: "focus", operation: .focusWindow(Empty()), precondition: nil, expect: nil),
+            ActionStep(actionId: "wheel", operation: .scrollWheel(ScrollWheelOperation(point: Point(x: 100, y: 120), space: .windowPoints, deltaX: 10, deltaY: 240)),
+                       precondition: nil, expect: nil),
+        ], foreground: true)
+        let res = actions.act(req, entry: retained, context: ctx, state: ActionExecutionState(act: req), progress: { _, _ in })
+        XCTAssertEqual(res.stopReason, .completed)
+        XCTAssertEqual(res.steps.map(\.route), [.foregroundFocus, .foregroundScrollWheel])
+        XCTAssertEqual(res.foreground?.activationRequested, true)
+        XCTAssertEqual(res.foreground?.restoration, .notNeeded, "focusWindow must persist focus without restoring prior app")
+        XCTAssertEqual(platform.activations, [9115], "prior app 777 must not be re-activated after focusWindow")
+        XCTAssertEqual(platform.pid, 9115)
+        XCTAssertEqual(platform.posted, [.focusWindow, .scrollWheel(point: Point(x: 100, y: 120), deltaX: 10, deltaY: 240)])
+    }
+
+    func testOcrContainsWaitOnVisualOnlyWindowAndClipboardPrivacyInSession() throws {
+        let bounds = Rect(x: 0, y: 0, width: 400, height: 300)
+        let gen = ProcessGeneration(startAbstime: 99, executableUUID: UUID())
+        let catalog = MacOSWindowCatalog(
+            windowRecords: { [[
+                kCGWindowOwnerPID as String: UInt32(9115),
+                kCGWindowNumber as String: UInt32(23),
+                kCGWindowLayer as String: 0,
+                kCGWindowName as String: "GameCanvas",
+                kCGWindowOwnerName as String: "CanvasApp",
+                kCGWindowBounds as String: ["X": 0.0, "Y": 0.0, "Width": 400.0, "Height": 300.0],
+            ]] },
+            processOwners: { _ in [9115: WindowProcessOwner(generation: gen, bundleId: nil)] }
+        )
+        let backend = GPBackend() // No AX windows -> falls back to VisualObservationHandle!
+        let img = makeSolidImage(width: 400, height: 300)
+        let identity = ImageTransform(scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0, validImageBounds: bounds, coverage: .complete)
+        let frame = VisualFrame(widthPx: 400, heightPx: 300, captureWindowBounds: bounds, captureScreenBounds: bounds,
+                                imageToScreen: identity, imageToWindow: identity)
+        let capture = SolidVisualCapture(image: img, frame: frame)
+        let clipboard = FakeClipboardManager()
+        let system = MacOSSystem(backend: backend, catalog: catalog, visual: capture,
+                                 clipboardManager: clipboard, isAXTrusted: { false })
+        final class CounterBox: @unchecked Sendable {
+            private let lock = NSLock()
+            private var n = 0
+            func next() -> Int { lock.lock(); defer { lock.unlock() }; n += 1; return n }
+        }
+        let ocrReads = CounterBox()
+        let predicates = PredicateEvaluator(
+            windowPresent: { _, _ in true },
+            visual: capture,
+            ocr: { _, query, _ in
+                let count = ocrReads.next()
+                let now = UInt64(Date().timeIntervalSince1970 * 1000)
+                let interval = CollectionInterval(startedUnixMs: now, finishedUnixMs: now)
+                if count >= 2, query == "PAY NOW" {
+                    return OcrEvidence(status: .complete, collected: interval,
+                                       matches: [OcrMatch(text: "PAY NOW", imageBounds: Rect(x: 10, y: 10, width: 80, height: 20))])
+                }
+                return OcrEvidence(status: .complete, collected: interval, matches: [])
+            }
+        )
+        let actions = BackgroundActions(predicates: predicates)
+        let values = TestCollector()
+        let session = RuntimeSession(system: system, epoch: "e2", actions: actions, emit: values.append)
+        defer { session.shutdown() }
+
+        func send(_ id: String, _ body: RequestBody, epoch: String? = "e2") throws -> Response {
+            let req = Request(version: 1, id: id, epoch: epoch, budgetMs: 3000, body: body)
+            session.receive(req, frameBytes: try Frame.request(req).encodeLine().count)
+            return try values.response(id)
+        }
+
+        _ = try send("h", .hello(HelloRequest(clientName: "t", supportedVersions: [1],
+                                              authority: Authority(grantId: "g2", mode: .backgroundRequired))), epoch: nil)
+
+        // Clipboard write, metadata-only read (no text), opt-in read (with text), and clear.
+        let writeRes = try send("cb1", .clipboard(ClipboardRequest(grantId: "g2", action: .write, text: "secret token")))
+        guard case .clipboard(let written) = writeRes.body else { return XCTFail("expected clipboard write result") }
+        XCTAssertNil(written.text)
+        XCTAssertEqual(written.textBytes, 12)
+        XCTAssertEqual(written.types, ["public.utf8-plain-text"])
+
+        let metaRes = try send("cb2", .clipboard(ClipboardRequest(grantId: "g2", action: .read, includeText: false)))
+        guard case .clipboard(let meta) = metaRes.body else { return XCTFail("expected clipboard read result") }
+        XCTAssertNil(meta.text)
+        XCTAssertEqual(meta.textBytes, 12)
+
+        let fullRes = try send("cb3", .clipboard(ClipboardRequest(grantId: "g2", action: .read, includeText: true)))
+        guard case .clipboard(let full) = fullRes.body else { return XCTFail("expected clipboard full read") }
+        XCTAssertEqual(full.text, "secret token")
+
+        let clearRes = try send("cb4", .clipboard(ClipboardRequest(grantId: "g2", action: .clear)))
+        guard case .clipboard(let cleared) = clearRes.body else { return XCTFail("expected clipboard clear") }
+        XCTAssertTrue(cleared.types.isEmpty)
+        XCTAssertNil(cleared.text)
+
+        // Visual-only observation (no AX) -> waitFor(ocrContains) succeeds on 2nd poll!
+        let targetKey = TargetKey(pid: 9115, windowId: 23)
+        let obsRes = try send("obs", .observe(ObserveRequest(target: targetKey, includeScreenshot: true, includeValues: false)))
+        guard case .observe(let obs) = obsRes.body else { return XCTFail("expected visual observation") }
+        XCTAssertEqual(obs.accessibility, .unavailable)
+
+        let waitRes = try send("w-ocr", .waitFor(WaitRequest(observationId: obs.observationId, target: targetKey,
+                                                             condition: .ocrContains(OcrCondition(contains: "PAY NOW")))))
+        guard case .waitFor(let waited) = waitRes.body else { return XCTFail("expected wait result") }
+        XCTAssertEqual(waited.outcome, .satisfied)
+        XCTAssertEqual(waited.alreadySatisfied, false)
+        XCTAssertEqual(waited.evidence?.matched, true)
+        XCTAssertNotNil(waited.observation)
     }
 }

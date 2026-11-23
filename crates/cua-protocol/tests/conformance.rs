@@ -24,7 +24,7 @@ fn shared_valid_fixtures_decode_and_round_trip() {
     let paths = fixtures("valid");
     assert_eq!(
         paths.len(),
-        73,
+        83,
         "keep the shared fixture inventory deliberate"
     );
     for path in paths {
@@ -63,6 +63,7 @@ fn absent_visual_options_keep_the_legacy_ax_wire_shape() {
         "eventHistory",
         "scope",
         "interactiveOnly",
+        "query",
     ] {
         assert!(params.get(name).is_none(), "unexpected {name}");
     }
@@ -134,7 +135,7 @@ fn ocr_budget_accounts_for_json_escaping_not_only_text_bytes() {
 #[test]
 fn shared_invalid_fixtures_are_rejected() {
     let paths = fixtures("invalid");
-    assert_eq!(paths.len(), 107);
+    assert_eq!(paths.len(), 117);
     for path in paths {
         assert!(
             decode_line(&fs::read(&path).unwrap()).is_err(),
@@ -546,6 +547,79 @@ fn open_wait_and_scoped_observe_enforce_authority_and_correlation() {
     assert!(
         complete_res
             .validate_for(&scoped_req, "helper-epoch-1")
+            .is_err()
+    );
+}
+
+#[test]
+fn clipboard_targets_discovery_and_query_enforce_privacy_and_correlation() {
+    let bg = SessionContext {
+        epoch: "helper-epoch-1".into(),
+        authority: Authority {
+            grant_id: "host-grant-1".into(),
+            mode: ExecutionMode::BackgroundRequired,
+        },
+    };
+    let Frame::Request(mut clip_req) = fixture("clipboard-request") else {
+        panic!()
+    };
+    let Frame::Response(clip_res) = fixture("clipboard-response") else {
+        panic!()
+    };
+    bg.authorize(&clip_req).unwrap();
+    clip_res.validate_for(&clip_req, "helper-epoch-1").unwrap();
+    // Privacy: omitting includeText must reject any response carrying text.
+    if let RequestBody::Clipboard(req) = &mut clip_req.body {
+        req.include_text = false;
+    }
+    assert!(clip_res.validate_for(&clip_req, "helper-epoch-1").is_err());
+    // Grant mismatch rejected.
+    if let RequestBody::Clipboard(req) = &mut clip_req.body {
+        req.grant_id = "forged-grant".into();
+    }
+    assert!(bg.authorize(&clip_req).is_err());
+
+    // Targets discovery correlation: apps/displays must match requested flags.
+    let Frame::Request(mut targets_req) = fixture("targets-discovery-request") else {
+        panic!()
+    };
+    let Frame::Response(targets_res) = fixture("targets-discovery-response") else {
+        panic!()
+    };
+    targets_res
+        .validate_for(&targets_req, "helper-epoch-1")
+        .unwrap();
+    if let RequestBody::Targets(req) = &mut targets_req.body {
+        req.include_apps = false;
+    }
+    assert!(
+        targets_res
+            .validate_for(&targets_req, "helper-epoch-1")
+            .is_err()
+    );
+
+    // Observe query cannot report Complete coverage.
+    let Frame::Request(query_req) = fixture("observe-query-request") else {
+        panic!()
+    };
+    let Frame::Response(Response {
+        body: ResponseBody::Observe(mut obs),
+        ..
+    }) = fixture("observe-partial-response")
+    else {
+        panic!()
+    };
+    obs.screenshot = None;
+    obs.accessibility = Coverage::Complete;
+    let complete_res = Response {
+        version: VERSION,
+        id: query_req.id.clone(),
+        epoch: "helper-epoch-1".into(),
+        body: ResponseBody::Observe(obs),
+    };
+    assert!(
+        complete_res
+            .validate_for(&query_req, "helper-epoch-1")
             .is_err()
     );
 }

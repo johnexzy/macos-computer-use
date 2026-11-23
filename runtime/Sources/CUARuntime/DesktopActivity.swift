@@ -117,6 +117,7 @@ struct DesktopActivity: Sendable {
         case .press(let input), .confirm(let input), .showMenu(let input), .cancel(let input):
             elementRef = input.elementRef; phase = .pressed
         case .invokeMenu: phase = .pressed
+        case .setWindowFrame, .windowAction, .focusWindow: phase = .updated
         case .key(let input): elementRef = input.elementRef
         case .hotkey(let input): elementRef = input.elementRef
         case .click(let input), .doubleClick(let input), .rightClick(let input):
@@ -128,6 +129,9 @@ struct DesktopActivity: Sendable {
         case .drag(let input):
             phase = .pressed
             point = mapScreen(input.to, space: input.space)
+        case .scrollWheel(let input):
+            phase = .scrolled
+            point = mapScreen(input.point, space: input.space)
         case .scroll(let input): elementRef = input.elementRef; phase = .scrolled
         case .scrollToVisible(let input): elementRef = input.elementRef; phase = .scrolled
         case .waitFor: return nil

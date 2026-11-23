@@ -21,6 +21,8 @@ public enum Limits {
     public static let maxOcrBytes = 256 * 1024
     public static let maxOcrQueryBytes = 4096
     public static let maxUrlBytes = 2048
+    public static let maxClipboardBytes = 256 * 1024
+    public static let maxClipboardTypes = 64
 }
 
 public struct ContractError: Error, Equatable, CustomStringConvertible, Sendable {
@@ -72,9 +74,18 @@ public enum Verification: String, Codable, Equatable, Sendable {
 
 public enum DeliveryRoute: String, Codable, Equatable, Sendable {
     case axSetValue, axSelectedText, axPress, axScroll, axScrollToVisible
-    case axConfirm, axShowMenu, axCancel, axMenu
+    case axConfirm, axShowMenu, axCancel, axMenu, axWindowFrame, axWindowAction
     case foregroundKey, foregroundClick, foregroundDoubleClick, foregroundRightClick
-    case foregroundHover, foregroundDrag, foregroundHotkey, foregroundTypeKeys
+    case foregroundHover, foregroundDrag, foregroundScrollWheel, foregroundFocus
+    case foregroundHotkey, foregroundTypeKeys
+}
+
+public enum WindowActionKind: String, Codable, Equatable, Sendable {
+    case minimize, close
+}
+
+public enum ClipboardAction: String, Codable, Equatable, Sendable {
+    case read, write, clear
 }
 
 public enum ObserveScope: String, Codable, Equatable, Sendable {
@@ -159,11 +170,15 @@ public enum ActionKind: String, Codable, Equatable, Sendable {
     case showMenu
     case cancel
     case invokeMenu
+    case setWindowFrame
+    case windowAction
     case click
     case doubleClick
     case rightClick
     case hover
     case drag
+    case scrollWheel
+    case focusWindow
     case hotkey
     case typeKeys
 }
@@ -435,15 +450,17 @@ public struct Target: Codable, Equatable, Sendable {
     public let title: String
     public let bounds: Rect
     public let ownerName: String?
-    public init(key: TargetKey, bundleId: String?, title: String, bounds: Rect, ownerName: String? = nil) {
+    public let onScreen: Bool?
+    public init(key: TargetKey, bundleId: String?, title: String, bounds: Rect, ownerName: String? = nil, onScreen: Bool? = nil) {
         self.key = key
         self.bundleId = bundleId
         self.title = title
         self.bounds = bounds
         self.ownerName = ownerName
+        self.onScreen = onScreen
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case key, bundleId, title, bounds, ownerName
+        case key, bundleId, title, bounds, ownerName, onScreen
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -452,6 +469,7 @@ public struct Target: Codable, Equatable, Sendable {
         title = try c.decode(String.self, forKey: .title)
         bounds = try c.decode(Rect.self, forKey: .bounds)
         ownerName = try c.decodeIfPresent(String.self, forKey: .ownerName)
+        onScreen = try c.decodeIfPresent(Bool.self, forKey: .onScreen)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -460,6 +478,75 @@ public struct Target: Codable, Equatable, Sendable {
         try c.encode(title, forKey: .title)
         try c.encode(bounds, forKey: .bounds)
         try c.encodeIfPresent(ownerName, forKey: .ownerName)
+        try c.encodeIfPresent(onScreen, forKey: .onScreen)
+    }
+}
+
+public struct AppInfo: Codable, Equatable, Sendable {
+    public let pid: UInt32?
+    public let bundleId: String?
+    public let name: String
+    public let running: Bool
+    public let active: Bool
+    public let hidden: Bool
+    public init(pid: UInt32? = nil, bundleId: String? = nil, name: String, running: Bool, active: Bool, hidden: Bool) {
+        self.pid = pid
+        self.bundleId = bundleId
+        self.name = name
+        self.running = running
+        self.active = active
+        self.hidden = hidden
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case pid, bundleId, name, running, active, hidden
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        pid = try c.decodeIfPresent(UInt32.self, forKey: .pid)
+        bundleId = try c.decodeIfPresent(String.self, forKey: .bundleId)
+        name = try c.decode(String.self, forKey: .name)
+        running = try c.decode(Bool.self, forKey: .running)
+        active = try c.decode(Bool.self, forKey: .active)
+        hidden = try c.decode(Bool.self, forKey: .hidden)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(pid, forKey: .pid)
+        try c.encodeIfPresent(bundleId, forKey: .bundleId)
+        try c.encode(name, forKey: .name)
+        try c.encode(running, forKey: .running)
+        try c.encode(active, forKey: .active)
+        try c.encode(hidden, forKey: .hidden)
+    }
+}
+
+public struct DisplayInfo: Codable, Equatable, Sendable {
+    public let displayId: UInt32
+    public let bounds: Rect
+    public let scaleFactor: Double
+    public let isPrimary: Bool
+    public init(displayId: UInt32, bounds: Rect, scaleFactor: Double, isPrimary: Bool) {
+        self.displayId = displayId
+        self.bounds = bounds
+        self.scaleFactor = scaleFactor
+        self.isPrimary = isPrimary
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case displayId, bounds, scaleFactor, isPrimary
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        displayId = try c.decode(UInt32.self, forKey: .displayId)
+        bounds = try c.decode(Rect.self, forKey: .bounds)
+        scaleFactor = try c.decode(Double.self, forKey: .scaleFactor)
+        isPrimary = try c.decode(Bool.self, forKey: .isPrimary)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(displayId, forKey: .displayId)
+        try c.encode(bounds, forKey: .bounds)
+        try c.encode(scaleFactor, forKey: .scaleFactor)
+        try c.encode(isPrimary, forKey: .isPrimary)
     }
 }
 
@@ -468,14 +555,20 @@ public struct TargetsRequest: Codable, Equatable, Sendable {
     public let titleContains: String?
     public let ownerContains: String?
     public let unbundledOnly: Bool
-    public init(bundleId: String? = nil, titleContains: String? = nil, ownerContains: String? = nil, unbundledOnly: Bool = false) {
+    public let includeOffscreen: Bool
+    public let includeApps: Bool
+    public let includeDisplays: Bool
+    public init(bundleId: String? = nil, titleContains: String? = nil, ownerContains: String? = nil, unbundledOnly: Bool = false, includeOffscreen: Bool = false, includeApps: Bool = false, includeDisplays: Bool = false) {
         self.bundleId = bundleId
         self.titleContains = titleContains
         self.ownerContains = ownerContains
         self.unbundledOnly = unbundledOnly
+        self.includeOffscreen = includeOffscreen
+        self.includeApps = includeApps
+        self.includeDisplays = includeDisplays
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case bundleId, titleContains, ownerContains, unbundledOnly
+        case bundleId, titleContains, ownerContains, unbundledOnly, includeOffscreen, includeApps, includeDisplays
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -483,6 +576,9 @@ public struct TargetsRequest: Codable, Equatable, Sendable {
         titleContains = try c.decodeIfPresent(String.self, forKey: .titleContains)
         ownerContains = try c.decodeIfPresent(String.self, forKey: .ownerContains)
         unbundledOnly = c.contains(.unbundledOnly) ? try c.decode(Bool.self, forKey: .unbundledOnly) : false
+        includeOffscreen = c.contains(.includeOffscreen) ? try c.decode(Bool.self, forKey: .includeOffscreen) : false
+        includeApps = c.contains(.includeApps) ? try c.decode(Bool.self, forKey: .includeApps) : false
+        includeDisplays = c.contains(.includeDisplays) ? try c.decode(Bool.self, forKey: .includeDisplays) : false
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -490,28 +586,39 @@ public struct TargetsRequest: Codable, Equatable, Sendable {
         try c.encodeIfPresent(titleContains, forKey: .titleContains)
         try c.encodeIfPresent(ownerContains, forKey: .ownerContains)
         if unbundledOnly { try c.encode(unbundledOnly, forKey: .unbundledOnly) }
+        if includeOffscreen { try c.encode(true, forKey: .includeOffscreen) }
+        if includeApps { try c.encode(true, forKey: .includeApps) }
+        if includeDisplays { try c.encode(true, forKey: .includeDisplays) }
     }
 }
 
 public struct TargetsResult: Codable, Equatable, Sendable {
     public let targets: [Target]
     public let truncated: Bool
-    public init(targets: [Target], truncated: Bool) {
+    public let apps: [AppInfo]?
+    public let displays: [DisplayInfo]?
+    public init(targets: [Target], truncated: Bool, apps: [AppInfo]? = nil, displays: [DisplayInfo]? = nil) {
         self.targets = targets
         self.truncated = truncated
+        self.apps = apps
+        self.displays = displays
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case targets, truncated
+        case targets, truncated, apps, displays
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
         targets = try c.decode([Target].self, forKey: .targets)
         truncated = try c.decode(Bool.self, forKey: .truncated)
+        apps = try c.decodeIfPresent([AppInfo].self, forKey: .apps)
+        displays = try c.decodeIfPresent([DisplayInfo].self, forKey: .displays)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(targets, forKey: .targets)
         try c.encode(truncated, forKey: .truncated)
+        try c.encodeIfPresent(apps, forKey: .apps)
+        try c.encodeIfPresent(displays, forKey: .displays)
     }
 }
 
@@ -998,7 +1105,8 @@ public struct ObserveRequest: Codable, Equatable, Sendable {
     public let eventHistory: EventHistoryRequest?
     public let scope: ObserveScope?
     public let interactiveOnly: Bool
-    public init(target: TargetKey, includeScreenshot: Bool, includeValues: Bool, includeOcr: Bool = false, ocrQuery: String? = nil, cropWindow: Rect? = nil, maxImageDimensionPx: UInt32? = nil, axSelectors: [Selector]? = nil, eventHistory: EventHistoryRequest? = nil, scope: ObserveScope? = nil, interactiveOnly: Bool = false) {
+    public let query: String?
+    public init(target: TargetKey, includeScreenshot: Bool, includeValues: Bool, includeOcr: Bool = false, ocrQuery: String? = nil, cropWindow: Rect? = nil, maxImageDimensionPx: UInt32? = nil, axSelectors: [Selector]? = nil, eventHistory: EventHistoryRequest? = nil, scope: ObserveScope? = nil, interactiveOnly: Bool = false, query: String? = nil) {
         self.target = target
         self.includeScreenshot = includeScreenshot
         self.includeValues = includeValues
@@ -1010,9 +1118,10 @@ public struct ObserveRequest: Codable, Equatable, Sendable {
         self.eventHistory = eventHistory
         self.scope = scope
         self.interactiveOnly = interactiveOnly
+        self.query = query
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case target, includeScreenshot, includeValues, includeOcr, ocrQuery, cropWindow, maxImageDimensionPx, axSelectors, eventHistory, scope, interactiveOnly
+        case target, includeScreenshot, includeValues, includeOcr, ocrQuery, cropWindow, maxImageDimensionPx, axSelectors, eventHistory, scope, interactiveOnly, query
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -1027,6 +1136,7 @@ public struct ObserveRequest: Codable, Equatable, Sendable {
         eventHistory = try c.decodeIfPresent(EventHistoryRequest.self, forKey: .eventHistory)
         scope = try c.decodeIfPresent(ObserveScope.self, forKey: .scope)
         interactiveOnly = c.contains(.interactiveOnly) ? try c.decode(Bool.self, forKey: .interactiveOnly) : false
+        query = try c.decodeIfPresent(String.self, forKey: .query)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -1041,6 +1151,7 @@ public struct ObserveRequest: Codable, Equatable, Sendable {
         try c.encodeIfPresent(eventHistory, forKey: .eventHistory)
         try c.encodeIfPresent(scope, forKey: .scope)
         if interactiveOnly { try c.encode(true, forKey: .interactiveOnly) }
+        try c.encodeIfPresent(query, forKey: .query)
     }
 }
 
@@ -1103,11 +1214,11 @@ public struct Observation: Codable, Equatable, Sendable {
 }
 
 public struct Selector: Codable, Equatable, Sendable {
-    public let role: String
+    public let role: String?
     public let label: String?
     public let identifier: String?
     public let labelContains: String?
-    public init(role: String, label: String?, identifier: String?, labelContains: String? = nil) {
+    public init(role: String? = nil, label: String? = nil, identifier: String? = nil, labelContains: String? = nil) {
         self.role = role
         self.label = label
         self.identifier = identifier
@@ -1118,14 +1229,14 @@ public struct Selector: Codable, Equatable, Sendable {
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
-        role = try c.decode(String.self, forKey: .role)
+        role = try c.decodeIfPresent(String.self, forKey: .role)
         label = try c.decodeIfPresent(String.self, forKey: .label)
         identifier = try c.decodeIfPresent(String.self, forKey: .identifier)
         labelContains = try c.decodeIfPresent(String.self, forKey: .labelContains)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(role, forKey: .role)
+        try c.encodeIfPresent(role, forKey: .role)
         try c.encode(label, forKey: .label)
         try c.encode(identifier, forKey: .identifier)
         try c.encodeIfPresent(labelContains, forKey: .labelContains)
@@ -1235,6 +1346,28 @@ public struct UrlCondition: Codable, Equatable, Sendable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(elementRef, forKey: .elementRef)
         try c.encode(contains, forKey: .contains)
+    }
+}
+
+public struct OcrCondition: Codable, Equatable, Sendable {
+    public let contains: String
+    public let cropWindow: Rect?
+    public init(contains: String, cropWindow: Rect? = nil) {
+        self.contains = contains
+        self.cropWindow = cropWindow
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case contains, cropWindow
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        contains = try c.decode(String.self, forKey: .contains)
+        cropWindow = try c.decodeIfPresent(Rect.self, forKey: .cropWindow)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(contains, forKey: .contains)
+        try c.encodeIfPresent(cropWindow, forKey: .cropWindow)
     }
 }
 
@@ -1366,6 +1499,42 @@ public struct InvokeMenuOperation: Codable, Equatable, Sendable {
     }
 }
 
+public struct SetWindowFrameOperation: Codable, Equatable, Sendable {
+    public let bounds: Rect
+    public init(bounds: Rect) {
+        self.bounds = bounds
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case bounds
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        bounds = try c.decode(Rect.self, forKey: .bounds)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(bounds, forKey: .bounds)
+    }
+}
+
+public struct WindowActionOperation: Codable, Equatable, Sendable {
+    public let action: WindowActionKind
+    public init(action: WindowActionKind) {
+        self.action = action
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case action
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        action = try c.decode(WindowActionKind.self, forKey: .action)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(action, forKey: .action)
+    }
+}
+
 public struct ClickOperation: Codable, Equatable, Sendable {
     public let point: Point
     public let space: CoordinateSpace
@@ -1415,6 +1584,36 @@ public struct DragOperation: Codable, Equatable, Sendable {
         try c.encode(to, forKey: .to)
         try c.encode(space, forKey: .space)
         try c.encodeIfPresent(steps, forKey: .steps)
+    }
+}
+
+public struct ScrollWheelOperation: Codable, Equatable, Sendable {
+    public let point: Point
+    public let space: CoordinateSpace
+    public let deltaX: Int32
+    public let deltaY: Int32
+    public init(point: Point, space: CoordinateSpace, deltaX: Int32 = 0, deltaY: Int32 = 0) {
+        self.point = point
+        self.space = space
+        self.deltaX = deltaX
+        self.deltaY = deltaY
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case point, space, deltaX, deltaY
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        point = try c.decode(Point.self, forKey: .point)
+        space = try c.decode(CoordinateSpace.self, forKey: .space)
+        deltaX = c.contains(.deltaX) ? try c.decode(Int32.self, forKey: .deltaX) : 0
+        deltaY = c.contains(.deltaY) ? try c.decode(Int32.self, forKey: .deltaY) : 0
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(point, forKey: .point)
+        try c.encode(space, forKey: .space)
+        try c.encode(deltaX, forKey: .deltaX)
+        try c.encode(deltaY, forKey: .deltaY)
     }
 }
 
@@ -1893,6 +2092,78 @@ public struct OpenResult: Codable, Equatable, Sendable {
     }
 }
 
+public struct ClipboardRequest: Codable, Equatable, Sendable {
+    public let grantId: String
+    public let action: ClipboardAction
+    public let includeText: Bool
+    public let text: String?
+    public let filePath: String?
+    public let imagePath: String?
+    public init(grantId: String, action: ClipboardAction, includeText: Bool = false, text: String? = nil, filePath: String? = nil, imagePath: String? = nil) {
+        self.grantId = grantId
+        self.action = action
+        self.includeText = includeText
+        self.text = text
+        self.filePath = filePath
+        self.imagePath = imagePath
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case grantId, action, includeText, text, filePath, imagePath
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        grantId = try c.decode(String.self, forKey: .grantId)
+        action = try c.decode(ClipboardAction.self, forKey: .action)
+        includeText = c.contains(.includeText) ? try c.decode(Bool.self, forKey: .includeText) : false
+        text = try c.decodeIfPresent(String.self, forKey: .text)
+        filePath = try c.decodeIfPresent(String.self, forKey: .filePath)
+        imagePath = try c.decodeIfPresent(String.self, forKey: .imagePath)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(grantId, forKey: .grantId)
+        try c.encode(action, forKey: .action)
+        if includeText { try c.encode(true, forKey: .includeText) }
+        try c.encodeIfPresent(text, forKey: .text)
+        try c.encodeIfPresent(filePath, forKey: .filePath)
+        try c.encodeIfPresent(imagePath, forKey: .imagePath)
+    }
+}
+
+public struct ClipboardResult: Codable, Equatable, Sendable {
+    public let changeCount: UInt64
+    public let types: [String]
+    public let text: String?
+    public let textBytes: UInt32?
+    public let truncated: Bool
+    public init(changeCount: UInt64, types: [String], text: String? = nil, textBytes: UInt32? = nil, truncated: Bool = false) {
+        self.changeCount = changeCount
+        self.types = types
+        self.text = text
+        self.textBytes = textBytes
+        self.truncated = truncated
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case changeCount, types, text, textBytes, truncated
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        changeCount = try c.decode(UInt64.self, forKey: .changeCount)
+        types = try c.decode([String].self, forKey: .types)
+        text = try c.decodeIfPresent(String.self, forKey: .text)
+        textBytes = try c.decodeIfPresent(UInt32.self, forKey: .textBytes)
+        truncated = c.contains(.truncated) ? try c.decode(Bool.self, forKey: .truncated) : false
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(changeCount, forKey: .changeCount)
+        try c.encode(types, forKey: .types)
+        try c.encodeIfPresent(text, forKey: .text)
+        try c.encodeIfPresent(textBytes, forKey: .textBytes)
+        if truncated { try c.encode(true, forKey: .truncated) }
+    }
+}
+
 public struct WaitResult: Codable, Equatable, Sendable {
     public let outcome: WaitOutcome
     public let alreadySatisfied: Bool
@@ -2091,6 +2362,7 @@ public enum Condition: Codable, Equatable, Sendable {
     case valueContains(ValueContainsCondition)
     case enabled(EnabledCondition)
     case urlContains(UrlCondition)
+    case ocrContains(OcrCondition)
     case windowAbsent(Empty)
     public init(from decoder: Decoder) throws {
         let (tag, c) = try tagged(decoder, "kind", "params")
@@ -2101,6 +2373,7 @@ public enum Condition: Codable, Equatable, Sendable {
         case "valueContains": self = .valueContains(try c.decode(ValueContainsCondition.self, forKey: WireKey("params")))
         case "enabled": self = .enabled(try c.decode(EnabledCondition.self, forKey: WireKey("params")))
         case "urlContains": self = .urlContains(try c.decode(UrlCondition.self, forKey: WireKey("params")))
+        case "ocrContains": self = .ocrContains(try c.decode(OcrCondition.self, forKey: WireKey("params")))
         case "windowAbsent": self = .windowAbsent(try c.decode(Empty.self, forKey: WireKey("params")))
         default: throw ContractError("unknown tagged variant")
         }
@@ -2126,6 +2399,9 @@ public enum Condition: Codable, Equatable, Sendable {
         case .urlContains(let value):
             try c.encode("urlContains", forKey: WireKey("kind"))
             try c.encode(value, forKey: WireKey("params"))
+        case .ocrContains(let value):
+            try c.encode("ocrContains", forKey: WireKey("kind"))
+            try c.encode(value, forKey: WireKey("params"))
         case .windowAbsent(let value):
             try c.encode("windowAbsent", forKey: WireKey("kind"))
             try c.encode(value, forKey: WireKey("params"))
@@ -2144,11 +2420,15 @@ public enum Operation: Codable, Equatable, Sendable {
     case showMenu(ElementOperation)
     case cancel(ElementOperation)
     case invokeMenu(InvokeMenuOperation)
+    case setWindowFrame(SetWindowFrameOperation)
+    case windowAction(WindowActionOperation)
     case click(ClickOperation)
     case doubleClick(ClickOperation)
     case rightClick(ClickOperation)
     case hover(ClickOperation)
     case drag(DragOperation)
+    case scrollWheel(ScrollWheelOperation)
+    case focusWindow(Empty)
     case hotkey(HotkeyOperation)
     case typeKeys(TypeKeysOperation)
     case waitFor(WaitOperation)
@@ -2165,11 +2445,15 @@ public enum Operation: Codable, Equatable, Sendable {
         case "showMenu": self = .showMenu(try c.decode(ElementOperation.self, forKey: WireKey("params")))
         case "cancel": self = .cancel(try c.decode(ElementOperation.self, forKey: WireKey("params")))
         case "invokeMenu": self = .invokeMenu(try c.decode(InvokeMenuOperation.self, forKey: WireKey("params")))
+        case "setWindowFrame": self = .setWindowFrame(try c.decode(SetWindowFrameOperation.self, forKey: WireKey("params")))
+        case "windowAction": self = .windowAction(try c.decode(WindowActionOperation.self, forKey: WireKey("params")))
         case "click": self = .click(try c.decode(ClickOperation.self, forKey: WireKey("params")))
         case "doubleClick": self = .doubleClick(try c.decode(ClickOperation.self, forKey: WireKey("params")))
         case "rightClick": self = .rightClick(try c.decode(ClickOperation.self, forKey: WireKey("params")))
         case "hover": self = .hover(try c.decode(ClickOperation.self, forKey: WireKey("params")))
         case "drag": self = .drag(try c.decode(DragOperation.self, forKey: WireKey("params")))
+        case "scrollWheel": self = .scrollWheel(try c.decode(ScrollWheelOperation.self, forKey: WireKey("params")))
+        case "focusWindow": self = .focusWindow(try c.decode(Empty.self, forKey: WireKey("params")))
         case "hotkey": self = .hotkey(try c.decode(HotkeyOperation.self, forKey: WireKey("params")))
         case "typeKeys": self = .typeKeys(try c.decode(TypeKeysOperation.self, forKey: WireKey("params")))
         case "waitFor": self = .waitFor(try c.decode(WaitOperation.self, forKey: WireKey("params")))
@@ -2209,6 +2493,12 @@ public enum Operation: Codable, Equatable, Sendable {
         case .invokeMenu(let value):
             try c.encode("invokeMenu", forKey: WireKey("kind"))
             try c.encode(value, forKey: WireKey("params"))
+        case .setWindowFrame(let value):
+            try c.encode("setWindowFrame", forKey: WireKey("kind"))
+            try c.encode(value, forKey: WireKey("params"))
+        case .windowAction(let value):
+            try c.encode("windowAction", forKey: WireKey("kind"))
+            try c.encode(value, forKey: WireKey("params"))
         case .click(let value):
             try c.encode("click", forKey: WireKey("kind"))
             try c.encode(value, forKey: WireKey("params"))
@@ -2223,6 +2513,12 @@ public enum Operation: Codable, Equatable, Sendable {
             try c.encode(value, forKey: WireKey("params"))
         case .drag(let value):
             try c.encode("drag", forKey: WireKey("kind"))
+            try c.encode(value, forKey: WireKey("params"))
+        case .scrollWheel(let value):
+            try c.encode("scrollWheel", forKey: WireKey("kind"))
+            try c.encode(value, forKey: WireKey("params"))
+        case .focusWindow(let value):
+            try c.encode("focusWindow", forKey: WireKey("kind"))
             try c.encode(value, forKey: WireKey("params"))
         case .hotkey(let value):
             try c.encode("hotkey", forKey: WireKey("kind"))
@@ -2245,6 +2541,7 @@ public enum RequestBody: Codable, Equatable, Sendable {
     case act(ActRequest)
     case waitFor(WaitRequest)
     case open(OpenRequest)
+    case clipboard(ClipboardRequest)
     case cancel(CancelRequest)
     public init(from decoder: Decoder) throws {
         let (tag, c) = try tagged(decoder, "method", "params")
@@ -2256,6 +2553,7 @@ public enum RequestBody: Codable, Equatable, Sendable {
         case "act": self = .act(try c.decode(ActRequest.self, forKey: WireKey("params")))
         case "waitFor": self = .waitFor(try c.decode(WaitRequest.self, forKey: WireKey("params")))
         case "open": self = .open(try c.decode(OpenRequest.self, forKey: WireKey("params")))
+        case "clipboard": self = .clipboard(try c.decode(ClipboardRequest.self, forKey: WireKey("params")))
         case "cancel": self = .cancel(try c.decode(CancelRequest.self, forKey: WireKey("params")))
         default: throw ContractError("unknown tagged variant")
         }
@@ -2284,6 +2582,9 @@ public enum RequestBody: Codable, Equatable, Sendable {
         case .open(let value):
             try c.encode("open", forKey: WireKey("method"))
             try c.encode(value, forKey: WireKey("params"))
+        case .clipboard(let value):
+            try c.encode("clipboard", forKey: WireKey("method"))
+            try c.encode(value, forKey: WireKey("params"))
         case .cancel(let value):
             try c.encode("cancel", forKey: WireKey("method"))
             try c.encode(value, forKey: WireKey("params"))
@@ -2299,6 +2600,7 @@ public enum ResponseBody: Codable, Equatable, Sendable {
     case act(ActResult)
     case waitFor(WaitResult)
     case open(OpenResult)
+    case clipboard(ClipboardResult)
     case cancel(CancelResult)
     case error(Failure)
     public init(from decoder: Decoder) throws {
@@ -2311,6 +2613,7 @@ public enum ResponseBody: Codable, Equatable, Sendable {
         case "act": self = .act(try c.decode(ActResult.self, forKey: WireKey("data")))
         case "waitFor": self = .waitFor(try c.decode(WaitResult.self, forKey: WireKey("data")))
         case "open": self = .open(try c.decode(OpenResult.self, forKey: WireKey("data")))
+        case "clipboard": self = .clipboard(try c.decode(ClipboardResult.self, forKey: WireKey("data")))
         case "cancel": self = .cancel(try c.decode(CancelResult.self, forKey: WireKey("data")))
         case "error": self = .error(try c.decode(Failure.self, forKey: WireKey("data")))
         default: throw ContractError("unknown tagged variant")
@@ -2339,6 +2642,9 @@ public enum ResponseBody: Codable, Equatable, Sendable {
             try c.encode(value, forKey: WireKey("data"))
         case .open(let value):
             try c.encode("open", forKey: WireKey("result"))
+            try c.encode(value, forKey: WireKey("data"))
+        case .clipboard(let value):
+            try c.encode("clipboard", forKey: WireKey("result"))
             try c.encode(value, forKey: WireKey("data"))
         case .cancel(let value):
             try c.encode("cancel", forKey: WireKey("result"))

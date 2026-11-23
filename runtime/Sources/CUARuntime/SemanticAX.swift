@@ -352,6 +352,9 @@ public struct SemanticAXObserver: Sendable {
         if params.interactiveOnly {
             eligible = eligible.filter { isInteractiveElement($0.snapshot) }
         }
+        if let query = params.query {
+            eligible = eligible.filter { matchesQuery($0.snapshot, query: query, includeValues: params.includeValues) }
+        }
         let selectedNodes: [ResolvedAXElement]
         if params.axSelectors == nil && eligible.count > Limits.maxElements {
             complete = false
@@ -393,7 +396,7 @@ public struct SemanticAXObserver: Sendable {
                 ambiguous: selectors.contains { selector in eligible.filter { matches($0.snapshot, selector: selector) }.count > 1 },
                 visitedNodes: scan.visitedNodes)
         }
-        let scoped = effectiveScope != .window || params.interactiveOnly
+        let scoped = effectiveScope != .window || params.interactiveOnly || params.query != nil
         let observation = Observation(observationId: observationId, target: target.key,
             collected: CollectionInterval(startedUnixMs: started, finishedUnixMs: max(axFinished, milliseconds())),
             windowBounds: target.bounds, accessibility: params.axSelectors == nil && !scoped && complete ? .complete : .partial,
@@ -453,6 +456,10 @@ public struct SemanticAXObserver: Sendable {
                             complete: snap.complete, subrole: snap.subrole, enabledUnsupported: snap.enabledUnsupported)
                         if let selectors = params.axSelectors {
                             if selectors.contains(where: { matches(projected, selector: $0) }) {
+                                collected.append((child, projected, pathLabel))
+                            }
+                        } else if let query = params.query {
+                            if matchesQuery(projected, query: query, includeValues: false) {
                                 collected.append((child, projected, pathLabel))
                             }
                         } else {
@@ -666,7 +673,9 @@ private func collectTree(roots: [any AXObject]? = nil, window: any AXObject, pid
                     try enqueueChildren(of: object, depth: depth, clipped: clipped)
                     continue
                 }
-                let candidates = selectors.filter { $0.role == identity.role && ($0.identifier == nil || $0.identifier == identity.identifier) }
+                let candidates = selectors.filter {
+                    ($0.role == nil || $0.role == identity.role) && ($0.identifier == nil || $0.identifier == identity.identifier)
+                }
                 if !candidates.isEmpty {
                     if var snapshot = try backend.snapshot(of: object, includeValue: false, context: context) {
                         if snapshot.identity != identity { complete = false }
@@ -757,9 +766,17 @@ private func isClipped(_ element: Rect, to window: Rect) -> Bool {
 }
 
 func matches(_ snapshot: AXNodeSnapshot, selector: CUAProtocol.Selector) -> Bool {
-    snapshot.role == selector.role && (selector.identifier == nil || selector.identifier == snapshot.identifier)
+    (selector.role == nil || snapshot.role == selector.role)
+        && (selector.identifier == nil || selector.identifier == snapshot.identifier)
         && (selector.label == nil || selector.label == snapshot.label)
         && (selector.labelContains == nil || (snapshot.label?.contains(selector.labelContains!) == true))
+}
+
+func matchesQuery(_ snapshot: AXNodeSnapshot, query: String, includeValues: Bool) -> Bool {
+    let fields: [String?] = includeValues
+        ? [snapshot.label, snapshot.title, snapshot.identifier, snapshot.subrole, snapshot.url, snapshot.value]
+        : [snapshot.label, snapshot.title, snapshot.identifier, snapshot.subrole, snapshot.url]
+    return fields.contains { $0?.range(of: query, options: .caseInsensitive) != nil }
 }
 
 /// Membership needs current identities/children, not a second full attribute read of every sibling.

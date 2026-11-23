@@ -16,7 +16,7 @@ final class ContractTests: XCTestCase {
     }
     func testSharedValidFixturesDecodeAndRoundTrip() throws {
         let paths = try fixtures("valid")
-        XCTAssertEqual(paths.count, 73)
+        XCTAssertEqual(paths.count, 83)
         for path in paths {
             let frame = try Frame.decodeLine(Data(contentsOf: path))
             let encoded = try frame.encodeLine()
@@ -44,7 +44,7 @@ final class ContractTests: XCTestCase {
         let message = try XCTUnwrap(object["message"] as? [String: Any])
         let body = try XCTUnwrap(message["body"] as? [String: Any])
         let params = try XCTUnwrap(body["params"] as? [String: Any])
-        for name in ["includeOcr", "ocrQuery", "cropWindow", "maxImageDimensionPx", "axSelectors", "eventHistory", "scope", "interactiveOnly"] { XCTAssertNil(params[name], name) }
+        for name in ["includeOcr", "ocrQuery", "cropWindow", "maxImageDimensionPx", "axSelectors", "eventHistory", "scope", "interactiveOnly", "query"] { XCTAssertNil(params[name], name) }
         let old = try fixture("observe-partial-response")
         let response = try XCTUnwrap(JSONSerialization.jsonObject(with: old.encodeLine()) as? [String: Any])
         let responseMessage = try XCTUnwrap(response["message"] as? [String: Any])
@@ -76,7 +76,7 @@ final class ContractTests: XCTestCase {
     }
     func testSharedInvalidFixturesAreRejected() throws {
         let paths = try fixtures("invalid")
-        XCTAssertEqual(paths.count, 107)
+        XCTAssertEqual(paths.count, 117)
         for path in paths {
             XCTAssertThrowsError(try Frame.decodeLine(Data(contentsOf: path)), path.lastPathComponent)
         }
@@ -306,5 +306,30 @@ final class ContractTests: XCTestCase {
             body: .waitFor(WaitRequest(observationId: waitBody.observationId, target: waitBody.target, condition: waitBody.condition,
                                        includeValues: false, scope: waitBody.scope)))
         XCTAssertThrowsError(try waitRes.validateFor(privateWaitReq, expectedEpoch: "helper-epoch-1"))
+    }
+
+    func testClipboardTargetsDiscoveryAndQueryEnforcePrivacyAndCorrelation() throws {
+        let bg = SessionContext(epoch: "helper-epoch-1", authority: Authority(grantId: "host-grant-1", mode: .backgroundRequired))
+        guard case .request(let clipReq) = try fixture("clipboard-request"),
+              case .response(let clipRes) = try fixture("clipboard-response"),
+              case .clipboard(let clipBody) = clipReq.body else { return XCTFail() }
+        try bg.authorize(clipReq)
+        try clipRes.validateFor(clipReq, expectedEpoch: "helper-epoch-1")
+
+        let noTextReq = Request(version: 1, id: clipReq.id, epoch: clipReq.epoch, budgetMs: clipReq.budgetMs,
+            body: .clipboard(ClipboardRequest(grantId: clipBody.grantId, action: .read, includeText: false)))
+        XCTAssertThrowsError(try clipRes.validateFor(noTextReq, expectedEpoch: "helper-epoch-1"))
+
+        let forgedReq = Request(version: 1, id: clipReq.id, epoch: clipReq.epoch, budgetMs: clipReq.budgetMs,
+            body: .clipboard(ClipboardRequest(grantId: "forged-grant", action: .read, includeText: false)))
+        XCTAssertThrowsError(try bg.authorize(forgedReq))
+
+        guard case .request(let targetsReq) = try fixture("targets-discovery-request"),
+              case .response(let targetsRes) = try fixture("targets-discovery-response"),
+              case .targets(let targetsBody) = targetsReq.body else { return XCTFail() }
+        try targetsRes.validateFor(targetsReq, expectedEpoch: "helper-epoch-1")
+        let noAppsReq = Request(version: 1, id: targetsReq.id, epoch: targetsReq.epoch, budgetMs: targetsReq.budgetMs,
+            body: .targets(TargetsRequest(bundleId: targetsBody.bundleId, includeOffscreen: true, includeApps: false, includeDisplays: true)))
+        XCTAssertThrowsError(try targetsRes.validateFor(noAppsReq, expectedEpoch: "helper-epoch-1"))
     }
 }

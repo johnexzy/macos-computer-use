@@ -42,6 +42,12 @@ pub struct TargetsArgs {
     pub owner_contains: Option<String>,
     #[serde(default)]
     pub unbundled_only: bool,
+    #[serde(default)]
+    pub include_offscreen: bool,
+    #[serde(default)]
+    pub include_apps: bool,
+    #[serde(default)]
+    pub include_displays: bool,
     #[serde(default = "default_budget")]
     #[schemars(range(min = 1, max = 60000))]
     pub budget_ms: u32,
@@ -66,6 +72,8 @@ pub struct ObserveArgs {
     pub scope: Option<ObserveScope>,
     #[serde(default)]
     pub interactive_only: bool,
+    #[schemars(length(min = 1, max = 1024))]
+    pub query: Option<String>,
     #[serde(default)]
     pub include_values: bool,
     #[serde(default = "default_budget")]
@@ -119,6 +127,22 @@ pub struct OpenArgs {
     pub budget_ms: u32,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClipboardArgs {
+    pub action: ClipboardAction,
+    #[serde(default)]
+    pub include_text: bool,
+    pub text: Option<String>,
+    #[schemars(length(min = 1, max = 2048))]
+    pub file_path: Option<String>,
+    #[schemars(length(min = 1, max = 2048))]
+    pub image_path: Option<String>,
+    #[serde(default = "default_budget")]
+    #[schemars(range(min = 1, max = 60000))]
+    pub budget_ms: u32,
+}
+
 #[derive(Clone)]
 pub struct Host {
     client: Arc<Client>,
@@ -147,6 +171,9 @@ fn validate_public(body: &RequestBody, budget_ms: u32) -> Result<(), McpError> {
     }
     if let RequestBody::Open(open) = &mut body {
         open.grant_id = "host-validation".into();
+    }
+    if let RequestBody::Clipboard(clipboard) = &mut body {
+        clipboard.grant_id = "host-validation".into();
     }
     Frame::Request(Request {
         version: VERSION,
@@ -234,6 +261,7 @@ impl Host {
             RequestBody::Act(_) => "act",
             RequestBody::WaitFor(_) => "waitFor",
             RequestBody::Open(_) => "open",
+            RequestBody::Clipboard(_) => "clipboard",
             _ => unreachable!("only public operations are routed"),
         };
         let token = self.disconnected.child_token();
@@ -320,7 +348,7 @@ impl Host {
     }
 
     #[tool(
-        description = "List bounded exact process/window targets. Filter by exact bundleId, case-insensitive titleContains or ownerContains, or unbundledOnly for verified window owners without a bundle ID. Filters combine."
+        description = "List bounded exact process/window targets. Filter by exact bundleId, case-insensitive titleContains or ownerContains, or unbundledOnly for verified window owners without a bundle ID. Optional includeOffscreen includes minimized/hidden/other-Space windows with an onScreen flag. Optional includeApps lists running and installed apps, and includeDisplays lists active displays (bounds in top-left logical coordinates, scaleFactor, isPrimary)."
     )]
     async fn targets(
         &self,
@@ -333,6 +361,9 @@ impl Host {
                 title_contains: args.title_contains,
                 owner_contains: args.owner_contains,
                 unbundled_only: args.unbundled_only,
+                include_offscreen: args.include_offscreen,
+                include_apps: args.include_apps,
+                include_displays: args.include_displays,
             }),
             args.budget_ms,
             context,
@@ -341,7 +372,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Observe one exact window, including Accessibility controls exposed by owners without a bundle ID. Request screenshots or OCR for controls or windows without usable AX coverage. Optional scope narrows AX reads to 'webArea' (skipping browser tabs/chrome) or 'menuBar' (inspecting native app menu items for invokeMenu). Optional interactiveOnly keeps only interactive controls. Optional axSelectors (supporting exact label or labelContains substring) reads matching AX controls and reports query coverage separately from window coverage. Optional eventHistory retains bounded selected-state changes between observations; historical controls have no actionable refs. Values, screenshots, and Vision OCR are opt-in. cropWindow uses window-local points. Partial coverage cannot prove absence; history can be stale or overrun."
+        description = "Observe one exact window, including Accessibility controls exposed by owners without a bundle ID. Request screenshots or OCR for controls or windows without usable AX coverage. Optional scope narrows AX reads to 'webArea' (skipping browser tabs/chrome) or 'menuBar' (inspecting native app menu items for invokeMenu). Optional interactiveOnly keeps only interactive controls. Optional query performs a case-insensitive substring search across label, identifier, subrole, url (and value when includeValues: true). Optional axSelectors (with optional role plus label, labelContains, or identifier) reads matching AX controls and reports query coverage separately from window coverage. Optional eventHistory retains bounded selected-state changes between observations; historical controls have no actionable refs. Values, screenshots, and Vision OCR are opt-in. cropWindow uses window-local points. Partial coverage cannot prove absence; history can be stale or overrun."
     )]
     async fn observe(
         &self,
@@ -361,6 +392,7 @@ impl Host {
                 event_history: args.event_history,
                 scope: args.scope,
                 interactive_only: args.interactive_only,
+                query: args.query,
             }),
             args.budget_ms,
             context,
@@ -369,7 +401,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Run 1-16 ordered typed actions and predicate waits within one budget. Background mode supports setValue, typeText (selection replacement), press, confirm (AXConfirm), showMenu (AXShowMenu), cancel (AXCancel), invokeMenu (native AXMenuBar path), scroll (AXScrollArea), and scrollToVisible on live references. Foreground mode (requires operator foregroundAllowed grant and foreground: true) supports click, doubleClick, rightClick, hover, drag, key, hotkey (arbitrary key + command/control/option/shift modifiers), and typeKeys (focused Unicode text input). Stops at the first failed requirement. Optional feedback returns requested control updates tied to the base observation. No rollback or automatic replay."
+        description = "Run 1-16 ordered typed actions and predicate waits within one budget. Background mode supports setValue, typeText (selection replacement), press, confirm (AXConfirm), showMenu (AXShowMenu), cancel (AXCancel), invokeMenu (native AXMenuBar path), setWindowFrame (background AX move/resize), windowAction (minimize or close via AX), scroll (AXScrollArea), and scrollToVisible on live references. Foreground mode (requires operator foregroundAllowed grant and foreground: true) supports click, doubleClick, rightClick, hover, drag, scrollWheel (coordinate wheel scroll), focusWindow (persistently raise & focus target), key, hotkey (arbitrary key + command/control/option/shift modifiers), and typeKeys (focused Unicode text input). Stops at the first failed requirement. Optional feedback returns requested control updates tied to the base observation. No rollback or automatic replay."
     )]
     async fn act(
         &self,
@@ -393,7 +425,7 @@ impl Host {
 
     #[tool(
         name = "waitFor",
-        description = "Wait within one budget for an exact value, valueContains substring, enabled state, element presence/absence (supporting exact label or labelContains), web URL substring (urlContains), or disappearance of the exact window identity. Optional includeValues and scope ('window' or 'webArea') control the fresh observation returned on satisfaction. Partial reads cannot prove absence. Window disappearance returns timestamped evidence without creating a replacement target."
+        description = "Wait within one budget for an exact value, valueContains substring, enabled state, element presence/absence (supporting optional role, exact label, labelContains, or identifier), web URL substring (urlContains), visual OCR text substring (ocrContains, including on windows without AX), or disappearance of the exact window identity. Optional includeValues and scope ('window' or 'webArea') control the fresh observation returned on satisfaction. Partial reads cannot prove absence. Window disappearance returns timestamped evidence without creating a replacement target."
     )]
     async fn wait_for(
         &self,
@@ -436,6 +468,29 @@ impl Host {
         )
         .await
     }
+
+    #[tool(
+        description = "Read, write, or clear the macOS system clipboard without stealing focus. Privacy-gated: action 'read' returns changeCount, UTI types, and textBytes by default, omitting clipboard text unless includeText: true is explicitly set. Action 'write' requires exactly one of text (plain UTF-8), filePath (absolute local file path), or imagePath (absolute local image path). Action 'clear' empties the clipboard."
+    )]
+    async fn clipboard(
+        &self,
+        Parameters(args): Parameters<ClipboardArgs>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        self.execute(
+            RequestBody::Clipboard(ClipboardRequest {
+                grant_id: String::new(),
+                action: args.action,
+                include_text: args.include_text,
+                text: args.text,
+                file_path: args.file_path,
+                image_path: args.image_path,
+            }),
+            args.budget_ms,
+            context,
+        )
+        .await
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -443,7 +498,7 @@ impl ServerHandler for Host {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("macos-computer-use", env!("CARGO_PKG_VERSION")))
-            .with_instructions("Background authority is installed by the operator. Read capabilities before acting. Use open to launch apps or open URLs in the background (activate: true requires foregroundAllowed). Use observe (optionally with scope: webArea/menuBar, interactiveOnly, or axSelectors with labelContains) to establish provenance. Unknown delivery must be reconciled before retrying. Use only actions advertised by the live element. This runtime accepts up to 16 typed steps per act request under one deadline. Waits send no input. Requested feedback uses the original references; invalidated references require a fresh observation. The foreground route requires an operator grant and explicit foreground: true on act. Foreground pointer operations require fresh image-backed evidence.")
+            .with_instructions("Background authority is installed by the operator. Read capabilities before acting. Use targets (optionally with includeOffscreen, includeApps, includeDisplays) to discover windows, apps, and displays. Use open to launch apps or open URLs in the background (activate: true requires foregroundAllowed). Use clipboard (read/write/clear; includeText: true required to read clipboard contents) without stealing focus. Use observe (optionally with scope: webArea/menuBar, interactiveOnly, query, or role-optional axSelectors) to establish provenance. Use waitFor for AX predicates, urlContains, ocrContains (even without AX), or windowAbsent. Unknown delivery must be reconciled before retrying. Use only actions advertised by the live element. This runtime accepts up to 16 typed steps per act request under one deadline. Waits send no input. Requested feedback uses the original references; invalidated references require a fresh observation. The foreground route requires an operator grant and explicit foreground: true on act. Foreground pointer operations require fresh image-backed evidence.")
     }
 }
 
@@ -469,6 +524,10 @@ mod tests {
                 json!({"bundleId":"com.apple.TextEdit","grantId":"forged"})
             )
             .is_err()
+        );
+        assert!(
+            serde_json::from_value::<ClipboardArgs>(json!({"action":"read","grantId":"forged"}))
+                .is_err()
         );
     }
 
@@ -533,6 +592,7 @@ mod tests {
                     event_history: None,
                     scope: None,
                     interactive_only: false,
+                    query: None,
                 }),
                 5000
             )
@@ -547,6 +607,20 @@ mod tests {
                     url: None,
                     new_instance: false,
                     activate: false,
+                }),
+                5000
+            )
+            .is_err()
+        );
+        assert!(
+            validate_public(
+                &RequestBody::Clipboard(ClipboardRequest {
+                    grant_id: String::new(),
+                    action: ClipboardAction::Write,
+                    include_text: false,
+                    text: None,
+                    file_path: None,
+                    image_path: None,
                 }),
                 5000
             )
