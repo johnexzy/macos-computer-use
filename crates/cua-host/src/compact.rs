@@ -19,7 +19,11 @@ pub fn format_response(response: &Response) -> String {
         ResponseBody::Open(open) => format_open(open, &mut out),
         ResponseBody::Clipboard(clip) => format_clipboard(clip, &mut out),
         ResponseBody::Hello(h) => {
-            let _ = write!(out, "hello v{} helper={}", h.selected_version, h.helper_version);
+            let _ = write!(
+                out,
+                "hello v{} helper={}",
+                h.selected_version, h.helper_version
+            );
         }
         ResponseBody::Cancel(c) => {
             let _ = write!(out, "cancel req={} status={:?}", c.request_id, c.status);
@@ -31,11 +35,7 @@ pub fn format_response(response: &Response) -> String {
     out
 }
 
-pub fn format_capabilities(
-    cap: &Capabilities,
-    browser_status: Option<&str>,
-    out: &mut String,
-) {
+pub fn format_capabilities(cap: &Capabilities, browser_status: Option<&str>, out: &mut String) {
     let acts: Vec<&str> = cap.actions.iter().map(action_kind_str).collect();
     let _ = writeln!(
         out,
@@ -319,7 +319,11 @@ fn format_act(act: &ActResult, out: &mut String) {
         act.observation_id, act.stop_reason, act.remaining_steps
     );
     for s in &act.steps {
-        let _ = write!(out, "- {}: {:?}/{:?}", s.action_id, s.delivery, s.verification);
+        let _ = write!(
+            out,
+            "- {}: {:?}/{:?}",
+            s.action_id, s.delivery, s.verification
+        );
         if let Some(route) = s.route {
             let _ = write!(out, " route={route:?}");
         }
@@ -352,7 +356,11 @@ fn format_act(act: &ActResult, out: &mut String) {
 }
 
 fn format_wait(wait: &WaitResult, out: &mut String) {
-    let _ = write!(out, "wait={:?} already={}", wait.outcome, wait.already_satisfied);
+    let _ = write!(
+        out,
+        "wait={:?} already={}",
+        wait.outcome, wait.already_satisfied
+    );
     if let Some(ev) = &wait.evidence {
         let _ = write!(out, " matched={}", ev.matched);
         if let Some(c) = &ev.collected {
@@ -373,7 +381,9 @@ fn format_open(open: &OpenResult, out: &mut String) {
     let _ = writeln!(
         out,
         "open pid={} bundle={} activated={} targets={}",
-        open.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".into()),
+        open.pid
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "-".into()),
         open.bundle_id.as_deref().unwrap_or("-"),
         open.activated,
         open.targets.len()
@@ -403,7 +413,9 @@ fn format_clipboard(clip: &ClipboardResult, out: &mut String) {
         "clipboard changeCount={} types=[{}] textBytes={}{}",
         clip.change_count,
         clip.types.join(","),
-        clip.text_bytes.map(|n| n.to_string()).unwrap_or_else(|| "-".into()),
+        clip.text_bytes
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "-".into()),
         if clip.truncated { " truncated" } else { "" }
     );
     if let Some(text) = &clip.text {
@@ -480,13 +492,28 @@ pub fn format_browser_result(action: &str, data: &serde_json::Value) -> String {
 
     match action {
         "status" => {
-            let conn = data.get("connected").and_then(|v| v.as_bool()).unwrap_or(false);
-            let ext = data.get("extensionId").and_then(|v| v.as_str()).unwrap_or("-");
+            let conn = data
+                .get("connected")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let ext = data
+                .get("extensionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("-");
             if conn {
-                let br = data.get("browser").and_then(|v| v.as_str()).unwrap_or("Chromium");
-                let ver = data.get("extensionVersion").and_then(|v| v.as_str()).unwrap_or("-");
+                let br = data
+                    .get("browser")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Chromium");
+                let ver = data
+                    .get("extensionVersion")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
                 let tabs = data.get("tabCount").and_then(|v| v.as_u64()).unwrap_or(0);
-                let _ = writeln!(out, "browserExtension connected=true browser={br} version={ver} tabs={tabs} id={ext}");
+                let _ = writeln!(
+                    out,
+                    "browserExtension connected=true browser={br} version={ver} tabs={tabs} id={ext}"
+                );
             } else {
                 let _ = writeln!(out, "browserExtension connected=false id={ext}");
             }
@@ -506,7 +533,11 @@ pub fn format_browser_result(action: &str, data: &serde_json::Value) -> String {
                     };
                     let title = t.get("title").and_then(|v| v.as_str()).unwrap_or("");
                     let url = t.get("url").and_then(|v| v.as_str()).unwrap_or("");
-                    let _ = writeln!(out, "{active} tab={tid} win={wid} {} url={url}", quote(title));
+                    let _ = writeln!(
+                        out,
+                        "{active} tab={tid} win={wid} {} url={url}",
+                        quote(title)
+                    );
                 }
             }
         }
@@ -521,7 +552,12 @@ pub fn format_browser_result(action: &str, data: &serde_json::Value) -> String {
                     if ok {
                         let title = p.get("title").and_then(|v| v.as_str()).unwrap_or("");
                         let final_url = p.get("finalUrl").and_then(|v| v.as_str()).unwrap_or("");
-                        let _ = writeln!(out, "\n=== Page {} ({pms}ms): {} ===\nurl={final_url}", i + 1, title);
+                        let _ = writeln!(
+                            out,
+                            "\n=== Page {} ({pms}ms): {} ===\nurl={final_url}",
+                            i + 1,
+                            title
+                        );
                         if let Some(text) = p.get("text").and_then(|v| v.as_str()) {
                             out.push_str(text);
                             out.push('\n');
@@ -539,7 +575,11 @@ pub fn format_browser_result(action: &str, data: &serde_json::Value) -> String {
                     } else {
                         let url = p.get("url").and_then(|v| v.as_str()).unwrap_or("");
                         let err = p.get("error").and_then(|v| v.as_str()).unwrap_or("failed");
-                        let _ = writeln!(out, "\n=== Page {} FAILED ({pms}ms): {url} ===\nerror={err}", i + 1);
+                        let _ = writeln!(
+                            out,
+                            "\n=== Page {} FAILED ({pms}ms): {url} ===\nerror={err}",
+                            i + 1
+                        );
                     }
                 }
             }
@@ -573,7 +613,10 @@ pub fn format_browser_result(action: &str, data: &serde_json::Value) -> String {
 
 fn format_browser_snapshot(snap: &serde_json::Value, out: &mut String) {
     let tid = snap.get("tabId").and_then(|v| v.as_i64()).unwrap_or(-1);
-    let sid = snap.get("snapshotId").and_then(|v| v.as_str()).unwrap_or("-");
+    let sid = snap
+        .get("snapshotId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("-");
     let url = snap.get("url").and_then(|v| v.as_str()).unwrap_or("");
     let title = snap.get("title").and_then(|v| v.as_str()).unwrap_or("");
     let els = snap.get("elements").and_then(|v| v.as_array());
@@ -583,7 +626,11 @@ fn format_browser_snapshot(snap: &serde_json::Value, out: &mut String) {
     } else {
         ""
     };
-    let _ = writeln!(out, "tab={tid} snap={sid} els={count}{trunc} {} url={url}", quote(title));
+    let _ = writeln!(
+        out,
+        "tab={tid} snap={sid} els={count}{trunc} {} url={url}",
+        quote(title)
+    );
     if let Some(els) = els {
         for el in els {
             let r = el.get("ref").and_then(|v| v.as_str()).unwrap_or("-");

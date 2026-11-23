@@ -658,24 +658,60 @@ impl Host {
         }
 
         let mut params = serde_json::Map::new();
-        if let Some(v) = args.tab_id { params.insert("tabId".into(), json!(v)); }
-        if let Some(v) = args.snapshot_id { params.insert("snapshotId".into(), json!(v)); }
-        if let Some(v) = args.url { params.insert("url".into(), json!(v)); }
-        if let Some(v) = args.urls { params.insert("urls".into(), json!(v)); }
-        if let Some(v) = args.history { params.insert("history".into(), json!(v)); }
-        if let Some(v) = args.active { params.insert("active".into(), json!(v)); }
-        if let Some(v) = args.steps { params.insert("steps".into(), json!(v)); }
-        if let Some(v) = args.return_snapshot { params.insert("returnSnapshot".into(), json!(v)); }
-        if let Some(v) = args.interactive_only { params.insert("interactiveOnly".into(), json!(v)); }
-        if let Some(v) = args.include_text { params.insert("includeText".into(), json!(v)); }
-        if let Some(v) = args.include_links { params.insert("includeLinks".into(), json!(v)); }
-        if let Some(v) = args.query { params.insert("query".into(), json!(v)); }
-        if let Some(v) = args.max_chars { params.insert("maxChars".into(), json!(v)); }
-        if let Some(v) = args.max_chars_per_page { params.insert("maxCharsPerPage".into(), json!(v)); }
-        if let Some(v) = args.max_elements { params.insert("maxElements".into(), json!(v)); }
-        if let Some(v) = args.close_after { params.insert("closeAfter".into(), json!(v)); }
-        if let Some(v) = args.concurrency { params.insert("concurrency".into(), json!(v)); }
-        if let Some(v) = args.settle_ms { params.insert("settleMs".into(), json!(v)); }
+        if let Some(v) = args.tab_id {
+            params.insert("tabId".into(), json!(v));
+        }
+        if let Some(v) = args.snapshot_id {
+            params.insert("snapshotId".into(), json!(v));
+        }
+        if let Some(v) = args.url {
+            params.insert("url".into(), json!(v));
+        }
+        if let Some(v) = args.urls {
+            params.insert("urls".into(), json!(v));
+        }
+        if let Some(v) = args.history {
+            params.insert("history".into(), json!(v));
+        }
+        if let Some(v) = args.active {
+            params.insert("active".into(), json!(v));
+        }
+        if let Some(v) = args.steps {
+            params.insert("steps".into(), json!(v));
+        }
+        if let Some(v) = args.return_snapshot {
+            params.insert("returnSnapshot".into(), json!(v));
+        }
+        if let Some(v) = args.interactive_only {
+            params.insert("interactiveOnly".into(), json!(v));
+        }
+        if let Some(v) = args.include_text {
+            params.insert("includeText".into(), json!(v));
+        }
+        if let Some(v) = args.include_links {
+            params.insert("includeLinks".into(), json!(v));
+        }
+        if let Some(v) = args.query {
+            params.insert("query".into(), json!(v));
+        }
+        if let Some(v) = args.max_chars {
+            params.insert("maxChars".into(), json!(v));
+        }
+        if let Some(v) = args.max_chars_per_page {
+            params.insert("maxCharsPerPage".into(), json!(v));
+        }
+        if let Some(v) = args.max_elements {
+            params.insert("maxElements".into(), json!(v));
+        }
+        if let Some(v) = args.close_after {
+            params.insert("closeAfter".into(), json!(v));
+        }
+        if let Some(v) = args.concurrency {
+            params.insert("concurrency".into(), json!(v));
+        }
+        if let Some(v) = args.settle_ms {
+            params.insert("settleMs".into(), json!(v));
+        }
 
         let token = self.disconnected.child_token();
         if context.ct.is_cancelled() {
@@ -691,7 +727,12 @@ impl Host {
 
         match self
             .browser_bridge
-            .call(action_name, Value::Object(params), budget, cancellation.token.clone())
+            .call(
+                action_name,
+                Value::Object(params),
+                budget,
+                cancellation.token.clone(),
+            )
             .await
         {
             Ok(data) => {
@@ -903,9 +944,17 @@ mod tests {
             text.len(),
             raw_json_len
         );
-        assert!(text.contains("[e1.1] Link \"Startup 1\" url=https://startuplist.africa/startups/s-1"));
-        assert!(!text.contains("[e1.2] StaticText"), "redundant child StaticText should be deduplicated");
-        assert!(receipt.structured_content.is_some(), "lossless structuredContent must be preserved");
+        assert!(
+            text.contains("[e1.1] Link \"Startup 1\" url=https://startuplist.africa/startups/s-1")
+        );
+        assert!(
+            !text.contains("[e1.2] StaticText"),
+            "redundant child StaticText should be deduplicated"
+        );
+        assert!(
+            receipt.structured_content.is_some(),
+            "lossless structuredContent must be preserved"
+        );
     }
 
     #[test]

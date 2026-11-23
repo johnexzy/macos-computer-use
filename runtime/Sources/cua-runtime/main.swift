@@ -19,8 +19,9 @@ final class RuntimeProcess: @unchecked Sendable {
         self.livePreview = livePreview
     }
 
-    func start() {
+    func start(preinstalledSignals: [DispatchSourceSignal] = []) {
         signal(SIGPIPE, SIG_IGN)
+        signals = preinstalledSignals
         output = OutputPump(write: { try FileHandle.standardOutput.write(contentsOf: $0) },
                             onFailure: { [weak self] in self?.session.shutdown() })
         session = RuntimeSession(visualFeedback: visualFeedback, livePreview: livePreview, emit: { [weak self] response in
@@ -31,12 +32,17 @@ final class RuntimeProcess: @unchecked Sendable {
             guard let self else { throw NativeFailure(.nativeFailed, "runtime output unavailable") }
             return try self.output.sendProgress(progress)
         }, didShutdown: { [weak self] in self?.finish() })
-        for number in [SIGTERM, SIGINT] {
-            signal(number, SIG_IGN)
-            let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+        for source in signals {
             source.setEventHandler { [weak self] in self?.session.shutdown() }
-            source.resume()
-            signals.append(source)
+        }
+        if signals.isEmpty {
+            for number in [SIGTERM, SIGINT] {
+                signal(number, SIG_IGN)
+                let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+                source.setEventHandler { [weak self] in self?.session.shutdown() }
+                source.resume()
+                signals.append(source)
+            }
         }
     }
     func startReading() {
@@ -101,15 +107,36 @@ final class RuntimeProcess: @unchecked Sendable {
     }
 }
 
+private final class EarlySignalFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var signalled = false
+    func mark() { lock.lock(); signalled = true; lock.unlock() }
+    var triggered: Bool { lock.lock(); defer { lock.unlock() }; return signalled }
+}
+
 MainActor.assumeIsolated {
+    // Mask termination signals before AppKit initialization so SIGTERM/SIGINT during startup exits cleanly.
+    signal(SIGPIPE, SIG_IGN)
+    let earlyStop = EarlySignalFlag()
+    var earlySignals: [DispatchSourceSignal] = []
+    for number in [SIGTERM, SIGINT] {
+        signal(number, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+        source.setEventHandler { earlyStop.mark() }
+        source.resume()
+        earlySignals.append(source)
+    }
+
     let app = NSApplication.shared
     let environment = ProcessInfo.processInfo.environment
     let feedbackRequested = environment["CUA_VISUAL_FEEDBACK"] == "1"
     let previewRequested = environment["CUA_LIVE_PREVIEW"] == "1"
     let useAppKit = (feedbackRequested || previewRequested) && app.setActivationPolicy(.accessory)
     if !useAppKit { app.setActivationPolicy(.prohibited) }
+    if earlyStop.triggered { exit(0) }
     let process = RuntimeProcess(visualFeedback: useAppKit && feedbackRequested, livePreview: useAppKit && previewRequested)
-    process.start()
+    process.start(preinstalledSignals: earlySignals)
+    if earlyStop.triggered { exit(0) }
     if process.shouldRun() {
         process.startReading()
         if useAppKit { app.run() }

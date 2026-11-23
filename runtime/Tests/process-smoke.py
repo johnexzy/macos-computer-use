@@ -56,7 +56,12 @@ try:
     assert caps["body"]["data"]["mode"] == "backgroundRequired"
     permissions = caps["body"]["data"]["permissions"]
     assert all(isinstance(value, bool) for value in permissions.values())
-    assert set(caps["body"]["data"]["actions"]) == ({"setValue", "typeText", "press"} if permissions["accessibility"] else set())
+    expected_actions = (
+        {"setValue", "typeText", "press", "scroll", "scrollToVisible", "confirm", "showMenu", "cancel", "invokeMenu", "setWindowFrame", "windowAction"}
+        if permissions["accessibility"]
+        else set()
+    )
+    assert set(caps["body"]["data"]["actions"]) == expected_actions
     targets = call(process, request("targets", "targets", {"bundleId": None}, epoch))["body"]["data"]
     assert len(targets["targets"]) <= 256
     filtered = call(process, request("filtered", "targets", {"bundleId": "nonexistent.cua.fixture"}, epoch))

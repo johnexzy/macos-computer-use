@@ -101,10 +101,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     println!("Installed Unpacked Extension: {}", ext_dir.display());
                 }
-                println!(
-                    "Extension ID: {}",
-                    cua_host::browser_bridge::EXTENSION_ID
-                );
+                println!("Extension ID: {}", cua_host::browser_bridge::EXTENSION_ID);
                 return Ok(());
             }
             Some("--version") => {

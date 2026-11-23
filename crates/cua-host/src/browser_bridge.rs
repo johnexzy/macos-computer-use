@@ -132,7 +132,10 @@ impl BrowserBridgeClient {
             })?;
             let (read_half, mut write_half) = stream.into_split();
             write_half.write_all(&line).await.map_err(|e| {
-                BrowserBridgeError::new("bridge_io", format!("Failed writing to browser bridge: {e}"))
+                BrowserBridgeError::new(
+                    "bridge_io",
+                    format!("Failed writing to browser bridge: {e}"),
+                )
             })?;
             write_half.flush().await.map_err(|e| {
                 BrowserBridgeError::new("bridge_io", format!("Failed flushing browser bridge: {e}"))
@@ -140,9 +143,15 @@ impl BrowserBridgeClient {
 
             let mut reader = BufReader::new(read_half);
             let mut reply_buf = Vec::new();
-            let n = reader.read_until(b'\n', &mut reply_buf).await.map_err(|e| {
-                BrowserBridgeError::new("bridge_io", format!("Failed reading browser bridge reply: {e}"))
-            })?;
+            let n = reader
+                .read_until(b'\n', &mut reply_buf)
+                .await
+                .map_err(|e| {
+                    BrowserBridgeError::new(
+                        "bridge_io",
+                        format!("Failed reading browser bridge reply: {e}"),
+                    )
+                })?;
             if n == 0 {
                 return Err(BrowserBridgeError::new(
                     "extension_disconnected",
@@ -419,7 +428,9 @@ async fn write_json_line(
 pub fn install_native_messaging_manifests(
     host_binary: &Path,
 ) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
-    let resolved = host_binary.canonicalize().unwrap_or_else(|_| host_binary.to_path_buf());
+    let resolved = host_binary
+        .canonicalize()
+        .unwrap_or_else(|_| host_binary.to_path_buf());
     let manifest = json!({
         "name": NATIVE_HOST_NAME,
         "description": "macOS Computer Use Browser Accelerator Bridge",
@@ -453,7 +464,12 @@ pub fn install_native_messaging_manifests(
             .map(|base| base.join("NativeMessagingHosts"))
             .collect();
         if dirs.is_empty() {
-            dirs.push(app_support.join("Google").join("Chrome").join("NativeMessagingHosts"));
+            dirs.push(
+                app_support
+                    .join("Google")
+                    .join("Chrome")
+                    .join("NativeMessagingHosts"),
+            );
         }
         dirs
     };
@@ -475,7 +491,9 @@ pub fn install_native_messaging_manifests(
 pub fn install_unpacked_extension(
     host_binary: &Path,
 ) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
-    let resolved = host_binary.canonicalize().unwrap_or_else(|_| host_binary.to_path_buf());
+    let resolved = host_binary
+        .canonicalize()
+        .unwrap_or_else(|_| host_binary.to_path_buf());
     let Some(contents_dir) = resolved.parent().and_then(Path::parent) else {
         return Ok(None);
     };
@@ -510,10 +528,7 @@ mod tests {
 
     #[test]
     fn install_writes_valid_native_messaging_manifest() {
-        let tmp = std::env::temp_dir().join(format!(
-            "cua-nm-test-{}",
-            std::process::id()
-        ));
+        let tmp = std::env::temp_dir().join(format!("cua-nm-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
         // Verify manifest structure directly without mutating user dirs.
