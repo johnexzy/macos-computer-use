@@ -53,6 +53,7 @@ private final class GPBackend: AXReading, AXMutating, WindowCatalog, @unchecked 
     var showMenuCalls = 0
     var cancelCalls = 0
     var invokedMenuPaths: [[String]] = []
+    var invokedMenuWindowIDs: [String] = []
     var setFrames: [Rect] = []
     var windowActions: [WindowActionKind] = []
     var onWindowAction: ((WindowActionKind) -> Void)?
@@ -122,9 +123,12 @@ private final class GPBackend: AXReading, AXMutating, WindowCatalog, @unchecked 
         try willDispatch()
         lock.lock(); cancelCalls += 1; lock.unlock()
     }
-    func invokeMenu(_ path: [String], on application: any AXObject, context: OperationContext, willDispatch: @Sendable () throws -> Void) throws {
+    func invokeMenu(_ path: [String], on application: any AXObject, window: any AXObject, context: OperationContext, willDispatch: @Sendable () throws -> Void) throws {
         try willDispatch()
-        lock.lock(); invokedMenuPaths.append(path); lock.unlock()
+        lock.lock()
+        invokedMenuPaths.append(path)
+        if let node = window as? GPNode { invokedMenuWindowIDs.append(node.id) }
+        lock.unlock()
     }
     func setWindowFrame(_ bounds: Rect, on window: any AXObject, windowId: UInt32, context: OperationContext, willDispatch: @Sendable () throws -> Void) throws {
         try willDispatch()
@@ -267,10 +271,15 @@ final class GeneralPurposeCUATests: XCTestCase {
         let web = GPNode("web", role: "AXWebArea", title: "App", url: "https://app.example/", bounds: Rect(x: 0, y: 80, width: 1200, height: 720))
         web.parent = win; web.owner = win
         let staticText = GPNode("txt", role: "AXStaticText", title: "Welcome heading", value: "Welcome heading", bounds: Rect(x: 20, y: 100, width: 200, height: 20))
+        // Chromium advertises AXShowMenu (context menu) + AXScrollToVisible on static text/headings/cells.
+        staticText.actions = ["AXScrollToVisible", "AXShowMenu"]
         staticText.parent = web; staticText.owner = win
+        let heading = GPNode("hd", role: "AXHeading", title: "Section", bounds: Rect(x: 20, y: 120, width: 200, height: 20))
+        heading.actions = ["AXScrollToVisible", "AXShowMenu"]
+        heading.parent = web; heading.owner = win
         let submitBtn = GPNode("btn", role: "AXButton", title: "Submit Order", bounds: Rect(x: 20, y: 140, width: 120, height: 32))
-        submitBtn.actions = ["AXPress"]; submitBtn.parent = web; submitBtn.owner = win
-        web.children = [staticText, submitBtn]
+        submitBtn.actions = ["AXPress", "AXScrollToVisible", "AXShowMenu"]; submitBtn.parent = web; submitBtn.owner = win
+        web.children = [staticText, heading, submitBtn]
         win.children = [tab1, toolbarBtn, web]
         backend.appWindows = [win]
 
@@ -287,7 +296,7 @@ final class GeneralPurposeCUATests: XCTestCase {
             params: ObserveRequest(target: target.key, includeScreenshot: false, includeValues: false, scope: .webArea, interactiveOnly: true),
             observationId: "o-web-int", context: OperationContext(budgetMs: 2000))
         XCTAssertEqual(interactiveWeb.observation.accessibility, .partial)
-        XCTAssertFalse(interactiveWeb.observation.elements.contains { $0.role == "AXStaticText" })
+        XCTAssertFalse(interactiveWeb.observation.elements.contains { $0.role == "AXStaticText" || $0.role == "AXHeading" })
         XCTAssertTrue(interactiveWeb.observation.elements.contains { $0.label == "Submit Order" })
     }
 
@@ -371,6 +380,7 @@ final class GeneralPurposeCUATests: XCTestCase {
         XCTAssertEqual(backend.showMenuCalls, 1)
         XCTAssertEqual(backend.cancelCalls, 1)
         XCTAssertEqual(backend.invokedMenuPaths, [["File", "New Tab"]])
+        XCTAssertEqual(backend.invokedMenuWindowIDs, ["w"])
     }
 
     func testChromiumColdStartWaitsForInteractiveActionsToMaterialize() throws {
@@ -381,10 +391,14 @@ final class GeneralPurposeCUATests: XCTestCase {
         backend.records = [target]
         let win = GPNode("w", role: "AXWindow", title: "Cold - Google Chrome", bounds: bounds)
         let web = GPNode("web", role: "AXWebArea", title: "Cold", url: "https://cold.example/", bounds: Rect(x: 0, y: 80, width: 900, height: 520))
+        // A writable search field is ready immediately, while buttons/links still wait for AXPress.
+        let search = GPNode("search", role: "AXTextField", title: "Search", bounds: Rect(x: 20, y: 90, width: 200, height: 24))
+        search.valueSettable = true
+        search.parent = web; search.owner = win
         let btn = GPNode("btn", role: "AXButton", title: "Record Check", bounds: Rect(x: 20, y: 120, width: 120, height: 30))
-        btn.actions = ["AXScrollToVisible"] // AXPress appears only after 2 probe reads!
+        btn.actions = ["AXScrollToVisible", "AXShowMenu"] // AXPress appears only after 2 probe reads!
         btn.parent = web; btn.owner = win
-        web.children = [btn]; web.parent = win; web.owner = win
+        web.children = [search, btn]; web.parent = win; web.owner = win
         win.children = [web]
         backend.appWindows = [win]
         backend.delayPressOnNode = btn
@@ -394,7 +408,7 @@ final class GeneralPurposeCUATests: XCTestCase {
             params: ObserveRequest(target: target.key, includeScreenshot: false, includeValues: false),
             observationId: "o-cold", context: OperationContext(budgetMs: 2500))
         let observedBtn = try XCTUnwrap(obs.observation.elements.first { $0.label == "Record Check" })
-        XCTAssertTrue(observedBtn.actions.contains(.press), "First observe on cold-started Chromium must settle until AXPress is published")
+        XCTAssertTrue(observedBtn.actions.contains(.press), "First observe on cold-started Chromium must settle until AXPress is published even when a writable AXTextField is already present")
     }
 
     func testForegroundPointerDragHotkeyAndTypeKeysDispatch() throws {

@@ -308,7 +308,19 @@ public struct SemanticAXObserver: Sendable {
                     let probe = try collectTree(roots: webRoots, window: window, pid: target.key.pid, backend: backend,
                                                 includeValues: false, selectors: interactiveSelectors, application: application,
                                                 visibleIn: target.bounds, context: context)
-                    if probe.nodes.contains(where: { $0.snapshot.actions.contains("AXPress") || $0.snapshot.valueSettable || $0.snapshot.selectedTextSettable }) {
+                    let pressable = probe.nodes.filter {
+                        ($0.snapshot.role == "AXButton" || $0.snapshot.role == "AXLink" || $0.snapshot.role == "AXCheckBox")
+                            && (!$0.snapshot.enabledKnown || $0.snapshot.enabled)
+                    }
+                    let ready: Bool
+                    if !pressable.isEmpty {
+                        ready = pressable.contains { $0.snapshot.actions.contains("AXPress") }
+                    } else {
+                        ready = probe.nodes.contains {
+                            $0.snapshot.actions.contains("AXPress") || $0.snapshot.valueSettable || $0.snapshot.selectedTextSettable
+                        }
+                    }
+                    if ready {
                         break
                     }
                     if probe.nodes.isEmpty && DispatchTime.now().uptimeNanoseconds >= emptyDeadline {
@@ -728,7 +740,6 @@ private func isInteractiveElement(_ snapshot: AXNodeSnapshot) -> Bool {
         || snapshot.selectedTextSettable
         || snapshot.actions.contains("AXPress")
         || snapshot.actions.contains("AXConfirm")
-        || snapshot.actions.contains("AXShowMenu")
         || snapshot.actions.contains("AXCancel")
 }
 

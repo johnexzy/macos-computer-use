@@ -19,7 +19,7 @@ public protocol AXMutating: Sendable {
                   willDispatch: @Sendable () throws -> Void) throws
     func cancel(_ object: any AXObject, context: OperationContext,
                 willDispatch: @Sendable () throws -> Void) throws
-    func invokeMenu(_ path: [String], on application: any AXObject, context: OperationContext,
+    func invokeMenu(_ path: [String], on application: any AXObject, window: any AXObject, context: OperationContext,
                     willDispatch: @Sendable () throws -> Void) throws
     func setWindowFrame(_ bounds: Rect, on window: any AXObject, windowId: UInt32, context: OperationContext,
                         willDispatch: @Sendable () throws -> Void) throws
@@ -44,7 +44,7 @@ public extension AXMutating {
                 willDispatch: @Sendable () throws -> Void) throws {
         throw NativeFailure(.unsupported, "AXCancel is not supported by this backend")
     }
-    func invokeMenu(_ path: [String], on application: any AXObject, context: OperationContext,
+    func invokeMenu(_ path: [String], on application: any AXObject, window: any AXObject, context: OperationContext,
                     willDispatch: @Sendable () throws -> Void) throws {
         throw NativeFailure(.unsupported, "AXMenuBar invocation is not supported by this backend")
     }
@@ -309,7 +309,8 @@ public struct BackgroundActions: Sendable {
         if case .invokeMenu(let menu) = step.operation {
             return try executeWindowOperation(route: .axMenu, step: step, entry: entry, handle: handle,
                                               context: context, state: state, before: before) { handoff in
-                try writer.invokeMenu(menu.path, on: handle.application, context: context, willDispatch: handoff)
+                try writer.invokeMenu(menu.path, on: handle.application, window: handle.retainedWindow,
+                                      context: context, willDispatch: handoff)
             }
         }
         if case .setWindowFrame(let frame) = step.operation {
@@ -725,7 +726,7 @@ extension MacOSAXBackend: AXMutating {
         try performAXAction(kAXCancelAction as String, on: object, allowUnsupportedEnabled: true,
                             context: context, willDispatch: willDispatch)
     }
-    public func invokeMenu(_ path: [String], on application: any AXObject, context: OperationContext,
+    public func invokeMenu(_ path: [String], on application: any AXObject, window: any AXObject, context: OperationContext,
                            willDispatch: @Sendable () throws -> Void) throws {
         guard path.count >= 2 else { throw NativeFailure(.invalidRequest, "menu path requires at least two segments") }
         guard let barObj = try menuBar(of: application, context: context) else {
@@ -766,8 +767,25 @@ extension MacOSAXBackend: AXMutating {
         guard try readAXActionNames(targetItem, context: context).contains(kAXPressAction as String) else {
             throw NativeFailure(.unsupported, "menu item does not advertise AXPress")
         }
+        let windowElement = try nativeElement(window, context: context)
+        var shouldSetMain = false
+        var rawMain: CFTypeRef?
+        let mainRead = AXUIElementCopyAttributeValue(windowElement, kAXMainAttribute as CFString, &rawMain)
+        try checkAXRead(mainRead, context: context, allowMissing: true)
+        if mainRead == .success, let flag = rawMain as? NSNumber, !flag.boolValue {
+            var settable = DarwinBoolean(false)
+            if AXUIElementIsAttributeSettable(windowElement, kAXMainAttribute as CFString, &settable) == .success,
+               settable.boolValue {
+                shouldSetMain = true
+            }
+        }
         try installTimeout(targetItem, context: context)
         try willDispatch()
+        // Target the requested window within the background application without activating it.
+        if shouldSetMain {
+            try installTimeout(windowElement, context: context)
+            _ = AXUIElementSetAttributeValue(windowElement, kAXMainAttribute as CFString, kCFBooleanTrue)
+        }
         try checkAXMutation(AXUIElementPerformAction(targetItem, kAXPressAction as CFString),
                             action: "AXMenuPress", context: context)
     }

@@ -23,7 +23,7 @@ Use the connected server's `capabilities`, `targets`, `open`, `clipboard`, `obse
 5. Observe the target close to the action:
    - Use `scope: "webArea"` on browsers to skip tab strips, toolbars, and window chrome and focus the 256-element cap on the page DOM.
    - Use `interactiveOnly: true` to return only interactive controls (buttons, links, inputs, checkboxes, menus, scroll areas, web areas).
-   - Use `scope: "menuBar"` to inspect the app's native macOS menu bar items (`"File > New Tab"`, `"History > Back"`, etc.) before calling `invokeMenu`.
+   - Use `scope: "menuBar"` to inspect the app's native macOS menu bar items (`"File > New"`, `"File > New Tab"`, etc.) and verify `enabled: true` before calling `invokeMenu`.
    - Use `query` for fast case-insensitive substring search across `label`, `identifier`, `subrole`, `url` (and `value` only when `includeValues: true`) — works with `scope: "webArea"`, `scope: "menuBar"`, and `interactiveOnly: true`.
    - Use `axSelectors` (with optional `role` plus exact `label`, `identifier`, or substring `labelContains`) when you need structured query coverage or ambiguity reporting.
    - Use `includeValues: true` when you need to read or verify field/text values.
@@ -40,7 +40,7 @@ Use the connected server's `capabilities`, `targets`, `open`, `clipboard`, `obse
   - `cancel` invokes `AXCancel` (dismiss sheets, popovers, search inputs).
   - `scrollToVisible` scrolls a web/list control into view in the background.
   - `scroll` moves a live `AXScrollArea` (`axis`: `vertical` or `horizontal`, nonzero `amount` in `[-1000, 1000]`).
-  - `invokeMenu` executes an exact native macOS `AXMenuBar` path (e.g. `path: ["File", "New Tab"]`, `["History", "Back"]`, `["Edit", "Copy"]`) in the background without stealing focus.
+  - `invokeMenu` executes an exact native macOS `AXMenuBar` path (e.g. `path: ["File", "New"]`, `["File", "New Tab"]`) in the background without stealing focus when the menu item is `enabled: true` while inactive. Note that macOS AppKit disables first-responder / key-window menu items (such as `["History", "Back"]` or `["Edit", "Copy"]` in Chrome/Safari) while an app is inactive; for background browser navigation use the window's native toolbar `AXButton` controls (`scope: "window"`, e.g. `Back`/`Forward`/`Reload`) with `press`.
   - `setWindowFrame` moves and/or resizes the target window (`bounds: {x, y, width, height}` in top-left logical coordinates) in the background via AX.
   - `windowAction` runs background window lifecycle actions (`action: "minimize"` or `"close"`, optionally paired with `expect: {kind: "windowAbsent", params: {}}`).
 - Each step has an `actionId` and an `operation` with `kind` and `params`. Group up to 16 compatible steps on one target and observation within one `budgetMs`.
