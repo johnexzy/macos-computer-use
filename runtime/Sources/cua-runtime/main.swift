@@ -127,19 +127,17 @@ MainActor.assumeIsolated {
         earlySignals.append(source)
     }
 
-    let app = NSApplication.shared
     let environment = ProcessInfo.processInfo.environment
     let feedbackRequested = environment["CUA_VISUAL_FEEDBACK"] == "1"
     let previewRequested = environment["CUA_LIVE_PREVIEW"] == "1"
-    let useAppKit = (feedbackRequested || previewRequested) && app.setActivationPolicy(.accessory)
-    if !useAppKit { app.setActivationPolicy(.prohibited) }
+    let useAppKit = (feedbackRequested || previewRequested) && NSApplication.shared.setActivationPolicy(.accessory)
     if earlyStop.triggered { exit(0) }
     let process = RuntimeProcess(visualFeedback: useAppKit && feedbackRequested, livePreview: useAppKit && previewRequested)
     process.start(preinstalledSignals: earlySignals)
     if earlyStop.triggered { exit(0) }
     if process.shouldRun() {
         process.startReading()
-        if useAppKit { app.run() }
+        if useAppKit { NSApplication.shared.run() }
         else { CFRunLoopRun() }
     }
     exit(process.result())

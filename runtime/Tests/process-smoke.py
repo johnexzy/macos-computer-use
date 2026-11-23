@@ -110,6 +110,8 @@ finally:
         process.wait()
 
 # Signal while the hello frame is buffered/being initialized; stdin remains open.
+# If SIGTERM lands before dyld enters main(), macOS terminates with -SIGTERM; once in main(),
+# cua-runtime traps SIGTERM and exits cleanly with 0. Either way it must exit promptly without hanging.
 process = launch()
 try:
     send(process, request("hello", "hello", {"clientName": "startup-signal", "supportedVersions": [1],
@@ -117,7 +119,7 @@ try:
     time.sleep(0.05)
     os.kill(process.pid, signal.SIGTERM)
     process.wait(timeout=5)
-    assert process.returncode == 0
+    assert process.returncode in (0, -signal.SIGTERM), f"unexpected startup SIGTERM exit: {process.returncode}"
     checks.append("SIGTERM during startup/hello with stdin open")
 finally:
     if process.poll() is None:
