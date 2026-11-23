@@ -469,6 +469,41 @@ pub fn install_native_messaging_manifests(
     Ok(installed)
 }
 
+/// Copies the bundled MV3 extension out of the `.app` package into a standard directory
+/// (`~/Library/Application Support/macOS Computer Use/browser-extension`) so Chrome's
+/// `NSOpenPanel` ("Load unpacked") can open it directly without treating `.app` as a file package.
+pub fn install_unpacked_extension(
+    host_binary: &Path,
+) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
+    let resolved = host_binary.canonicalize().unwrap_or_else(|_| host_binary.to_path_buf());
+    let Some(contents_dir) = resolved.parent().and_then(Path::parent) else {
+        return Ok(None);
+    };
+    let source = contents_dir.join("Resources").join("browser-extension");
+    if !source.is_dir() {
+        return Ok(None);
+    }
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or("HOME environment variable is not set")?;
+    let dest = home
+        .join("Library")
+        .join("Application Support")
+        .join("macOS Computer Use")
+        .join("browser-extension");
+    fs::create_dir_all(&dest)?;
+    for entry in fs::read_dir(&source)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_file() {
+            let target = dest.join(entry.file_name());
+            fs::copy(entry.path(), &target)?;
+            fs::set_permissions(&target, fs::Permissions::from_mode(0o644))?;
+        }
+    }
+    Ok(Some(dest))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

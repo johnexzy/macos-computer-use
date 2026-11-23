@@ -146,12 +146,13 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
                 showStatus("Failed to install Native Messaging manifest (exit \(process.terminationStatus)).")
                 return
             }
-            if let extURL = Bundle.main.resourceURL?.appendingPathComponent("browser-extension"),
-               FileManager.default.fileExists(atPath: extURL.path) {
+            let unpackedDir = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/macOS Computer Use/browser-extension")
+            if FileManager.default.fileExists(atPath: unpackedDir.path) {
                 let pb = NSPasteboard.general
                 pb.clearContents()
-                pb.setString(extURL.path, forType: .string)
-                showStatus("Bridge installed. Extension path copied — load unpacked in chrome://extensions.")
+                pb.setString(unpackedDir.path, forType: .string)
+                showStatus("Bridge installed. Extension path copied — press ⌘⇧G in Load unpacked and paste.")
             } else {
                 showStatus("Native Messaging bridge installed.")
             }

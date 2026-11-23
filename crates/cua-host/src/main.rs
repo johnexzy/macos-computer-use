@@ -96,6 +96,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 for path in installed {
                     println!("Installed Native Messaging manifest: {}", path.display());
                 }
+                if let Some(ext_dir) =
+                    cua_host::browser_bridge::install_unpacked_extension(&self_exe)?
+                {
+                    println!("Installed Unpacked Extension: {}", ext_dir.display());
+                }
                 println!(
                     "Extension ID: {}",
                     cua_host::browser_bridge::EXTENSION_ID
