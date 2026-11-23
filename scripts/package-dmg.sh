@@ -34,6 +34,10 @@ install -m 644 "$native/manifest.json" "$resources/native-manifest.json"
 skill=macos-computer-use-native
 mkdir -p "$resources/skills/$skill"
 install -m 644 "$root/skills/$skill/SKILL.md" "$resources/skills/$skill/SKILL.md"
+if [ -d "$root/extension/chromium" ]; then
+  mkdir -p "$resources/browser-extension"
+  cp -R "$root/extension/chromium/." "$resources/browser-extension/"
+fi
 icon_source="$root/brand/app-icon.png"
 iconset="$temporary/AppIcon.iconset"
 mkdir "$iconset"

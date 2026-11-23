@@ -1799,6 +1799,59 @@ public struct ActionStep: Codable, Equatable, Sendable {
     }
 }
 
+public struct ObserveAfter: Codable, Equatable, Sendable {
+    public let includeScreenshot: Bool
+    public let includeValues: Bool
+    public let includeOcr: Bool
+    public let ocrQuery: String?
+    public let scope: ObserveScope?
+    public let interactiveOnly: Bool
+    public let query: String?
+    public let axSelectors: [Selector]?
+    public init(includeScreenshot: Bool = false, includeValues: Bool = false, includeOcr: Bool = false,
+                ocrQuery: String? = nil, scope: ObserveScope? = nil, interactiveOnly: Bool = false,
+                query: String? = nil, axSelectors: [Selector]? = nil) {
+        self.includeScreenshot = includeScreenshot
+        self.includeValues = includeValues
+        self.includeOcr = includeOcr
+        self.ocrQuery = ocrQuery
+        self.scope = scope
+        self.interactiveOnly = interactiveOnly
+        self.query = query
+        self.axSelectors = axSelectors
+    }
+    public func toObserveRequest(target: TargetKey) -> ObserveRequest {
+        ObserveRequest(target: target, includeScreenshot: includeScreenshot, includeValues: includeValues,
+                       includeOcr: includeOcr, ocrQuery: ocrQuery, axSelectors: axSelectors,
+                       scope: scope, interactiveOnly: interactiveOnly, query: query)
+    }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case includeScreenshot, includeValues, includeOcr, ocrQuery, scope, interactiveOnly, query, axSelectors
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try strict(decoder, CodingKeys.self)
+        includeScreenshot = c.contains(.includeScreenshot) ? try c.decode(Bool.self, forKey: .includeScreenshot) : false
+        includeValues = c.contains(.includeValues) ? try c.decode(Bool.self, forKey: .includeValues) : false
+        includeOcr = c.contains(.includeOcr) ? try c.decode(Bool.self, forKey: .includeOcr) : false
+        ocrQuery = try c.decodeIfPresent(String.self, forKey: .ocrQuery)
+        scope = try c.decodeIfPresent(ObserveScope.self, forKey: .scope)
+        interactiveOnly = c.contains(.interactiveOnly) ? try c.decode(Bool.self, forKey: .interactiveOnly) : false
+        query = try c.decodeIfPresent(String.self, forKey: .query)
+        axSelectors = try c.decodeIfPresent([Selector].self, forKey: .axSelectors)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        if includeScreenshot { try c.encode(true, forKey: .includeScreenshot) }
+        if includeValues { try c.encode(true, forKey: .includeValues) }
+        if includeOcr { try c.encode(true, forKey: .includeOcr) }
+        try c.encodeIfPresent(ocrQuery, forKey: .ocrQuery)
+        try c.encodeIfPresent(scope, forKey: .scope)
+        if interactiveOnly { try c.encode(true, forKey: .interactiveOnly) }
+        try c.encodeIfPresent(query, forKey: .query)
+        try c.encodeIfPresent(axSelectors, forKey: .axSelectors)
+    }
+}
+
 public struct ActRequest: Codable, Equatable, Sendable {
     public let grantId: String
     public let observationId: String
@@ -1806,17 +1859,20 @@ public struct ActRequest: Codable, Equatable, Sendable {
     public let steps: [ActionStep]
     public let feedback: FeedbackRequest?
     public let foreground: Bool
-    public init(grantId: String, observationId: String, target: TargetKey, steps: [ActionStep], feedback: FeedbackRequest? = nil, foreground: Bool = false) {
+    public let observeAfter: ObserveAfter?
+    public init(grantId: String, observationId: String, target: TargetKey, steps: [ActionStep],
+                feedback: FeedbackRequest? = nil, foreground: Bool = false, observeAfter: ObserveAfter? = nil) {
         self.grantId = grantId
         self.observationId = observationId
         self.target = target
         self.steps = steps
         self.feedback = feedback
         self.foreground = foreground
+        self.observeAfter = observeAfter
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case grantId, observationId, target, steps
-        case feedback, foreground
+        case feedback, foreground, observeAfter
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -1826,6 +1882,7 @@ public struct ActRequest: Codable, Equatable, Sendable {
         steps = try c.decode([ActionStep].self, forKey: .steps)
         feedback = try c.decodeIfPresent(FeedbackRequest.self, forKey: .feedback)
         foreground = c.contains(.foreground) ? try c.decode(Bool.self, forKey: .foreground) : false
+        observeAfter = try c.decodeIfPresent(ObserveAfter.self, forKey: .observeAfter)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -1835,6 +1892,7 @@ public struct ActRequest: Codable, Equatable, Sendable {
         try c.encode(steps, forKey: .steps)
         try c.encode(feedback, forKey: .feedback)
         if foreground { try c.encode(foreground, forKey: .foreground) }
+        try c.encodeIfPresent(observeAfter, forKey: .observeAfter)
     }
 }
 
@@ -1958,17 +2016,21 @@ public struct ActResult: Codable, Equatable, Sendable {
     public let stopReason: StopReason
     public let feedback: ObservationFeedback?
     public let foreground: ForegroundEvidence?
-    public init(observationId: String, steps: [StepReceipt], remainingSteps: UInt16, stopReason: StopReason, feedback: ObservationFeedback? = nil, foreground: ForegroundEvidence? = nil) {
+    public let observation: Observation?
+    public init(observationId: String, steps: [StepReceipt], remainingSteps: UInt16, stopReason: StopReason,
+                feedback: ObservationFeedback? = nil, foreground: ForegroundEvidence? = nil,
+                observation: Observation? = nil) {
         self.observationId = observationId
         self.steps = steps
         self.remainingSteps = remainingSteps
         self.stopReason = stopReason
         self.feedback = feedback
         self.foreground = foreground
+        self.observation = observation
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case observationId, steps, remainingSteps, stopReason
-        case feedback, foreground
+        case feedback, foreground, observation
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -1978,6 +2040,7 @@ public struct ActResult: Codable, Equatable, Sendable {
         stopReason = try c.decode(StopReason.self, forKey: .stopReason)
         feedback = try c.decodeIfPresent(ObservationFeedback.self, forKey: .feedback)
         foreground = try c.decodeIfPresent(ForegroundEvidence.self, forKey: .foreground)
+        observation = try c.decodeIfPresent(Observation.self, forKey: .observation)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -1987,6 +2050,7 @@ public struct ActResult: Codable, Equatable, Sendable {
         try c.encode(stopReason, forKey: .stopReason)
         try c.encode(feedback, forKey: .feedback)
         try c.encodeIfPresent(foreground, forKey: .foreground)
+        try c.encodeIfPresent(observation, forKey: .observation)
     }
 }
 
@@ -2031,16 +2095,19 @@ public struct OpenRequest: Codable, Equatable, Sendable {
     public let url: String?
     public let newInstance: Bool
     public let activate: Bool
-    public init(grantId: String, bundleId: String? = nil, appName: String? = nil, url: String? = nil, newInstance: Bool = false, activate: Bool = false) {
+    public let observe: ObserveAfter?
+    public init(grantId: String, bundleId: String? = nil, appName: String? = nil, url: String? = nil,
+                newInstance: Bool = false, activate: Bool = false, observe: ObserveAfter? = nil) {
         self.grantId = grantId
         self.bundleId = bundleId
         self.appName = appName
         self.url = url
         self.newInstance = newInstance
         self.activate = activate
+        self.observe = observe
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case grantId, bundleId, appName, url, newInstance, activate
+        case grantId, bundleId, appName, url, newInstance, activate, observe
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -2050,6 +2117,7 @@ public struct OpenRequest: Codable, Equatable, Sendable {
         url = try c.decodeIfPresent(String.self, forKey: .url)
         newInstance = c.contains(.newInstance) ? try c.decode(Bool.self, forKey: .newInstance) : false
         activate = c.contains(.activate) ? try c.decode(Bool.self, forKey: .activate) : false
+        observe = try c.decodeIfPresent(ObserveAfter.self, forKey: .observe)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -2059,6 +2127,7 @@ public struct OpenRequest: Codable, Equatable, Sendable {
         try c.encodeIfPresent(url, forKey: .url)
         if newInstance { try c.encode(true, forKey: .newInstance) }
         if activate { try c.encode(true, forKey: .activate) }
+        try c.encodeIfPresent(observe, forKey: .observe)
     }
 }
 
@@ -2067,14 +2136,16 @@ public struct OpenResult: Codable, Equatable, Sendable {
     public let bundleId: String?
     public let activated: Bool
     public let targets: [Target]
-    public init(pid: UInt32?, bundleId: String?, activated: Bool, targets: [Target]) {
+    public let observation: Observation?
+    public init(pid: UInt32?, bundleId: String?, activated: Bool, targets: [Target], observation: Observation? = nil) {
         self.pid = pid
         self.bundleId = bundleId
         self.activated = activated
         self.targets = targets
+        self.observation = observation
     }
     private enum CodingKeys: String, CodingKey, CaseIterable {
-        case pid, bundleId, activated, targets
+        case pid, bundleId, activated, targets, observation
     }
     public init(from decoder: Decoder) throws {
         let c = try strict(decoder, CodingKeys.self)
@@ -2082,6 +2153,7 @@ public struct OpenResult: Codable, Equatable, Sendable {
         bundleId = try c.decodeIfPresent(String.self, forKey: .bundleId)
         activated = try c.decode(Bool.self, forKey: .activated)
         targets = try c.decode([Target].self, forKey: .targets)
+        observation = try c.decodeIfPresent(Observation.self, forKey: .observation)
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -2089,6 +2161,7 @@ public struct OpenResult: Codable, Equatable, Sendable {
         try c.encodeIfPresent(bundleId, forKey: .bundleId)
         try c.encode(activated, forKey: .activated)
         try c.encode(targets, forKey: .targets)
+        try c.encodeIfPresent(observation, forKey: .observation)
     }
 }
 

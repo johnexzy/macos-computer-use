@@ -42,12 +42,12 @@ export class Session {
     });
   }
   notify(method, params) { this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n"); }
-  request(method, params) {
+  request(method, params, timeoutMs = 5000) {
     const id = ++this.next;
     return deadline(new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
-    }));
+    }), timeoutMs);
   }
   async initialize() {
     await deadline(this.ready);
@@ -56,7 +56,10 @@ export class Session {
     this.notify("notifications/initialized");
     return response;
   }
-  tool(name, args = {}) { return this.request("tools/call", { name, arguments: args }); }
+  tool(name, args = {}) {
+    const timeoutMs = Math.max(5000, (typeof args?.budgetMs === "number" ? args.budgetMs : 5000) + 2000);
+    return this.request("tools/call", { name, arguments: args }, timeoutMs);
+  }
   async close(signal) {
     if (this.child.exitCode === null && this.child.signalCode === null) {
       if (signal) this.child.kill(signal); else this.child.stdin.end();

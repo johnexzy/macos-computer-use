@@ -31,6 +31,7 @@ fn act(count: usize) -> RequestBody {
         grant_id: "model-must-not-select-this-grant".into(),
         foreground: false,
         feedback: None,
+        observe_after: None,
         observation_id: "observation-1".into(),
         target: TargetKey {
             pid: 42,

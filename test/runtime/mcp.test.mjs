@@ -49,7 +49,7 @@ test("installed Rust MCP host keeps one native epoch and rejects model policy up
   try {
     await session.initialize();
     const listed = await session.request("tools/list", {});
-    assert.deepEqual(listed.result.tools.map((t) => t.name).sort(), ["act", "capabilities", "clipboard", "observe", "open", "targets", "waitFor"].sort());
+    assert.deepEqual(listed.result.tools.map((t) => t.name).sort(), ["act", "browser", "capabilities", "clipboard", "observe", "open", "targets", "waitFor"].sort());
     for (const tool of listed.result.tools) {
       assert.equal(tool.inputSchema.additionalProperties, false);
       for (const forbidden of ["grantId", "mode", "epoch", "authority"]) assert.equal(tool.inputSchema.properties[forbidden], undefined);
@@ -91,6 +91,9 @@ test("installed Rust MCP host keeps one native epoch and rejects model policy up
     assert.equal(clipMeta.result.isError, false);
     assert.equal(clipMeta.result.structuredContent.body.data.text, undefined);
     assert.equal(typeof clipMeta.result.structuredContent.body.data.changeCount, "number");
+    const browserStatus = await session.tool("browser", { action: "status" });
+    assert.equal(browserStatus.result.isError, false);
+    assert.equal(typeof browserStatus.result.structuredContent.data.connected, "boolean");
     assert.equal(alive(session.helperPid), true);
   } finally { await session.close(); }
 });

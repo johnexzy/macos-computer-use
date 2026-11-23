@@ -812,4 +812,75 @@ final class GeneralPurposeCUATests: XCTestCase {
         XCTAssertEqual(waited.evidence?.matched, true)
         XCTAssertNotNil(waited.observation)
     }
+
+    func testActObserveAfterAndOpenObserveRegisterLiveShortRefObservations() throws {
+        let bounds = Rect(x: 0, y: 0, width: 900, height: 600)
+        let backend = GPBackend()
+        let target = Target(key: TargetKey(pid: 9115, windowId: 30), bundleId: "com.google.Chrome", title: "Directory", bounds: bounds)
+        backend.records = [target]
+
+        let win = GPNode("w", role: "AXWindow", title: "Directory", bounds: bounds)
+        let web = GPNode("web", role: "AXWebArea", title: "Directory", url: "https://startuplist.africa/startups", bounds: bounds)
+        let btn = GPNode("btn", role: "AXLink", title: "OPay", url: "https://startuplist.africa/startups/opay",
+                         bounds: Rect(x: 20, y: 100, width: 120, height: 24))
+        btn.actions = ["AXPress"]
+        btn.parent = web; btn.owner = win
+        web.children = [btn]; web.parent = win; web.owner = win
+        win.children = [web]
+        backend.appWindows = [win]
+
+        let opener = FakeOpener(OpenResult(pid: 9115, bundleId: "com.google.Chrome", activated: false, targets: [target]))
+        let system = MacOSSystem(backend: backend, catalog: backend, visual: ScreenWindowCapture(),
+                                 opener: opener, isAXTrusted: { true })
+        let values = TestCollector()
+        let session = RuntimeSession(system: system, epoch: "ep-fast", emit: values.append)
+        defer { session.shutdown() }
+
+        func send(_ id: String, _ body: RequestBody, epoch: String? = "ep-fast") throws -> Response {
+            let req = Request(version: 1, id: id, epoch: epoch, budgetMs: 3000, body: body)
+            session.receive(req, frameBytes: try Frame.request(req).encodeLine().count)
+            return try values.response(id)
+        }
+
+        _ = try send("h", .hello(HelloRequest(clientName: "t", supportedVersions: [1],
+                                              authority: Authority(grantId: "g-fast", mode: .backgroundRequired))), epoch: nil)
+
+        // 1. open(..., observe:) returns and registers an initial observation with short refs (obs-1, eN.M).
+        let openRes = try send("op", .open(OpenRequest(grantId: "g-fast", bundleId: "com.google.Chrome",
+                                                       url: "https://startuplist.africa/startups",
+                                                       observe: ObserveAfter(scope: .webArea, interactiveOnly: true))))
+        guard case .open(let opened) = openRes.body else { return XCTFail("expected open result") }
+        let initialObs = try XCTUnwrap(opened.observation)
+        XCTAssertTrue(initialObs.observationId.hasPrefix("obs-"))
+        let linkEl = try XCTUnwrap(initialObs.elements.first { $0.label == "OPay" })
+        XCTAssertTrue(linkEl.reference.hasPrefix("e"), "Expected compact ref, got \(linkEl.reference)")
+        XCTAssertLessThan(linkEl.reference.count, 12)
+
+        // 2. act(..., observeAfter:) uses the observation registered by open() AND returns a newly registered observation!
+        let actRes = try send("a1", .act(ActRequest(
+            grantId: "g-fast",
+            observationId: initialObs.observationId,
+            target: target.key,
+            steps: [ActionStep(actionId: "click-opay", operation: .press(ElementOperation(elementRef: linkEl.reference)),
+                               precondition: nil, expect: nil)],
+            observeAfter: ObserveAfter(scope: .webArea, interactiveOnly: true)
+        )))
+        guard case .act(let acted) = actRes.body else { return XCTFail("expected act result") }
+        XCTAssertEqual(acted.stopReason, .completed)
+        let afterObs = try XCTUnwrap(acted.observation)
+        XCTAssertNotEqual(afterObs.observationId, initialObs.observationId)
+        let afterLink = try XCTUnwrap(afterObs.elements.first { $0.label == "OPay" })
+        XCTAssertNotEqual(afterLink.reference, linkEl.reference, "Disjoint short refs across observations")
+
+        // 3. Follow-up act immediately succeeds using the observationId & ref from observeAfter!
+        let actRes2 = try send("a2", .act(ActRequest(
+            grantId: "g-fast",
+            observationId: afterObs.observationId,
+            target: target.key,
+            steps: [ActionStep(actionId: "click-again", operation: .press(ElementOperation(elementRef: afterLink.reference)),
+                               precondition: nil, expect: nil)]
+        )))
+        guard case .act(let acted2) = actRes2.body else { return XCTFail("expected second act result") }
+        XCTAssertEqual(acted2.stopReason, .completed)
+    }
 }

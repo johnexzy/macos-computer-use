@@ -526,6 +526,7 @@ pub(crate) fn interrupted(
             stop_reason,
             feedback: None,
             foreground: None,
+            observation: None,
         }),
     })
 }

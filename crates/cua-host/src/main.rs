@@ -69,26 +69,46 @@ fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let raw_args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    // Chrome launches Native Messaging hosts with `chrome-extension://<id>/` as argv[1].
+    if raw_args.iter().any(|arg| {
+        arg.to_str()
+            .is_some_and(|s| s == "--native-messaging-host" || s.starts_with("chrome-extension://"))
+    }) {
+        return cua_host::browser_bridge::run_native_messaging_host().await;
+    }
+
     // MCP clients may launch a symlink outside the archive. Resolve its real
     // location before selecting the sibling helper, independently of cwd/PATH.
-    let mut helper = std::env::current_exe()?
-        .canonicalize()?
-        .with_file_name("cua-runtime");
+    let self_exe = std::env::current_exe()?.canonicalize()?;
+    let mut helper = self_exe.with_file_name("cua-runtime");
     let mut mode = ExecutionMode::BackgroundRequired;
-    let mut args = std::env::args_os().skip(1);
+    let mut args = raw_args.into_iter();
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--helper") => {
                 helper = PathBuf::from(args.next().ok_or("--helper requires a path")?)
             }
             Some("--allow-foreground") => mode = ExecutionMode::ForegroundAllowed,
+            Some("--install-browser-bridge") => {
+                let installed =
+                    cua_host::browser_bridge::install_native_messaging_manifests(&self_exe)?;
+                for path in installed {
+                    println!("Installed Native Messaging manifest: {}", path.display());
+                }
+                println!(
+                    "Extension ID: {}",
+                    cua_host::browser_bridge::EXTENSION_ID
+                );
+                return Ok(());
+            }
             Some("--version") => {
                 println!("cua-host {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
             }
             Some("--help") => {
                 println!(
-                    "cua-host [--helper PATH] [--allow-foreground]\nMCP stdio server; execution mode is installed by the operator."
+                    "cua-host [--helper PATH] [--allow-foreground] [--native-messaging-host] [--install-browser-bridge]\nMCP stdio server; execution mode is installed by the operator."
                 );
                 return Ok(());
             }

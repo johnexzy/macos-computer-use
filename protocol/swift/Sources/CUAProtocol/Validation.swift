@@ -445,6 +445,28 @@ extension Observation {
     }
 }
 
+extension ObserveAfter {
+    func validate() throws {
+        try toObserveRequest(target: TargetKey(pid: 1, windowId: 1)).validate()
+    }
+}
+
+private func validateObserveAfter(_ after: ObserveAfter, expectedTarget: TargetKey, observation: Observation) throws {
+    try require(observation.target == expectedTarget, "post-action observation target mismatch")
+    let scoped = after.scope == .webArea || after.scope == .menuBar || after.interactiveOnly || after.query != nil
+    try require(!scoped || observation.accessibility != .complete, "scoped observation cannot imply a complete window")
+    try require(after.includeValues || observation.elements.allSatisfy { $0.value == nil },
+                "observation includes unrequested values")
+    try require(after.axSelectors == observation.axSelection?.selectors, "AX selection does not match request")
+    try require(after.includeScreenshot || observation.screenshot == nil, "observation includes unrequested image")
+    try require(after.includeScreenshot || after.includeOcr || observation.visual == nil,
+                "observation includes unrequested visual evidence")
+    try require(!after.includeOcr || observation.visual != nil, "requested visual evidence is missing")
+    if let visual = observation.visual {
+        try require(after.includeOcr == (visual.ocr != nil), "OCR inclusion does not match request")
+    }
+}
+
 extension OpenRequest {
     func validate() throws {
         try identifier(grantId)
@@ -461,6 +483,7 @@ extension OpenRequest {
         if newInstance {
             try require(bundleId != nil || appName != nil, "newInstance requires bundleId or appName")
         }
+        try observe?.validate()
     }
 }
 
@@ -566,6 +589,7 @@ extension ActRequest {
             try require(feedback.elementRefs.count <= Limits.maxElements, "too many feedback references")
             try unique(feedback.elementRefs)
         }
+        try observeAfter?.validate()
     }
 }
 
@@ -624,6 +648,7 @@ extension ActResult {
             }, "completed sequence cannot include rejected steps")
         }
         try feedback?.validate()
+        try observation?.validate()
     }
 }
 
@@ -733,6 +758,7 @@ extension Frame {
                     }
                     try validRect(target.bounds)
                 }
+                try value.observation?.validate()
             case .clipboard(let value):
                 try require(value.changeCount <= 9_007_199_254_740_991, "clipboard change count exceeds safe integer range")
                 try require(value.types.count <= Limits.maxClipboardTypes, "too many clipboard types")
@@ -861,6 +887,11 @@ extension Response {
             }
             try require(request.foreground || result.foreground == nil, "unrequested foreground evidence")
             try correlateFeedback(request, result)
+            try require(request.observeAfter != nil || result.observation == nil,
+                        "act includes unrequested post-action observation")
+            if let after = request.observeAfter, let observation = result.observation {
+                try validateObserveAfter(after, expectedTarget: request.target, observation: observation)
+            }
         case (.waitFor(let request), .waitFor(let result)):
             if let evidence = result.evidence {
                 try require(evidence.condition == request.condition, "wait evidence condition mismatch")
@@ -881,6 +912,12 @@ extension Response {
             }
         case (.open(let request), .open(let result)):
             try require(request.activate || !result.activated, "unrequested foreground activation")
+            try require(request.observe != nil || result.observation == nil, "open includes unrequested observation")
+            if let after = request.observe, let observation = result.observation {
+                try require(result.targets.contains(where: { $0.key == observation.target }),
+                            "open observation target is not among opened targets")
+                try validateObserveAfter(after, expectedTarget: observation.target, observation: observation)
+            }
         case (.clipboard(let request), .clipboard(let result)):
             try require((request.action == .read && request.includeText) || result.text == nil,
                         "clipboard includes unrequested text")

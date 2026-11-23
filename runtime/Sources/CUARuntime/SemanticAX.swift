@@ -145,6 +145,17 @@ private let maxTreeDepth = 32
 private let maxSelectiveTreeDepth = 48
 private let activeSiblingBatch = 32
 
+private final class RefGenerationCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var nextValue: UInt64 = 0
+    func next() -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        nextValue += 1
+        return nextValue
+    }
+}
+private let refGenerationCounter = RefGenerationCounter()
+
 struct RetainedAXElement: Sendable {
     let object: any AXObject
     let identity: AXElementIdentity
@@ -374,9 +385,10 @@ public struct SemanticAXObserver: Sendable {
         } else {
             selectedNodes = eligible
         }
+        let refGeneration = refGenerationCounter.next()
         for node in selectedNodes {
             if elements.count == Limits.maxElements { complete = false; break }
-            let reference = "element-\(UUID().uuidString)"
+            let reference = "e\(refGeneration).\(elements.count + 1)"
             let s = node.snapshot
             if !s.enabledKnown { complete = false }
             guard !s.role.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, s.role.utf8.count <= 128 else {

@@ -264,6 +264,7 @@ fn foreground_selection_requires_authority_and_correlates_dispatch() {
             stop_reason: StopReason::Completed,
             feedback: None,
             foreground: None,
+            observation: None,
         }),
     };
     let mut session = SessionContext {

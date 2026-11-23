@@ -49,6 +49,7 @@ public final class RuntimeSession: @unchecked Sendable {
     private var workItems = 0
     private var workBytes = 0
     private var closed = false
+    private var nextObsSeq: UInt64 = 0
     private let maintenance: DispatchSourceTimer
 
     public init(system: any NativeSystem = MacOSSystem(), epoch: String = UUID().uuidString,
@@ -188,6 +189,14 @@ public final class RuntimeSession: @unchecked Sendable {
                         try self.observations.insert(observation, handle: result.handle)
                         self.livePreview?.follow(observation, target: (result.handle as? SemanticObservationHandle)?.target)
                     }
+                    if case .act(let actRes) = result.body, let observation = actRes.observation {
+                        try self.observations.insert(observation, handle: result.handle)
+                        self.livePreview?.follow(observation, target: (result.handle as? SemanticObservationHandle)?.target)
+                    }
+                    if case .open(let openRes) = result.body, let observation = openRes.observation {
+                        try self.observations.insert(observation, handle: result.handle)
+                        self.livePreview?.follow(observation, target: (result.handle as? SemanticObservationHandle)?.target)
+                    }
                     self.respond(request, result.body, activity: result.activity)
                 } catch {
                     self.reject(request, code: .staleObservation, "session closed before observation publication")
@@ -241,7 +250,21 @@ public final class RuntimeSession: @unchecked Sendable {
         case .targets(let params):
             return NativeResult(.targets(try system.targets(params, context: context)))
         case .open(let params):
-            return NativeResult(.open(try system.open(params, context: context)))
+            let opened = try system.open(params, context: context)
+            if let after = params.observe, context.interruption == nil {
+                let ordered = opened.targets.filter { $0.bounds.width >= 100 && $0.bounds.height >= 100 }
+                    + opened.targets.filter { $0.bounds.width < 100 || $0.bounds.height < 100 }
+                for candidate in ordered.prefix(4) {
+                    if let native = try? system.observe(params: after.toObserveRequest(target: candidate.key),
+                                                        observationId: nextObservationID(), context: context) {
+                        let enriched = OpenResult(pid: opened.pid, bundleId: opened.bundleId,
+                                                  activated: opened.activated, targets: opened.targets,
+                                                  observation: native.observation)
+                        return NativeResult(.open(enriched), handle: native.handle)
+                    }
+                }
+            }
+            return NativeResult(.open(opened))
         case .clipboard(let params):
             return NativeResult(.clipboard(try system.clipboard(params, context: context)))
         case .observe(let params):
@@ -281,6 +304,16 @@ public final class RuntimeSession: @unchecked Sendable {
                                      progress: progress, activityOverlay: activityOverlay)
             let activity = activityOverlay != nil || livePreview != nil
                 ? DesktopActivity.action(act, result: result, observation: retained.observation) : nil
+            if let after = act.observeAfter, result.stopReason == .completed, context.interruption == nil {
+                if let native = try? system.observe(params: after.toObserveRequest(target: act.target),
+                                                    observationId: nextObservationID(), context: context) {
+                    let enriched = ActResult(observationId: result.observationId, steps: result.steps,
+                                             remainingSteps: result.remainingSteps, stopReason: result.stopReason,
+                                             feedback: result.feedback, foreground: result.foreground,
+                                             observation: native.observation)
+                    return NativeResult(.act(enriched), handle: native.handle, activity: activity)
+                }
+            }
             return NativeResult(.act(result), activity: activity)
         case .waitFor(let wait):
             let retained = try observations.lookup(wait.observationId, epoch: epoch, target: wait.target)
@@ -320,7 +353,10 @@ public final class RuntimeSession: @unchecked Sendable {
         }
     }
 
-    private func nextObservationID() -> String { "obs-\(epoch)-\(UUID().uuidString)" }
+    private func nextObservationID() -> String {
+        nextObsSeq += 1
+        return "obs-\(nextObsSeq)"
+    }
 }
 
 private func unixMilliseconds() -> UInt64 { UInt64(Date().timeIntervalSince1970 * 1000) }

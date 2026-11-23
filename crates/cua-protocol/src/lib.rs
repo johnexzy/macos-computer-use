@@ -632,6 +632,52 @@ record!(ObservationFeedback {
 record!(ActionStep {
     action_id: String, operation: Operation, precondition: Option<Condition>, expect: Option<Condition>
 });
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ObserveAfter {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_screenshot: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_values: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_ocr: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr_query: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ObserveScope>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub interactive_only: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ax_selectors: Option<Vec<Selector>>,
+}
+impl ObserveAfter {
+    fn to_observe_request(&self, target: TargetKey) -> ObserveRequest {
+        ObserveRequest {
+            target,
+            include_screenshot: self.include_screenshot,
+            include_values: self.include_values,
+            include_ocr: self.include_ocr,
+            ocr_query: self.ocr_query.clone(),
+            crop_window: None,
+            max_image_dimension_px: None,
+            ax_selectors: self.ax_selectors.clone(),
+            event_history: None,
+            scope: self.scope,
+            interactive_only: self.interactive_only,
+            query: self.query.clone(),
+        }
+    }
+    fn validate(&self) -> Result<(), String> {
+        self.to_observe_request(TargetKey {
+            pid: 1,
+            window_id: 1,
+        })
+        .validate()
+    }
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -643,6 +689,8 @@ pub struct ActRequest {
     pub feedback: Option<FeedbackRequest>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub foreground: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observe_after: Option<ObserveAfter>,
 }
 record!(CheckEvidence {
     observation_id: String,
@@ -686,6 +734,8 @@ pub struct ActResult {
     pub feedback: Option<ObservationFeedback>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub foreground: Option<ForegroundEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<Box<Observation>>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -715,6 +765,8 @@ pub struct OpenRequest {
     pub new_instance: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub activate: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observe: Option<ObserveAfter>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -726,6 +778,8 @@ pub struct OpenResult {
     pub bundle_id: Option<String>,
     pub activated: bool,
     pub targets: Vec<Target>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<Box<Observation>>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1931,6 +1985,9 @@ impl OpenRequest {
                 "newInstance requires bundleId or appName",
             )?;
         }
+        if let Some(observe) = &self.observe {
+            observe.validate()?;
+        }
         Ok(())
     }
 }
@@ -2126,6 +2183,9 @@ impl ActRequest {
             )?;
             unique(feedback.element_refs.iter().map(String::as_str))?;
         }
+        if let Some(after) = &self.observe_after {
+            after.validate()?;
+        }
         Ok(())
     }
 }
@@ -2233,6 +2293,9 @@ impl ActResult {
         if let Some(feedback) = &self.feedback {
             feedback.validate()?;
         }
+        if let Some(observation) = &self.observation {
+            observation.validate()?;
+        }
         Ok(())
     }
 }
@@ -2246,6 +2309,7 @@ impl Frame {
                 ActResult {
                     feedback: None,
                     foreground: None,
+                    observation: None,
                     observation_id: progress.observation_id.clone(),
                     steps: progress.steps.clone(),
                     remaining_steps: 0,
@@ -2410,6 +2474,9 @@ impl Frame {
                                 )?;
                             }
                             rect(&t.bounds)?;
+                        }
+                        if let Some(observation) = &v.observation {
+                            observation.validate()?;
                         }
                     }
                     ResponseBody::Clipboard(v) => {
@@ -2676,7 +2743,17 @@ impl Response {
                     request.foreground || result.foreground.is_none(),
                     "unrequested foreground evidence",
                 )?;
-                correlate_feedback(request, result)
+                correlate_feedback(request, result)?;
+                require(
+                    request.observe_after.is_some() || result.observation.is_none(),
+                    "act includes unrequested post-action observation",
+                )?;
+                if let (Some(after), Some(observation)) =
+                    (&request.observe_after, &result.observation)
+                {
+                    validate_observe_after(after, &request.target, observation)?;
+                }
+                Ok(())
             }
             (RequestBody::WaitFor(request), ResponseBody::WaitFor(result)) => {
                 if let Some(evidence) = &result.evidence {
@@ -2724,10 +2801,24 @@ impl Response {
                 }
                 Ok(())
             }
-            (RequestBody::Open(request), ResponseBody::Open(result)) => require(
-                request.activate || !result.activated,
-                "unrequested foreground activation",
-            ),
+            (RequestBody::Open(request), ResponseBody::Open(result)) => {
+                require(
+                    request.activate || !result.activated,
+                    "unrequested foreground activation",
+                )?;
+                require(
+                    request.observe.is_some() || result.observation.is_none(),
+                    "open includes unrequested observation",
+                )?;
+                if let (Some(after), Some(observation)) = (&request.observe, &result.observation) {
+                    require(
+                        result.targets.iter().any(|t| t.key == observation.target),
+                        "open observation target is not among opened targets",
+                    )?;
+                    validate_observe_after(after, &observation.target, observation)?;
+                }
+                Ok(())
+            }
             (RequestBody::Clipboard(request), ResponseBody::Clipboard(result)) => require(
                 (request.action == ClipboardAction::Read && request.include_text)
                     || result.text.is_none(),
@@ -2740,6 +2831,53 @@ impl Response {
             _ => Err("response method mismatch".into()),
         }
     }
+}
+
+fn validate_observe_after(
+    after: &ObserveAfter,
+    expected_target: &TargetKey,
+    observation: &Observation,
+) -> Result<(), String> {
+    require(
+        observation.target == *expected_target,
+        "post-action observation target mismatch",
+    )?;
+    let scoped = matches!(
+        after.scope,
+        Some(ObserveScope::WebArea | ObserveScope::MenuBar)
+    ) || after.interactive_only
+        || after.query.is_some();
+    require(
+        !scoped || observation.accessibility != Coverage::Complete,
+        "scoped observation cannot imply a complete window",
+    )?;
+    require(
+        after.include_values || observation.elements.iter().all(|e| e.value.is_none()),
+        "observation includes unrequested values",
+    )?;
+    require(
+        after.ax_selectors.as_ref() == observation.ax_selection.as_ref().map(|s| &s.selectors),
+        "AX selection does not match request",
+    )?;
+    require(
+        after.include_screenshot || observation.screenshot.is_none(),
+        "observation includes unrequested image",
+    )?;
+    require(
+        after.include_screenshot || after.include_ocr || observation.visual.is_none(),
+        "observation includes unrequested visual evidence",
+    )?;
+    require(
+        !after.include_ocr || observation.visual.is_some(),
+        "requested visual evidence is missing",
+    )?;
+    if let Some(visual) = &observation.visual {
+        require(
+            after.include_ocr == visual.ocr.is_some(),
+            "OCR inclusion does not match request",
+        )?;
+    }
+    Ok(())
 }
 
 /// Decode exactly one JSONL frame, excluding the optional final LF. Embedded newlines are rejected.
