@@ -46,6 +46,16 @@ final class RuntimeLivePreview {
         }
     }
 
+    nonisolated func toggle() {
+        DispatchQueue.main.async {
+            if self.panel.isVisible {
+                self.panel.dismiss()
+            } else {
+                self.panel.showIfPossible()
+            }
+        }
+    }
+
     nonisolated func dismiss() {
         DispatchQueue.main.async {
             self.anchor = nil

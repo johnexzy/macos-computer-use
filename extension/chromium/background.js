@@ -1,6 +1,17 @@
 const NATIVE_HOST_NAME = "com.johnoba.useui.browser";
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 const KEEPALIVE_ALARM = "useui_bridge_keepalive";
+const VALID_GROUP_COLORS = new Set([
+  "grey",
+  "blue",
+  "red",
+  "yellow",
+  "green",
+  "pink",
+  "purple",
+  "cyan",
+  "orange",
+]);
 
 let port = null;
 let connected = false;
@@ -8,15 +19,118 @@ let lastError = null;
 let reconnectTimer = null;
 let reconnectDelayMs = 1000;
 
-function updateBadge(isConnected) {
-  connected = isConnected;
+// Visual UX, respectful Tab Group tracking, and graceful Pause Gate state.
+let visualEnabled = true;
+let paused = false;
+let inFlightCount = 0;
+const pauseWaiters = [];
+const agentTabIds = new Set();
+const recentActivity = []; // newest first, max 16
+
+function recordActivity(label, opts = {}) {
+  const entry = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    ts: Date.now(),
+    label: String(label || "Working…").slice(0, 96),
+    inFlight: Boolean(opts.inFlight),
+    ok: opts.ok ?? null,
+    tabId: opts.tabId ?? null,
+  };
+  recentActivity.unshift(entry);
+  if (recentActivity.length > 16) recentActivity.length = 16;
+  return entry;
+}
+
+function finishActivity(entry, ok, finalLabel) {
+  if (!entry) return;
+  entry.inFlight = false;
+  entry.ok = ok;
+  if (finalLabel) entry.label = String(finalLabel).slice(0, 96);
+}
+
+function updateBadge() {
   try {
-    chrome.action.setBadgeText({ text: isConnected ? "ON" : "OFF" });
-    chrome.action.setBadgeBackgroundColor({
-      color: isConnected ? "#1f883d" : "#6e7781",
-    });
+    if (!connected) {
+      chrome.action.setBadgeText({ text: "OFF" });
+      chrome.action.setBadgeBackgroundColor({ color: "#506173" });
+      return;
+    }
+    if (paused) {
+      chrome.action.setBadgeText({ text: "II" });
+      chrome.action.setBadgeBackgroundColor({ color: "#D97706" });
+      return;
+    }
+    if (inFlightCount > 0) {
+      chrome.action.setBadgeText({ text: inFlightCount > 9 ? "9+" : String(inFlightCount) });
+      chrome.action.setBadgeBackgroundColor({ color: "#059669" });
+      return;
+    }
+    chrome.action.setBadgeText({ text: "ON" });
+    chrome.action.setBadgeBackgroundColor({ color: "#10B981" });
   } catch {
     // Ignore badge errors in headless/unfocused environments.
+  }
+}
+
+async function broadcastPauseStateToActiveTabs() {
+  try {
+    const activeTabs = await chrome.tabs.query({ active: true });
+    await Promise.allSettled(
+      activeTabs
+        .filter((t) => t.id && isScriptableUrl(t.url))
+        .map(async (t) => {
+          await ensureStageInjected(t.id);
+          await chrome.scripting.executeScript({
+            target: { tabId: t.id },
+            func: (p) => {
+              if (window.__useuiStage) window.__useuiStage.setPaused(p);
+            },
+            args: [paused],
+          });
+        })
+    );
+  } catch {
+    // Best effort only.
+  }
+}
+
+function setPaused(nextPaused) {
+  const normalized = Boolean(nextPaused);
+  if (paused === normalized) return paused;
+  paused = normalized;
+  updateBadge();
+  if (!paused) {
+    while (pauseWaiters.length > 0) {
+      const wake = pauseWaiters.shift();
+      try {
+        wake();
+      } catch {
+        // Ignore waiter errors.
+      }
+    }
+  }
+  broadcastPauseStateToActiveTabs();
+  return paused;
+}
+
+async function waitIfPaused(deadlineMs) {
+  while (paused) {
+    const remaining = deadlineMs ? deadlineMs - Date.now() : 30000;
+    if (remaining <= 0) {
+      throw bridgeError("paused_timeout", "Paused by user until request budget expired");
+    }
+    await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        const idx = pauseWaiters.indexOf(onResume);
+        if (idx >= 0) pauseWaiters.splice(idx, 1);
+        resolve();
+      }, Math.min(remaining, 1000));
+      const onResume = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      pauseWaiters.push(onResume);
+    });
   }
 }
 
@@ -36,7 +150,8 @@ function connectNative() {
     const nextPort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
     port = nextPort;
     lastError = null;
-    updateBadge(true);
+    connected = true;
+    updateBadge();
     reconnectDelayMs = 1000;
 
     nextPort.onMessage.addListener((message) => {
@@ -48,14 +163,16 @@ function connectNative() {
       lastError = err;
       if (port === nextPort) {
         port = null;
-        updateBadge(false);
+        connected = false;
+        updateBadge();
         scheduleReconnect();
       }
     });
   } catch (err) {
     lastError = String(err);
     port = null;
-    updateBadge(false);
+    connected = false;
+    updateBadge();
     scheduleReconnect();
   }
 }
@@ -73,6 +190,11 @@ async function handleNativeRequest(targetPort, msg) {
   const action = msg?.action;
   const params = msg?.params ?? {};
   const t0 = Date.now();
+  const isTracked = action && action !== "ping" && action !== "listTabs";
+  if (isTracked) {
+    inFlightCount += 1;
+    updateBadge();
+  }
   try {
     const data = await dispatchAction(action, params);
     safePost(targetPort, {
@@ -88,6 +210,11 @@ async function handleNativeRequest(targetPort, msg) {
       ok: false,
       error: { code, message },
     });
+  } finally {
+    if (isTracked) {
+      inFlightCount = Math.max(0, inFlightCount - 1);
+      updateBadge();
+    }
   }
 }
 
@@ -103,6 +230,122 @@ function isScriptableUrl(url) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function hostFromUrl(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function normalizeGroupColor(color) {
+  if (typeof color === "string" && VALID_GROUP_COLORS.has(color.toLowerCase())) {
+    return color.toLowerCase();
+  }
+  return "cyan";
+}
+
+function formatGroupTitle(label) {
+  const clean = typeof label === "string" ? label.trim().slice(0, 28) : "";
+  return clean ? `UseUI · ${clean}` : "UseUI";
+}
+
+// Respectful Chrome Tab Grouping: discovers authoritative Chrome group state via
+// chrome.tabGroups.query (resilient across MV3 service-worker restarts) and only
+// groups UseUI-owned tabs — never hijacking the user's personal tabs.
+async function addTabToSessionGroup(tab, opts = {}) {
+  if (!chrome.tabGroups || !tab || typeof tab.id !== "number") return null;
+  const title = formatGroupTitle(opts.groupLabel);
+  const color = normalizeGroupColor(opts.groupColor);
+  const collapsed = Boolean(opts.collapsed);
+  const windowId = tab.windowId;
+  try {
+    const groups = await chrome.tabGroups.query({ windowId });
+    // Reuse an existing exact-title group, or any non-reading "UseUI" session group in this window.
+    const existing =
+      groups.find((g) => g.title === title) ||
+      (!opts.groupLabel
+        ? groups.find((g) => g.title === "UseUI" || (g.title?.startsWith("UseUI · ") && !g.title.startsWith("UseUI · Reading")))
+        : null);
+
+    let groupId;
+    if (existing) {
+      groupId = await chrome.tabs.group({ groupId: existing.id, tabIds: [tab.id] });
+      if (opts.groupLabel || opts.groupColor) {
+        await chrome.tabGroups.update(groupId, { title, color });
+      }
+      return { groupId, title: opts.groupLabel ? title : existing.title || title, color: opts.groupColor ? color : existing.color || color };
+    }
+
+    groupId = await chrome.tabs.group({ createProperties: { windowId }, tabIds: [tab.id] });
+    await chrome.tabGroups.update(groupId, { title, color, collapsed });
+    return { groupId, title, color };
+  } catch {
+    return null;
+  }
+}
+
+// Collapsed "Quiet Worker" group for parallel batchRead tabs in one explicit window
+// so the user's tab strip never thrashes.
+async function groupBatchTabs(windowId, tabIds, title, color = "cyan", collapsed = true) {
+  if (!chrome.tabGroups || !Array.isArray(tabIds) || tabIds.length === 0) return null;
+  try {
+    const groupId = await chrome.tabs.group({
+      createProperties: typeof windowId === "number" ? { windowId } : undefined,
+      tabIds,
+    });
+    await chrome.tabGroups.update(groupId, { title, color: normalizeGroupColor(color), collapsed });
+    return groupId;
+  } catch {
+    return null;
+  }
+}
+
+async function updateBatchGroupTitle(groupId, title) {
+  if (!chrome.tabGroups || typeof groupId !== "number") return;
+  try {
+    await chrome.tabGroups.update(groupId, { title });
+  } catch {
+    // Group already auto-dissolved when its last tab closed.
+  }
+}
+
+// Inject the closed Shadow DOM stage lazily into visible tabs only.
+async function ensureStageInjected(tabId) {
+  try {
+    const check = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => Boolean(window.__useuiStage && window.__useuiStage.version === "1.1.0"),
+    });
+    if (check?.[0]?.result === true) return true;
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["stage.js"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function showTabStageStatus(tab, labelText, state = "active", opts = {}) {
+  if (!visualEnabled || opts.visual === false) return;
+  if (!tab || !tab.active || !isScriptableUrl(tab.url)) return;
+  const injected = await ensureStageInjected(tab.id);
+  if (!injected) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (lbl, st, options) => {
+        if (window.__useuiStage) window.__useuiStage.setStatus(lbl, st, options);
+      },
+      args: [labelText, state, { tag: opts.tag || "UseUI", idleMs: opts.idleMs ?? 2600 }],
+    });
+  } catch {
+    // Non-fatal visual error.
+  }
 }
 
 async function resolveTab(tabId) {
@@ -157,6 +400,7 @@ async function waitForTabComplete(tabId, timeoutMs = 15000, settleMs = 300) {
 }
 
 // Self-contained DOM snapshot & clean text extraction function injected into target tabs.
+// Explicitly skips UseUI's own closed Shadow DOM stage host (`#__useui_stage_host`).
 function collectSnapshotInPage(opts) {
   const interactiveOnly = opts.interactiveOnly !== false;
   const includeText = Boolean(opts.includeText);
@@ -199,6 +443,7 @@ function collectSnapshotInPage(opts) {
 
   function isVisible(el) {
     if (!(el instanceof Element)) return false;
+    if (el.id === "__useui_stage_host" || el.hasAttribute("data-useui-ignore")) return false;
     if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return false;
     const style = window.getComputedStyle(el);
     if (!style || style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
@@ -265,6 +510,10 @@ function collectSnapshotInPage(opts) {
     let node = walker.currentNode;
     while (node) {
       if (node instanceof Element) {
+        if (node.id === "__useui_stage_host" || node.hasAttribute("data-useui-ignore")) {
+          node = walker.nextSibling() || walker.nextNode();
+          continue;
+        }
         totalVisited += 1;
         const tag = node.tagName;
         const roleAttr = (node.getAttribute("role") || "").trim().toLowerCase();
@@ -385,9 +634,32 @@ function collectSnapshotInPage(opts) {
   };
 }
 
-// Execute a single DOM action step inside the page.
-function executeDomStepInPage(step, snapshotId) {
+// Execute a single DOM action step inside the page, driving UseUI's Shadow DOM stage
+// smoothly when the tab is visibly watched, and running with 0ms overhead when hidden.
+async function executeDomStepInPage(step, snapshotId, visualOpts) {
   const kind = step.kind;
+  const showVisual = Boolean(visualOpts?.enabled) && document.visibilityState === "visible" && Boolean(window.__useuiStage);
+  const stepSuffix = visualOpts?.totalSteps > 1 ? ` · ${visualOpts.stepIndex + 1}/${visualOpts.totalSteps}` : "";
+  const reducedMotion = Boolean(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+  function shortLabel(el, fallback = "") {
+    if (!el) return fallback;
+    const raw =
+      el.getAttribute?.("aria-label") ||
+      el.getAttribute?.("placeholder") ||
+      el.innerText ||
+      el.textContent ||
+      el.getAttribute?.("title") ||
+      el.getAttribute?.("name") ||
+      fallback;
+    const clean = String(raw || "").replace(/\s+/g, " ").trim();
+    return clean.length > 34 ? clean.slice(0, 33) + "…" : clean;
+  }
+
+  function plainRect(el) {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  }
 
   function findByRef(ref) {
     const store = window.__cuaBridge;
@@ -408,6 +680,7 @@ function executeDomStepInPage(step, snapshotId) {
 
   function isVisible(el) {
     if (!(el instanceof Element)) return false;
+    if (el.id === "__useui_stage_host" || el.hasAttribute("data-useui-ignore")) return false;
     if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return false;
     const style = window.getComputedStyle(el);
     if (!style || style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
@@ -477,17 +750,39 @@ function executeDomStepInPage(step, snapshotId) {
     return { el: null };
   }
 
+  async function scrollControlIntoView(el) {
+    const r = el.getBoundingClientRect();
+    const inView = r.top >= 16 && r.bottom <= window.innerHeight - 16 && r.left >= 0 && r.right <= window.innerWidth;
+    if (inView) return;
+    if (showVisual && !reducedMotion) {
+      el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+      await new Promise((res) => setTimeout(res, 170));
+    } else {
+      el.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
+    }
+  }
+
   if (kind === "scroll") {
+    const scrollBehavior = showVisual && !reducedMotion ? "smooth" : "instant";
     if (step.ref || step.text || step.selector) {
       const { el, error } = resolveTarget();
       if (error) return { ok: false, error };
-      el.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
-      return { ok: true, scrollY: Math.round(window.scrollY || 0) };
+      if (showVisual) {
+        const lbl = shortLabel(el);
+        await window.__useuiStage.animateScroll("down", lbl ? `Scrolling to "${lbl}"${stepSuffix}` : `Scrolling${stepSuffix}`);
+      }
+      el.scrollIntoView({ behavior: scrollBehavior, block: "center", inline: "nearest" });
+      if (scrollBehavior === "smooth") await new Promise((res) => setTimeout(res, 170));
+      return { ok: true, scrollY: Math.round(window.scrollY || 0), narration: "Scrolled to target" };
+    }
+    const dir = step.direction || (typeof step.deltaY === "number" && step.deltaY < 0 ? "up" : "down");
+    if (showVisual) {
+      await window.__useuiStage.animateScroll(dir, `Scrolling ${dir}${stepSuffix}`);
     }
     if (step.direction === "top") {
-      window.scrollTo({ top: 0, behavior: "instant" });
+      window.scrollTo({ top: 0, behavior: scrollBehavior });
     } else if (step.direction === "bottom") {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: scrollBehavior });
     } else {
       const dy =
         typeof step.deltaY === "number"
@@ -495,17 +790,25 @@ function executeDomStepInPage(step, snapshotId) {
           : step.direction === "up"
             ? -Math.round(window.innerHeight * 0.75)
             : Math.round(window.innerHeight * 0.75);
-      window.scrollBy({ top: dy, behavior: "instant" });
+      window.scrollBy({ top: dy, behavior: scrollBehavior });
     }
-    return { ok: true, scrollY: Math.round(window.scrollY || 0) };
+    if (scrollBehavior === "smooth") await new Promise((res) => setTimeout(res, 170));
+    return { ok: true, scrollY: Math.round(window.scrollY || 0), narration: `Scrolled ${dir}` };
   }
 
   if (kind === "click") {
     const { el, error } = resolveTarget();
     if (error) return { ok: false, error };
     if (!el) return { ok: false, error: { code: "invalid_request", message: "click requires ref, text, or selector" } };
-    el.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
-    const rect = el.getBoundingClientRect();
+    await scrollControlIntoView(el);
+    const rect = plainRect(el);
+    const lbl = shortLabel(el, step.text || "");
+    const narration = lbl ? `Clicking "${lbl}"` : "Clicking element";
+    if (showVisual) {
+      await window.__useuiStage.animateClick(rect, `${narration}${stepSuffix}`, {
+        tag: visualOpts?.tag || "UseUI",
+      });
+    }
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
     const init = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 };
@@ -517,16 +820,26 @@ function executeDomStepInPage(step, snapshotId) {
       el.dispatchEvent(new MouseEvent("mouseup", init));
       el.click();
     } catch (e) {
+      if (showVisual) window.__useuiStage.setStatus("Click failed", "error");
       return { ok: false, error: { code: "click_failed", message: String(e) } };
     }
-    return { ok: true, tag: el.tagName, href: el.href || undefined };
+    return { ok: true, tag: el.tagName, href: el.href || undefined, narration };
   }
 
   if (kind === "type") {
     const { el, error } = resolveTarget();
     if (error) return { ok: false, error };
     if (!el) return { ok: false, error: { code: "invalid_request", message: "type requires ref, text target, or selector" } };
-    el.scrollIntoView({ behavior: "instant", block: "center", inline: "nearest" });
+    await scrollControlIntoView(el);
+    const rect = plainRect(el);
+    const isPassword = el.tagName === "INPUT" && (el.getAttribute("type") || "").toLowerCase() === "password";
+    const lbl = isPassword ? "password field" : shortLabel(el);
+    const narration = lbl ? `Typing in "${lbl}"` : "Typing text";
+    if (showVisual) {
+      await window.__useuiStage.animateType(rect, `${narration}${stepSuffix}`, {
+        tag: visualOpts?.tag || "UseUI",
+      });
+    }
     if (typeof el.focus === "function") el.focus({ preventScroll: true });
     const valueText = String(step.value ?? step.input ?? "");
     const shouldClear = step.clear !== false;
@@ -549,7 +862,7 @@ function executeDomStepInPage(step, snapshotId) {
         try { el.form.requestSubmit(); } catch { /* ignore */ }
       }
     }
-    return { ok: true };
+    return { ok: true, narration };
   }
 
   if (kind === "select") {
@@ -557,6 +870,14 @@ function executeDomStepInPage(step, snapshotId) {
     if (error) return { ok: false, error };
     if (!el || el.tagName !== "SELECT") {
       return { ok: false, error: { code: "invalid_request", message: "select requires a <select> element" } };
+    }
+    await scrollControlIntoView(el);
+    const lbl = shortLabel(el);
+    const narration = lbl ? `Selecting in "${lbl}"` : "Selecting option";
+    if (showVisual) {
+      await window.__useuiStage.animateClick(plainRect(el), `${narration}${stepSuffix}`, {
+        tag: visualOpts?.tag || "UseUI",
+      });
     }
     const wantVal = step.value !== undefined ? String(step.value) : null;
     const wantLabel = step.label !== undefined ? String(step.label).trim().toLowerCase() : null;
@@ -569,22 +890,27 @@ function executeDomStepInPage(step, snapshotId) {
       }
     }
     if (!matched) {
+      if (showVisual) window.__useuiStage.setStatus("Option not found", "error");
       return { ok: false, error: { code: "option_not_found", message: "No matching <option> found" } };
     }
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
-    return { ok: true, value: el.value };
+    return { ok: true, value: el.value, narration };
   }
 
   if (kind === "pressKey") {
     const target = step.ref || step.selector ? resolveTarget().el : (document.activeElement || document.body);
     if (!target) return { ok: false, error: { code: "stale_ref", message: "Target element unavailable" } };
     const key = String(step.key || "Enter");
+    const narration = `Pressing ${key}`;
+    if (showVisual) {
+      window.__useuiStage.setStatus(`${narration}${stepSuffix}`, "active", { tag: visualOpts?.tag || "UseUI" });
+    }
     const init = { key, bubbles: true, cancelable: true };
     target.dispatchEvent(new KeyboardEvent("keydown", init));
     target.dispatchEvent(new KeyboardEvent("keypress", init));
     target.dispatchEvent(new KeyboardEvent("keyup", init));
-    return { ok: true };
+    return { ok: true, narration };
   }
 
   return { ok: false, error: { code: "invalid_request", message: `Unsupported step kind: ${kind}` } };
@@ -648,6 +974,7 @@ async function runWaitStep(tabId, step, defaultTimeoutMs = 10000) {
   }
   const deadline = Date.now() + timeoutMs;
   while (Date.now() <= deadline) {
+    await waitIfPaused(deadline);
     const tab = await chrome.tabs.get(tabId);
     let urlOk = true;
     if (step.urlContains) {
@@ -679,6 +1006,9 @@ async function runWaitStep(tabId, step, defaultTimeoutMs = 10000) {
 }
 
 async function dispatchAction(action, params) {
+  const allowVisual = params.visual !== false && visualEnabled;
+  const tag = params.groupLabel ? `UseUI · ${String(params.groupLabel).trim().slice(0, 18)}` : "UseUI";
+
   switch (action) {
     case "ping": {
       const tabs = await chrome.tabs.query({});
@@ -688,6 +1018,9 @@ async function dispatchAction(action, params) {
         browser,
         extensionVersion: EXTENSION_VERSION,
         tabCount: tabs.length,
+        agentTabCount: agentTabIds.size,
+        paused,
+        visualEnabled,
       };
     }
 
@@ -698,6 +1031,8 @@ async function dispatchAction(action, params) {
           tabId: t.id,
           windowId: t.windowId,
           active: Boolean(t.active),
+          groupId: typeof t.groupId === "number" && t.groupId >= 0 ? t.groupId : null,
+          managedByUseUI: agentTabIds.has(t.id),
           title: t.title || "",
           url: t.url || "",
           status: t.status || "complete",
@@ -711,10 +1046,22 @@ async function dispatchAction(action, params) {
       if (!isScriptableUrl(url)) {
         throw bridgeError("invalid_request", "openTab requires an http:// or https:// url");
       }
+      await waitIfPaused(Date.now() + (params.timeoutMs ?? 15000));
+      const actEntry = recordActivity(`Opening ${hostFromUrl(url) || url}`, { inFlight: true });
       const active = Boolean(params.active);
       const tab = await chrome.tabs.create({ url, active });
+      agentTabIds.add(tab.id);
+      const group = await addTabToSessionGroup(tab, {
+        groupLabel: params.groupLabel,
+        groupColor: params.groupColor,
+        collapsed: false,
+      });
       const settleMs = params.settleMs ?? 350;
       const loaded = await waitForTabComplete(tab.id, params.timeoutMs ?? 15000, settleMs);
+      if (allowVisual && loaded.active) {
+        await showTabStageStatus(loaded, `Opened ${hostFromUrl(loaded.url || url) || "page"}`, "active", { tag });
+      }
+      finishActivity(actEntry, true, `Opened ${loaded.title || hostFromUrl(url) || "tab"}`);
       if (params.returnSnapshot || params.includeText) {
         await waitForPageHydration(tab.id, 2000);
         const snap = await runSnapshot(tab.id, {
@@ -725,20 +1072,35 @@ async function dispatchAction(action, params) {
           maxChars: params.maxChars,
           maxElements: params.maxElements,
         });
-        return { tabId: tab.id, windowId: loaded.windowId, active: Boolean(loaded.active), snapshot: snap };
+        return {
+          tabId: tab.id,
+          windowId: loaded.windowId,
+          active: Boolean(loaded.active),
+          ...(group ? { groupId: group.groupId, groupTitle: group.title } : {}),
+          snapshot: snap,
+        };
       }
       return {
         tabId: tab.id,
         windowId: loaded.windowId,
         active: Boolean(loaded.active),
+        ...(group ? { groupId: group.groupId, groupTitle: group.title } : {}),
         url: loaded.url || url,
         title: loaded.title || "",
       };
     }
 
     case "navigate": {
+      await waitIfPaused(Date.now() + (params.timeoutMs ?? 15000));
       const tab = await resolveTab(params.tabId);
       const history = params.history;
+      const navLabel = history
+        ? `Navigating ${history}`
+        : `Navigating to ${hostFromUrl(params.url) || params.url}`;
+      const actEntry = recordActivity(navLabel, { inFlight: true, tabId: tab.id });
+      if (allowVisual) {
+        await showTabStageStatus(tab, navLabel, "active", { tag });
+      }
       if (history === "back") {
         try {
           await chrome.tabs.goBack(tab.id);
@@ -749,6 +1111,7 @@ async function dispatchAction(action, params) {
               func: () => window.history.back(),
             });
           } else {
+            finishActivity(actEntry, false);
             throw err;
           }
         }
@@ -762,6 +1125,7 @@ async function dispatchAction(action, params) {
               func: () => window.history.forward(),
             });
           } else {
+            finishActivity(actEntry, false);
             throw err;
           }
         }
@@ -769,14 +1133,20 @@ async function dispatchAction(action, params) {
         await chrome.tabs.reload(tab.id);
       } else if (params.url) {
         if (!isScriptableUrl(params.url)) {
+          finishActivity(actEntry, false);
           throw bridgeError("invalid_request", "navigate url must be http:// or https://");
         }
         await chrome.tabs.update(tab.id, { url: params.url });
       } else {
+        finishActivity(actEntry, false);
         throw bridgeError("invalid_request", "navigate requires url or history ('back'|'forward'|'reload')");
       }
       await sleep(150);
       const loaded = await waitForTabComplete(tab.id, params.timeoutMs ?? 15000, params.settleMs ?? 350);
+      if (allowVisual && loaded.active) {
+        await showTabStageStatus(loaded, `Loaded ${loaded.title || hostFromUrl(loaded.url) || "page"}`, "active", { tag });
+      }
+      finishActivity(actEntry, true, `Loaded ${loaded.title || hostFromUrl(loaded.url) || "page"}`);
       if (params.returnSnapshot !== false || params.includeText) {
         await waitForPageHydration(tab.id, 1800);
         const snap = await runSnapshot(tab.id, {
@@ -794,6 +1164,13 @@ async function dispatchAction(action, params) {
 
     case "snapshot": {
       const tab = await resolveTab(params.tabId);
+      const actEntry = recordActivity(`Inspecting ${tab.title || hostFromUrl(tab.url) || "tab"}`, {
+        inFlight: true,
+        tabId: tab.id,
+      });
+      if (allowVisual && tab.active) {
+        await showTabStageStatus(tab, "Inspecting page…", "active", { tag, idleMs: 1800 });
+      }
       const snap = await runSnapshot(tab.id, {
         interactiveOnly: params.interactiveOnly !== false,
         includeText: Boolean(params.includeText),
@@ -802,6 +1179,7 @@ async function dispatchAction(action, params) {
         maxChars: params.maxChars,
         maxElements: params.maxElements,
       });
+      finishActivity(actEntry, true, `Inspected ${snap.title || hostFromUrl(snap.url) || "page"}`);
       return { snapshot: snap };
     }
 
@@ -814,25 +1192,61 @@ async function dispatchAction(action, params) {
       if (steps.length === 0 || steps.length > 16) {
         throw bridgeError("invalid_request", "act requires 1 to 16 steps");
       }
+      const deadline = Date.now() + (params.timeoutMs ?? 20000);
+      const actEntry = recordActivity(`Running ${steps.length} step${steps.length > 1 ? "s" : ""}…`, {
+        inFlight: true,
+        tabId: tab.id,
+      });
+
+      // Lazily inject Shadow DOM stage if tab is currently active and visual feedback is enabled.
+      const stageReady = allowVisual && tab.active ? await ensureStageInjected(tab.id) : false;
+
       const receipts = [];
+      let lastNarration = null;
       for (let i = 0; i < steps.length; i++) {
+        await waitIfPaused(deadline);
         const step = steps[i];
         const stepId = step.id || `step-${i + 1}`;
         if (step.kind === "waitFor") {
+          if (stageReady) {
+            const waitDesc = step.urlContains
+              ? `Waiting for ${step.urlContains}…`
+              : step.textContains
+                ? `Waiting for "${step.textContains.slice(0, 24)}"…`
+                : "Waiting…";
+            await showTabStageStatus(tab, waitDesc, "active", { tag });
+          }
           const waitRes = await runWaitStep(tab.id, step);
           receipts.push({ id: stepId, kind: "waitFor", ok: true, ...(waitRes.url ? { url: waitRes.url } : {}) });
           continue;
         }
+        // Re-ensure stage if a prior step navigated the page while active.
+        let useStage = stageReady;
+        if (allowVisual && i > 0) {
+          const liveTab = await chrome.tabs.get(tab.id).catch(() => tab);
+          useStage = Boolean(liveTab.active) && (await ensureStageInjected(tab.id));
+        }
         const exec = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: executeDomStepInPage,
-          args: [step, params.snapshotId || null],
+          args: [
+            step,
+            params.snapshotId || null,
+            {
+              enabled: useStage,
+              stepIndex: i,
+              totalSteps: steps.length,
+              tag,
+            },
+          ],
         });
         const outcome = exec?.[0]?.result;
         if (!outcome || !outcome.ok) {
           const err = outcome?.error || { code: "step_failed", message: "DOM step failed" };
+          finishActivity(actEntry, false, `Failed: ${err.message}`);
           throw bridgeError(err.code, `Step ${stepId} (${step.kind}) failed: ${err.message}`);
         }
+        if (outcome.narration) lastNarration = outcome.narration;
         receipts.push({ id: stepId, kind: step.kind, ok: true });
         if (step.kind === "click" && i + 1 < steps.length && steps[i + 1].kind !== "waitFor") {
           await sleep(120);
@@ -841,6 +1255,7 @@ async function dispatchAction(action, params) {
       const settleMs = params.settleMs ?? 250;
       await sleep(100);
       const loaded = await waitForTabComplete(tab.id, 10000, settleMs);
+      finishActivity(actEntry, true, lastNarration || `Completed ${steps.length} step${steps.length > 1 ? "s" : ""}`);
       let snapshot;
       if (params.returnSnapshot !== false || params.includeText) {
         await waitForPageHydration(tab.id, 1500);
@@ -878,18 +1293,63 @@ async function dispatchAction(action, params) {
       const includeLinks = Boolean(params.includeLinks);
       const settleMs = params.settleMs ?? 400;
       const concurrency = Math.min(Math.max(Number(params.concurrency) || 3, 1), 6);
+      const batchColor = normalizeGroupColor(params.groupColor);
+      const baseTitle = params.groupLabel ? `UseUI · ${String(params.groupLabel).trim().slice(0, 16)}` : "UseUI · Reading";
 
+      // Pin all worker tabs for this batch into one target window so chrome.tabs.group
+      // always groups them into a single collapsed chip cleanly.
+      let targetWindowId;
+      try {
+        const win = await chrome.windows.getLastFocused({ windowTypes: ["normal"] });
+        targetWindowId = win?.id;
+      } catch {
+        targetWindowId = undefined;
+      }
+
+      const actEntry = recordActivity(`Reading ${urls.length} page${urls.length > 1 ? "s" : ""}…`, { inFlight: true });
       const results = new Array(urls.length);
       let cursor = 0;
+      let remaining = urls.length;
+      let batchGroupId = null;
+      let groupInitPromise = null;
+
+      async function attachToCollapsedBatchGroup(tabId, winId) {
+        if (!chrome.tabGroups) return;
+        try {
+          if (batchGroupId !== null) {
+            await chrome.tabs.group({ groupId: batchGroupId, tabIds: [tabId] });
+            return;
+          }
+          if (!groupInitPromise) {
+            groupInitPromise = groupBatchTabs(winId, [tabId], `${baseTitle} (${remaining})`, batchColor, true).then((gid) => {
+              batchGroupId = gid;
+              return gid;
+            });
+            await groupInitPromise;
+          } else {
+            const gid = await groupInitPromise;
+            if (typeof gid === "number") {
+              await chrome.tabs.group({ groupId: gid, tabIds: [tabId] });
+            }
+          }
+        } catch {
+          // Best-effort grouping; never blocks batchRead.
+        }
+      }
 
       async function worker() {
         while (cursor < urls.length) {
+          await waitIfPaused(Date.now() + (params.timeoutMs ?? 25000));
           const idx = cursor++;
           const targetUrl = urls[idx];
           const started = Date.now();
           let createdTab = null;
           try {
-            createdTab = await chrome.tabs.create({ url: targetUrl, active: false });
+            const createOpts = { url: targetUrl, active: false };
+            if (typeof targetWindowId === "number") createOpts.windowId = targetWindowId;
+            createdTab = await chrome.tabs.create(createOpts);
+            agentTabIds.add(createdTab.id);
+            await attachToCollapsedBatchGroup(createdTab.id, createdTab.windowId);
             await waitForTabComplete(createdTab.id, params.timeoutMs ?? 15000, settleMs);
             await waitForPageHydration(createdTab.id, 2500);
             const snap = await runSnapshot(createdTab.id, {
@@ -917,26 +1377,38 @@ async function dispatchAction(action, params) {
               elapsedMs: Date.now() - started,
             };
           } finally {
+            remaining = Math.max(0, remaining - 1);
             if (closeAfter && createdTab?.id !== undefined) {
+              agentTabIds.delete(createdTab.id);
               try {
                 await chrome.tabs.remove(createdTab.id);
               } catch {
                 // Ignore if already closed.
               }
             }
+            if (batchGroupId !== null && remaining > 0) {
+              updateBatchGroupTitle(batchGroupId, `${baseTitle} (${remaining})`);
+            }
           }
         }
       }
 
       await Promise.all(Array.from({ length: Math.min(concurrency, urls.length) }, () => worker()));
-      return { pages: results };
+      const okCount = results.filter((r) => r?.ok).length;
+      finishActivity(actEntry, okCount > 0, `Read ${okCount}/${urls.length} pages`);
+      return {
+        pages: results,
+        ...(batchGroupId !== null && !closeAfter ? { groupId: batchGroupId } : {}),
+      };
     }
 
     case "closeTab": {
       if (typeof params.tabId !== "number") {
         throw bridgeError("invalid_request", "closeTab requires numeric tabId");
       }
+      agentTabIds.delete(params.tabId);
       await chrome.tabs.remove(params.tabId);
+      recordActivity(`Closed tab ${params.tabId}`, { ok: true });
       return { closed: true, tabId: params.tabId };
     }
 
@@ -945,14 +1417,97 @@ async function dispatchAction(action, params) {
   }
 }
 
+chrome.tabs.onRemoved.addListener((tabId) => {
+  agentTabIds.delete(tabId);
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "cua_bridge_status") {
-    sendResponse({ connected, lastError, extensionId: chrome.runtime.id });
+    (async () => {
+      const liveTabs = [];
+      for (const tid of Array.from(agentTabIds)) {
+        try {
+          const t = await chrome.tabs.get(tid);
+          liveTabs.push({
+            tabId: t.id,
+            title: t.title || "",
+            url: t.url || "",
+            active: Boolean(t.active),
+          });
+        } catch {
+          agentTabIds.delete(tid);
+        }
+      }
+      sendResponse({
+        connected,
+        lastError,
+        extensionId: chrome.runtime.id,
+        paused,
+        visualEnabled,
+        inFlight: inFlightCount,
+        agentTabs: liveTabs,
+        recentActivity: recentActivity.slice(0, 10),
+      });
+    })();
     return true;
   }
+
+  if (message?.type === "useui_toggle_pause") {
+    const next = setPaused(!paused);
+    sendResponse({ ok: true, paused: next });
+    return true;
+  }
+
+  if (message?.type === "useui_toggle_visual") {
+    visualEnabled = !visualEnabled;
+    if (!visualEnabled) {
+      chrome.tabs.query({ active: true }).then((tabs) => {
+        for (const t of tabs) {
+          if (t.id && isScriptableUrl(t.url)) {
+            chrome.scripting
+              .executeScript({
+                target: { tabId: t.id },
+                func: () => {
+                  if (window.__useuiStage) window.__useuiStage.hide();
+                },
+              })
+              .catch(() => {});
+          }
+        }
+      });
+    }
+    sendResponse({ ok: true, visualEnabled });
+    return true;
+  }
+
+  if (message?.type === "useui_focus_tab" && typeof message.tabId === "number") {
+    chrome.tabs
+      .get(message.tabId)
+      .then(async (t) => {
+        await chrome.windows.update(t.windowId, { focused: true });
+        await chrome.tabs.update(t.id, { active: true });
+        sendResponse({ ok: true });
+      })
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message?.type === "useui_close_agent_tabs") {
+    const ids = Array.from(agentTabIds);
+    agentTabIds.clear();
+    Promise.allSettled(ids.map((id) => chrome.tabs.remove(id))).then(() => {
+      sendResponse({ ok: true, closed: ids.length });
+    });
+    return true;
+  }
+
   if (message?.type === "cua_bridge_reconnect") {
     if (port) {
-      try { port.disconnect(); } catch { /* ignore */ }
+      try {
+        port.disconnect();
+      } catch {
+        /* ignore */
+      }
       port = null;
     }
     reconnectDelayMs = 1000;

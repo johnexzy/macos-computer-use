@@ -39,6 +39,8 @@ public final class RuntimeSession: @unchecked Sendable {
     private let actions: BackgroundActions
     private let activityOverlay: DesktopActivityOverlay?
     private let livePreview: RuntimeLivePreview?
+    private let menuBar: MenuBarIsland?
+    private let telemetryListener: TelemetryListener?
     private let limits: RuntimeLimits
     private let emit: @Sendable (Response) -> Void
     private let emitProgress: (@Sendable (UseUIProtocol.Progress) throws -> OutputTicket)?
@@ -57,14 +59,47 @@ public final class RuntimeSession: @unchecked Sendable {
                 actions: BackgroundActions = BackgroundActions(),
                 visualFeedback: Bool = false,
                 livePreview: Bool = false,
+                menuBar: Bool = false,
+                telemetrySocketPath: String? = nil,
                 emit: @escaping @Sendable (Response) -> Void,
                 emitProgress: (@Sendable (UseUIProtocol.Progress) throws -> OutputTicket)? = nil,
                 didShutdown: @escaping @Sendable () -> Void = {}) {
         self.system = system; self.epoch = epoch; self.limits = limits
         self.actions = actions
-        let preview = livePreview ? RuntimeLivePreview() : nil
-        self.livePreview = preview
-        activityOverlay = visualFeedback ? DesktopActivityOverlay(onActivity: { preview?.present($0) }) : nil
+        let preview = (livePreview || menuBar) ? RuntimeLivePreview() : nil
+        self.livePreview = livePreview ? preview : nil
+
+        let overlay = visualFeedback ? DesktopActivityOverlay(onActivity: { [weak preview] activity in
+            preview?.present(activity)
+        }) : nil
+        let island: MenuBarIsland? = menuBar ? MenuBarIsland(
+            overlayEnabled: visualFeedback,
+            onToggleOverlay: { enabled in overlay?.isEnabled = enabled },
+            onSelectMotion: { style in overlay?.motionStyle = style },
+            onToggleLiveView: { preview?.toggle() },
+            onHideOverlay: { overlay?.hide() }
+        ) : nil
+        if let overlay, let island {
+            DispatchQueue.main.async { [weak preview] in
+                overlay.onActivity = { [weak preview] activity in
+                    preview?.present(activity)
+                    island.recordNative(activity)
+                }
+            }
+        }
+        self.activityOverlay = overlay
+        self.menuBar = island
+
+        if let telemetrySocketPath, !telemetrySocketPath.isEmpty, let island {
+            let listener = TelemetryListener(socketPath: telemetrySocketPath) { event in
+                island.submitHostTelemetry(event)
+            }
+            listener.start()
+            self.telemetryListener = listener
+        } else {
+            self.telemetryListener = nil
+        }
+
         self.emit = emit; self.emitProgress = emitProgress; self.didShutdown = didShutdown
         observations = ObservationRegistry(epoch: epoch)
         system.configureObservationWorker(worker)
@@ -93,6 +128,8 @@ public final class RuntimeSession: @unchecked Sendable {
         observations.invalidate()
         activityOverlay?.dismiss()
         livePreview?.dismiss()
+        telemetryListener?.stop()
+        menuBar?.shutdown()
         session = nil
         seen.removeAll()
         didShutdown()
@@ -134,7 +171,7 @@ public final class RuntimeSession: @unchecked Sendable {
             guard session == nil else { reject(request, code: .authorityDenied, "session already initialized"); return }
             guard context.interruption == nil else { respond(request, interruptedBody(request, .deadlineExceeded)); return }
             session = SessionContext(epoch: epoch, authority: hello.authority)
-            respond(request, .hello(HelloResult(helperVersion: "1.0.0", selectedVersion: Limits.version)))
+            respond(request, .hello(HelloResult(helperVersion: "1.1.0", selectedVersion: Limits.version)))
             return
         }
         guard let session else { reject(request, code: .authorityDenied, "host hello is required"); return }

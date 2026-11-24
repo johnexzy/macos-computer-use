@@ -4,20 +4,218 @@
   <meta charset="utf-8" />
   <title>UseUI Bridge</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; width: 260px; margin: 12px; color: #1d1d1f; }
-    h3 { margin: 0 0 8px; font-size: 14px; }
-    .row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 8px; }
-    .dot { width: 9px; height: 9px; border-radius: 50%; background: #8e8e93; }
-    .dot.ok { background: #28a745; }
-    code { font-size: 11px; background: #f2f2f7; padding: 2px 5px; border-radius: 4px; word-break: break-all; }
-    button { margin-top: 8px; padding: 5px 10px; font-size: 12px; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    :root {
+      --ink: #101C2C;
+      --ink-soft: #18283D;
+      --mint: #66E9BC;
+      --paper: #F2F7F5;
+      --slate: #8AA0B5;
+      --amber: #F5A623;
+      --coral: #F25F5C;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+      width: 310px;
+      margin: 0;
+      padding: 14px;
+      background: var(--ink);
+      color: var(--paper);
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .mark {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #243B50, #101C2C);
+      border: 1px solid rgba(102, 233, 188, 0.35);
+      display: grid;
+      place-items: center;
+    }
+    h3 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(242, 247, 245, 0.08);
+      border: 1px solid rgba(242, 247, 245, 0.12);
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--slate);
+    }
+    .dot.ok { background: var(--mint); box-shadow: 0 0 8px rgba(102, 233, 188, 0.75); }
+    .dot.paused { background: var(--amber); box-shadow: 0 0 8px rgba(245, 166, 35, 0.75); }
+    .dot.err { background: var(--coral); }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    button {
+      appearance: none;
+      border: 1px solid rgba(242, 247, 245, 0.14);
+      background: var(--ink-soft);
+      color: var(--paper);
+      padding: 7px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    button:hover { border-color: rgba(102, 233, 188, 0.55); background: #1F334C; }
+    button.primary {
+      background: var(--mint);
+      color: var(--ink);
+      border-color: var(--mint);
+    }
+    button.primary:hover { background: #85f0cb; }
+    button.subtle {
+      font-size: 11px;
+      padding: 4px 8px;
+      color: var(--slate);
+    }
+    button.subtle:hover { color: var(--paper); }
+
+    .section {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(242, 247, 245, 0.1);
+    }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .section-title {
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--slate);
+    }
+    .list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      max-height: 118px;
+      overflow-y: auto;
+    }
+    .item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 7px;
+      background: rgba(242, 247, 245, 0.05);
+      border: 1px solid rgba(242, 247, 245, 0.07);
+      font-size: 11.5px;
+    }
+    .item.clickable { cursor: pointer; }
+    .item.clickable:hover { border-color: rgba(102, 233, 188, 0.45); background: rgba(102, 233, 188, 0.08); }
+    .item-main {
+      min-width: 0;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .item-meta {
+      font-size: 10px;
+      color: var(--slate);
+      flex-shrink: 0;
+    }
+    .empty {
+      font-size: 11.5px;
+      color: var(--slate);
+      padding: 4px 2px;
+    }
+    .footer {
+      margin-top: 12px;
+      padding-top: 9px;
+      border-top: 1px solid rgba(242, 247, 245, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 10.5px;
+      color: var(--slate);
+    }
+    code {
+      font-family: Menlo, monospace;
+      font-size: 10px;
+      color: #a9c1d6;
+      background: rgba(242, 247, 245, 0.06);
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
   </style>
 </head>
 <body>
-  <h3>UseUI</h3>
-  <div class="row"><span id="dot" class="dot"></span><span id="status">Checking bridge…</span></div>
-  <div class="row">ID: <code id="ext-id"></code></div>
-  <button id="reconnect" type="button">Reconnect Bridge</button>
+  <div class="header">
+    <div class="brand">
+      <div class="mark">
+        <svg width="16" height="16" viewBox="0 0 100 100" fill="none">
+          <path d="M20 45V32a8 8 0 0 1 8-8h20m32 31v13a8 8 0 0 1-8 8H52" stroke="#DDF1ED" stroke-width="8" stroke-linecap="round"/>
+          <path d="M37.6 35.1a2.5 2.5 0 0 1 3.5-2.9l32.3 15.4a2.5 2.5 0 0 1-.5 4.7l-14.2 3.2-7.3 13a2.5 2.5 0 0 1-4.6-.5Z" fill="#66E9BC"/>
+        </svg>
+      </div>
+      <h3>UseUI</h3>
+    </div>
+    <span class="badge"><span id="dot" class="dot"></span><span id="status">Checking…</span></span>
+  </div>
+
+  <div class="controls">
+    <button id="pause-btn" type="button">Pause Agent</button>
+    <button id="visual-btn" type="button">Visuals: On</button>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <span class="section-title">Active Agent Tabs</span>
+      <button id="close-tabs" class="subtle" type="button">Close All</button>
+    </div>
+    <div id="tabs-list" class="list"><div class="empty">No active UseUI tabs</div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <span class="section-title">Recent Activity</span>
+    </div>
+    <div id="activity-list" class="list"><div class="empty">Waiting for agent activity…</div></div>
+  </div>
+
+  <div class="footer">
+    <code id="ext-id"></code>
+    <button id="reconnect" class="subtle" type="button">Reconnect</button>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>

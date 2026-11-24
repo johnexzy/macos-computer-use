@@ -160,24 +160,46 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         input_disconnect.cancel();
         input_service.cancel();
     });
-    let client =
-        match Client::spawn_with_cancellation(Config::new(helper, authority), disconnected.clone())
-            .await
-        {
-            Ok(client) => Arc::new(client),
-            Err(_) if disconnected.is_cancelled() => {
-                signals.abort();
-                input_pump.abort();
-                return Ok(());
-            }
-            Err(error) => return Err(error.into()),
-        };
+    let mut config = Config::new(helper, authority);
+    let in_ci = std::env::var_os("CI").is_some() || std::env::var_os("GITHUB_ACTIONS").is_some();
+    let explicit_feedback = std::env::var_os("USEUI_VISUAL_FEEDBACK")
+        .or_else(|| std::env::var_os("CUA_VISUAL_FEEDBACK"));
+    let visual_enabled = match explicit_feedback.as_deref().and_then(|v| v.to_str()) {
+        Some("0") | Some("false") | Some("FALSE") | Some("off") => false,
+        Some("1") | Some("true") | Some("TRUE") | Some("on") => true,
+        _ => !in_ci,
+    };
+    if visual_enabled && explicit_feedback.is_none() {
+        config
+            .env
+            .push(("USEUI_VISUAL_FEEDBACK".into(), "1".into()));
+    }
+    let telemetry = if visual_enabled {
+        let sock = useui_host::telemetry::telemetry_socket_path();
+        config.env.push((
+            "USEUI_TELEMETRY_SOCK".into(),
+            sock.as_os_str().to_os_string(),
+        ));
+        useui_host::telemetry::TelemetryClient::new(sock)
+    } else {
+        useui_host::telemetry::TelemetryClient::disabled()
+    };
+
+    let client = match Client::spawn_with_cancellation(config, disconnected.clone()).await {
+        Ok(client) => Arc::new(client),
+        Err(_) if disconnected.is_cancelled() => {
+            signals.abort();
+            input_pump.abort();
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
+    };
     eprintln!(
         "{}",
         serde_json::json!({"event":"runtime_started","helperPid":client.helper_pid(),"epoch":client.epoch(),"mode":mode})
     );
     let transport = (input, tokio::io::stdout());
-    let result = match Host::new(client.clone(), disconnected.clone())
+    let result = match Host::with_telemetry(client.clone(), disconnected.clone(), telemetry)
         .serve_with_ct(transport, service_token)
         .await
     {

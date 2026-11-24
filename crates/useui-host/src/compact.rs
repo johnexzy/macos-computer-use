@@ -592,6 +592,9 @@ pub fn format_browser_result(action: &str, data: &serde_json::Value) -> String {
             // openTab, navigate, snapshot, act
             if let Some(tid) = data.get("tabId").and_then(|v| v.as_i64()) {
                 let _ = write!(out, "browser:{action} tab={tid}");
+                if let Some(title) = data.get("groupTitle").and_then(|v| v.as_str()) {
+                    let _ = write!(out, " group={}", quote(title));
+                }
                 if let Some(steps) = data.get("steps").and_then(|v| v.as_array()) {
                     let _ = write!(out, " steps={}", steps.len());
                 }

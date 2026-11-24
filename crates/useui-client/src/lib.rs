@@ -28,6 +28,7 @@ use useui_protocol::{
 pub struct Config {
     pub program: PathBuf,
     pub args: Vec<OsString>,
+    pub env: Vec<(OsString, OsString)>,
     pub authority: Authority,
     pub handshake_budget: Duration,
 }
@@ -36,6 +37,7 @@ impl Config {
         Self {
             program: program.into(),
             args: Vec::new(),
+            env: Vec::new(),
             authority,
             handshake_budget: Duration::from_secs(5),
         }

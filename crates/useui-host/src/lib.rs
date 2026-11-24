@@ -1,6 +1,7 @@
 //! MCP adapts public arguments to the same typed client used by Rust callers.
 pub mod browser_bridge;
 mod compact;
+pub mod telemetry;
 use browser_bridge::BrowserBridgeClient;
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
@@ -19,6 +20,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use telemetry::TelemetryClient;
 use tokio_util::sync::CancellationToken;
 use useui_client::Client;
 use useui_protocol::*;
@@ -239,6 +241,11 @@ pub struct BrowserArgs {
     pub concurrency: Option<u32>,
     #[schemars(range(min = 0, max = 10000))]
     pub settle_ms: Option<u32>,
+    #[schemars(length(min = 1, max = 28))]
+    pub group_label: Option<String>,
+    #[schemars(length(min = 1, max = 16))]
+    pub group_color: Option<String>,
+    pub visual: Option<bool>,
     #[serde(default = "default_budget")]
     #[schemars(range(min = 1, max = 60000))]
     pub budget_ms: u32,
@@ -248,6 +255,7 @@ pub struct BrowserArgs {
 pub struct Host {
     client: Arc<Client>,
     browser_bridge: BrowserBridgeClient,
+    telemetry: TelemetryClient,
     disconnected: CancellationToken,
     trace_count: Arc<AtomicUsize>,
     admission: Arc<tokio::sync::Semaphore>,
@@ -337,9 +345,18 @@ fn native_receipt(response: Response, is_error: bool) -> Result<CallToolResult, 
 #[tool_router]
 impl Host {
     pub fn new(client: Arc<Client>, disconnected: CancellationToken) -> Self {
+        Self::with_telemetry(client, disconnected, TelemetryClient::disabled())
+    }
+
+    pub fn with_telemetry(
+        client: Arc<Client>,
+        disconnected: CancellationToken,
+        telemetry: TelemetryClient,
+    ) -> Self {
         Self {
             client,
             browser_bridge: BrowserBridgeClient::new(),
+            telemetry,
             disconnected,
             trace_count: Arc::new(AtomicUsize::new(0)),
             admission: Arc::new(tokio::sync::Semaphore::new(16)),
@@ -627,7 +644,7 @@ impl Host {
     }
 
     #[tool(
-        description = "Fast, zero-focus-stealing Chromium browser accelerator via the bundled MV3 Native Messaging extension (uses the user's real signed-in browser profile with zero open TCP ports). Prefer this over AX observe/act for web workflows whenever capabilities reports browserExtension connected=true. Actions: 'status' (check bridge), 'listTabs', 'openTab' (background tab with optional returnSnapshot/includeText in one call), 'navigate' (url or history: 'back'|'forward'|'reload' + optional snapshot), 'snapshot' (fast ~20ms compact DOM outline with refs bN.M + optional includeText/query), 'act' (1-16 DOM steps: click by ref/text/selector, type, select, pressKey, scroll, waitFor urlContains/textContains/selector/ms + fresh post-action snapshot in one call), 'batchRead' (read 1-6 URLs in parallel background tabs in one call), and 'closeTab'."
+        description = "Fast, zero-focus-stealing Chromium browser accelerator via the bundled MV3 Native Messaging extension (uses the user's real signed-in browser profile with zero open TCP ports). Automatically organizes UseUI-created tabs into a branded Chrome Tab Group (optional groupLabel/groupColor) and runs batchRead workers inside a collapsed group. Prefer this over AX observe/act for web workflows whenever capabilities reports browserExtension connected=true. Actions: 'status' (check bridge), 'listTabs', 'openTab' (background tab with optional returnSnapshot/includeText/groupLabel in one call), 'navigate' (url or history: 'back'|'forward'|'reload' + optional snapshot), 'snapshot' (fast ~20ms compact DOM outline with refs bN.M + optional includeText/query), 'act' (1-16 DOM steps: click by ref/text/selector, type, select, pressKey, scroll, waitFor urlContains/textContains/selector/ms + fresh post-action snapshot in one call), 'batchRead' (read 1-6 URLs in parallel collapsed background tabs in one call), and 'closeTab'."
     )]
     async fn browser(
         &self,
@@ -712,6 +729,21 @@ impl Host {
         if let Some(v) = args.settle_ms {
             params.insert("settleMs".into(), json!(v));
         }
+        if let Some(v) = args.group_label {
+            params.insert("groupLabel".into(), json!(v));
+        }
+        if let Some(v) = args.group_color {
+            params.insert("groupColor".into(), json!(v));
+        }
+        if let Some(v) = args.visual {
+            params.insert("visual".into(), json!(v));
+        }
+
+        let summary_label = telemetry::describe_browser_call(action_name, &params);
+        if action_name != "listTabs" {
+            self.telemetry
+                .emit_browser("active", &summary_label, Some(action_name));
+        }
 
         let token = self.disconnected.child_token();
         if context.ct.is_cancelled() {
@@ -736,6 +768,13 @@ impl Host {
             .await
         {
             Ok(data) => {
+                if action_name != "listTabs" {
+                    let detail = data
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty());
+                    self.telemetry.emit_browser("done", &summary_label, detail);
+                }
                 let text = compact::format_browser_result(action_name, &data);
                 let mut result = CallToolResult::structured(json!({
                     "version": VERSION,
@@ -746,12 +785,18 @@ impl Host {
                 result.content = vec![ContentBlock::text(text)];
                 Ok(result)
             }
-            Err(err) => Ok(CallToolResult::structured_error(json!({
-                "version": VERSION,
-                "route": "browser_extension",
-                "action": action_name,
-                "error": { "code": err.code, "message": err.message },
-            }))),
+            Err(err) => {
+                if action_name != "listTabs" {
+                    self.telemetry
+                        .emit_browser("error", &summary_label, Some(err.code));
+                }
+                Ok(CallToolResult::structured_error(json!({
+                    "version": VERSION,
+                    "route": "browser_extension",
+                    "action": action_name,
+                    "error": { "code": err.code, "message": err.message },
+                })))
+            }
         }
     }
 }

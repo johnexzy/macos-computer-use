@@ -279,7 +279,7 @@ public struct BackgroundActions: Sendable {
 
         let approach: ((Point) throws -> Void)? = activityOverlay.map { overlay in
             { point in
-                _ = try overlay.approach(.approaching(control.window, screenPoint: point), context: context)
+                _ = try overlay.approach(.approaching(control.window, screenPoint: point, label: "Foreground action", isForeground: true), context: context)
                 try checkLifetime(entry)
             }
         }
@@ -404,8 +404,10 @@ public struct BackgroundActions: Sendable {
         try checkForeground(before, targetPID: handle.target.key.pid)
         try context.check()
         let writing = route == .axSelectedText || (route == .axSetValue && DesktopActivity.textRole(resolved.snapshot.role))
-        let approached = try activityOverlay?.approach(.approaching(handle.target, control: resolved.snapshot.bounds, writing: writing),
-                                                       context: context) ?? false
+        let approached = try activityOverlay?.approach(
+            .approaching(handle.target, control: resolved.snapshot.bounds, writing: writing, label: resolved.snapshot.label, isForeground: false),
+            context: context
+        ) ?? false
         if approached { try checkLifetime(entry) }
         // Resolve again inside the shared mutation boundary; never reselect by a label.
         let typing: Bool

@@ -7,6 +7,8 @@ import Foundation
 final class RuntimeProcess: @unchecked Sendable {
     private let visualFeedback: Bool
     private let livePreview: Bool
+    private let menuBar: Bool
+    private let telemetrySocketPath: String?
     private var session: RuntimeSession!
     private var output: OutputPump!
     private var signals: [DispatchSourceSignal] = []
@@ -14,9 +16,11 @@ final class RuntimeProcess: @unchecked Sendable {
     private var exitCode: Int32 = 0
     private var stopped = false
 
-    init(visualFeedback: Bool, livePreview: Bool) {
+    init(visualFeedback: Bool, livePreview: Bool, menuBar: Bool, telemetrySocketPath: String?) {
         self.visualFeedback = visualFeedback
         self.livePreview = livePreview
+        self.menuBar = menuBar
+        self.telemetrySocketPath = telemetrySocketPath
     }
 
     func start(preinstalledSignals: [DispatchSourceSignal] = []) {
@@ -24,7 +28,9 @@ final class RuntimeProcess: @unchecked Sendable {
         signals = preinstalledSignals
         output = OutputPump(write: { try FileHandle.standardOutput.write(contentsOf: $0) },
                             onFailure: { [weak self] in self?.session.shutdown() })
-        session = RuntimeSession(visualFeedback: visualFeedback, livePreview: livePreview, emit: { [weak self] response in
+        session = RuntimeSession(visualFeedback: visualFeedback, livePreview: livePreview,
+                                 menuBar: menuBar, telemetrySocketPath: telemetrySocketPath,
+                                 emit: { [weak self] response in
             guard let self else { return }
             do { try self.output.send(response) }
             catch { self.diagnostic("output_failure"); self.session.shutdown() }
@@ -130,9 +136,14 @@ MainActor.assumeIsolated {
     let environment = ProcessInfo.processInfo.environment
     let feedbackRequested = environment["USEUI_VISUAL_FEEDBACK"] == "1" || environment["CUA_VISUAL_FEEDBACK"] == "1"
     let previewRequested = environment["USEUI_LIVE_PREVIEW"] == "1" || environment["CUA_LIVE_PREVIEW"] == "1"
+    let menuBarRequested = (feedbackRequested || previewRequested) && environment["USEUI_MENUBAR"] != "0"
+    let telemetrySocketPath = environment["USEUI_TELEMETRY_SOCK"]
     let useAppKit = (feedbackRequested || previewRequested) && NSApplication.shared.setActivationPolicy(.accessory)
     if earlyStop.triggered { exit(0) }
-    let process = RuntimeProcess(visualFeedback: useAppKit && feedbackRequested, livePreview: useAppKit && previewRequested)
+    let process = RuntimeProcess(visualFeedback: useAppKit && feedbackRequested,
+                                 livePreview: useAppKit && previewRequested,
+                                 menuBar: useAppKit && menuBarRequested,
+                                 telemetrySocketPath: useAppKit ? telemetrySocketPath : nil)
     process.start(preinstalledSignals: earlySignals)
     if earlyStop.triggered { exit(0) }
     if process.shouldRun() {

@@ -37,6 +37,7 @@ impl Transport {
     pub fn spawn(config: &Config, stderr_bytes: Arc<AtomicU64>) -> Result<Self, ClientError> {
         let mut child = Command::new(&config.program)
             .args(&config.args)
+            .envs(config.env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
