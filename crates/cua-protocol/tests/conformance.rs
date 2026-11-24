@@ -24,7 +24,7 @@ fn shared_valid_fixtures_decode_and_round_trip() {
     let paths = fixtures("valid");
     assert_eq!(
         paths.len(),
-        61,
+        83,
         "keep the shared fixture inventory deliberate"
     );
     for path in paths {
@@ -34,6 +34,19 @@ fn shared_valid_fixtures_decode_and_round_trip() {
         assert_eq!(encoded.last(), Some(&b'\n'));
         assert_eq!(decode_line(&encoded).unwrap(), frame, "{}", path.display());
     }
+}
+
+#[test]
+fn bundled_and_unbundled_targets_omit_absent_metadata() {
+    let frame = fixture("targets-response");
+    let encoded: serde_json::Value = serde_json::from_slice(&encode_line(&frame).unwrap()).unwrap();
+    let targets = encoded["message"]["body"]["data"]["targets"]
+        .as_array()
+        .unwrap();
+    assert_eq!(targets[0]["bundleId"], "com.apple.TextEdit");
+    assert!(targets[0].get("ownerName").is_none());
+    assert_eq!(targets[1]["ownerName"], "Window Fixture");
+    assert!(targets[1].get("bundleId").is_none());
 }
 
 #[test]
@@ -48,6 +61,9 @@ fn absent_visual_options_keep_the_legacy_ax_wire_shape() {
         "maxImageDimensionPx",
         "axSelectors",
         "eventHistory",
+        "scope",
+        "interactiveOnly",
+        "query",
     ] {
         assert!(params.get(name).is_none(), "unexpected {name}");
     }
@@ -119,7 +135,7 @@ fn ocr_budget_accounts_for_json_escaping_not_only_text_bytes() {
 #[test]
 fn shared_invalid_fixtures_are_rejected() {
     let paths = fixtures("invalid");
-    assert_eq!(paths.len(), 90);
+    assert_eq!(paths.len(), 117);
     for path in paths {
         assert!(
             decode_line(&fs::read(&path).unwrap()).is_err(),
@@ -248,6 +264,7 @@ fn foreground_selection_requires_authority_and_correlates_dispatch() {
             stop_reason: StopReason::Completed,
             feedback: None,
             foreground: None,
+            observation: None,
         }),
     };
     let mut session = SessionContext {
@@ -448,6 +465,164 @@ fn observations_expose_independent_channel_times_and_capabilities_include_click(
     };
     assert!(capabilities.actions.contains(&ActionKind::Click));
     assert!(serde_json::from_str::<ElementAction>("\"click\"").is_err());
+}
+
+#[test]
+fn open_wait_and_scoped_observe_enforce_authority_and_correlation() {
+    let Frame::Request(mut open_req) = fixture("open-request") else {
+        panic!()
+    };
+    let Frame::Response(mut open_res) = fixture("open-response") else {
+        panic!()
+    };
+    let bg = SessionContext {
+        epoch: "helper-epoch-1".into(),
+        authority: Authority {
+            grant_id: "host-grant-1".into(),
+            mode: ExecutionMode::BackgroundRequired,
+        },
+    };
+    let fg = SessionContext {
+        epoch: "helper-epoch-1".into(),
+        authority: Authority {
+            grant_id: "host-grant-1".into(),
+            mode: ExecutionMode::ForegroundAllowed,
+        },
+    };
+    bg.authorize(&open_req).unwrap();
+    open_res.validate_for(&open_req, "helper-epoch-1").unwrap();
+    if let ResponseBody::Open(data) = &mut open_res.body {
+        data.activated = true;
+    }
+    assert!(open_res.validate_for(&open_req, "helper-epoch-1").is_err());
+    if let RequestBody::Open(open) = &mut open_req.body {
+        open.activate = true;
+    }
+    assert!(bg.authorize(&open_req).is_err());
+    fg.authorize(&open_req).unwrap();
+    open_res.validate_for(&open_req, "helper-epoch-1").unwrap();
+
+    // Wait with includeValues: true allows private values; false rejects them.
+    let Frame::Request(mut wait_req) = fixture("wait-values-request") else {
+        panic!()
+    };
+    let Frame::Response(Response {
+        body: ResponseBody::Observe(mut obs),
+        ..
+    }) = fixture("observe-partial-response")
+    else {
+        panic!()
+    };
+    obs.screenshot = None;
+    obs.elements[0].value = Some("SAVED:Ada".into());
+    let wait_res = Response {
+        version: VERSION,
+        id: wait_req.id.clone(),
+        epoch: "helper-epoch-1".into(),
+        body: ResponseBody::WaitFor(WaitResult {
+            outcome: WaitOutcome::Satisfied,
+            already_satisfied: false,
+            observation: Some(obs.clone()),
+            evidence: None,
+        }),
+    };
+    wait_res.validate_for(&wait_req, "helper-epoch-1").unwrap();
+    if let RequestBody::WaitFor(wait) = &mut wait_req.body {
+        wait.include_values = false;
+    }
+    assert!(wait_res.validate_for(&wait_req, "helper-epoch-1").is_err());
+
+    // Scoped observe cannot report Complete window coverage.
+    let Frame::Request(scoped_req) = fixture("observe-scoped-request") else {
+        panic!()
+    };
+    let mut complete_obs = obs;
+    complete_obs.accessibility = Coverage::Complete;
+    complete_obs.elements[0].value = None;
+    let complete_res = Response {
+        version: VERSION,
+        id: scoped_req.id.clone(),
+        epoch: "helper-epoch-1".into(),
+        body: ResponseBody::Observe(complete_obs),
+    };
+    assert!(
+        complete_res
+            .validate_for(&scoped_req, "helper-epoch-1")
+            .is_err()
+    );
+}
+
+#[test]
+fn clipboard_targets_discovery_and_query_enforce_privacy_and_correlation() {
+    let bg = SessionContext {
+        epoch: "helper-epoch-1".into(),
+        authority: Authority {
+            grant_id: "host-grant-1".into(),
+            mode: ExecutionMode::BackgroundRequired,
+        },
+    };
+    let Frame::Request(mut clip_req) = fixture("clipboard-request") else {
+        panic!()
+    };
+    let Frame::Response(clip_res) = fixture("clipboard-response") else {
+        panic!()
+    };
+    bg.authorize(&clip_req).unwrap();
+    clip_res.validate_for(&clip_req, "helper-epoch-1").unwrap();
+    // Privacy: omitting includeText must reject any response carrying text.
+    if let RequestBody::Clipboard(req) = &mut clip_req.body {
+        req.include_text = false;
+    }
+    assert!(clip_res.validate_for(&clip_req, "helper-epoch-1").is_err());
+    // Grant mismatch rejected.
+    if let RequestBody::Clipboard(req) = &mut clip_req.body {
+        req.grant_id = "forged-grant".into();
+    }
+    assert!(bg.authorize(&clip_req).is_err());
+
+    // Targets discovery correlation: apps/displays must match requested flags.
+    let Frame::Request(mut targets_req) = fixture("targets-discovery-request") else {
+        panic!()
+    };
+    let Frame::Response(targets_res) = fixture("targets-discovery-response") else {
+        panic!()
+    };
+    targets_res
+        .validate_for(&targets_req, "helper-epoch-1")
+        .unwrap();
+    if let RequestBody::Targets(req) = &mut targets_req.body {
+        req.include_apps = false;
+    }
+    assert!(
+        targets_res
+            .validate_for(&targets_req, "helper-epoch-1")
+            .is_err()
+    );
+
+    // Observe query cannot report Complete coverage.
+    let Frame::Request(query_req) = fixture("observe-query-request") else {
+        panic!()
+    };
+    let Frame::Response(Response {
+        body: ResponseBody::Observe(mut obs),
+        ..
+    }) = fixture("observe-partial-response")
+    else {
+        panic!()
+    };
+    obs.screenshot = None;
+    obs.accessibility = Coverage::Complete;
+    let complete_res = Response {
+        version: VERSION,
+        id: query_req.id.clone(),
+        epoch: "helper-epoch-1".into(),
+        body: ResponseBody::Observe(obs),
+    };
+    assert!(
+        complete_res
+            .validate_for(&query_req, "helper-epoch-1")
+            .is_err()
+    );
 }
 
 #[cfg(feature = "schema")]

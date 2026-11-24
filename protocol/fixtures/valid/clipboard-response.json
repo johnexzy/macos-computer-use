@@ -1,0 +1,1 @@
+{"kind":"response","message":{"version":1,"id":"request-1","epoch":"helper-epoch-1","body":{"result":"clipboard","data":{"changeCount":42,"types":["public.utf8-plain-text"],"text":"hello clipboard","textBytes":15}}}}

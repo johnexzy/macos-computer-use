@@ -49,7 +49,7 @@ test("installed Rust MCP host keeps one native epoch and rejects model policy up
   try {
     await session.initialize();
     const listed = await session.request("tools/list", {});
-    assert.deepEqual(listed.result.tools.map((t) => t.name).sort(), ["act", "capabilities", "observe", "targets", "waitFor"].sort());
+    assert.deepEqual(listed.result.tools.map((t) => t.name).sort(), ["act", "browser", "capabilities", "clipboard", "observe", "open", "targets", "waitFor"].sort());
     for (const tool of listed.result.tools) {
       assert.equal(tool.inputSchema.additionalProperties, false);
       for (const forbidden of ["grantId", "mode", "epoch", "authority"]) assert.equal(tool.inputSchema.properties[forbidden], undefined);
@@ -60,9 +60,16 @@ test("installed Rust MCP host keeps one native epoch and rejects model policy up
     assert.equal(new Set(responses.map((r) => r.epoch)).size, 1);
     assert.ok(responses.every((r) => r.body.data.mode === "backgroundRequired"));
     assert.ok(responses.every((r) => r.body.data.permissions.accessibility
-      ? ["setValue", "typeText", "press"].every((kind) => r.body.data.actions.includes(kind))
+      ? ["setValue", "typeText", "press", "confirm", "showMenu", "cancel", "invokeMenu", "setWindowFrame", "windowAction"].every((kind) => r.body.data.actions.includes(kind))
       : r.body.data.actions.length === 0));
     assert.ok(responses.every((r) => Object.values(r.body.data.permissions).every((v) => typeof v === "boolean")));
+    const openDenied = await session.tool("open", { bundleId: "com.apple.TextEdit", activate: true });
+    assert.equal(openDenied.result.isError, true);
+    assert.equal(openDenied.result.structuredContent.error.code, "authorityDenied");
+    assert.equal(openDenied.result.structuredContent.delivery, "not_dispatched");
+    const clipForged = await session.tool("clipboard", { action: "read", grantId: "forged" });
+    assert.equal(clipForged.result.isError, true);
+    assert.match(clipForged.result.content[0].text, /unknown field/);
     const forged = await session.tool("capabilities", { mode: "foregroundAllowed" });
     assert.equal(forged.result.isError, true);
     assert.match(forged.result.content[0].text, /unknown field/);
@@ -75,6 +82,18 @@ test("installed Rust MCP host keeps one native epoch and rejects model policy up
     const sequence = (id) => Number(id.match(/\d+$/)[0]);
     assert.equal(sequence(following.result.structuredContent.id), Math.max(...responses.map((r) => sequence(r.id))) + 1,
       "Rejected model arguments reached the native connection");
+    const discovery = await session.tool("targets", { includeApps: true, includeDisplays: true });
+    assert.equal(discovery.result.isError, false);
+    assert.ok(Array.isArray(discovery.result.structuredContent.body.data.apps));
+    assert.ok(Array.isArray(discovery.result.structuredContent.body.data.displays));
+    assert.ok(discovery.result.structuredContent.body.data.displays.some((d) => d.isPrimary && d.scaleFactor > 0));
+    const clipMeta = await session.tool("clipboard", { action: "read" });
+    assert.equal(clipMeta.result.isError, false);
+    assert.equal(clipMeta.result.structuredContent.body.data.text, undefined);
+    assert.equal(typeof clipMeta.result.structuredContent.body.data.changeCount, "number");
+    const browserStatus = await session.tool("browser", { action: "status" });
+    assert.equal(browserStatus.result.isError, false);
+    assert.equal(typeof browserStatus.result.structuredContent.data.connected, "boolean");
     assert.equal(alive(session.helperPid), true);
   } finally { await session.close(); }
 });

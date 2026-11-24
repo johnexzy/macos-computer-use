@@ -43,6 +43,11 @@ Application identity and [Apple notarization](https://developer.apple.com/docume
 
 The deployment target remains **macOS 13.0**, on **Apple Silicon and Intel**.
 Semantic AX observations/actions work within the app's advertised capabilities.
+`targets` also lists visible windows owned by verified live processes without a
+bundle ID. Narrow these results with `unbundledOnly`, `ownerContains`, or
+`titleContains`. Use the exact returned PID and window ID. The runtime attempts AX
+on the owner process and exposes only controls it can bind to that window.
+Screenshot and OCR remain available when AX cannot describe the window.
 Screenshot/OCR capture requires macOS 14+ and Screen Recording permission; on
 macOS 13 the visual channel reports `unsupported` while AX can remain available.
 The build produces and checks both `arm64` and `x86_64` slices in each executable.
@@ -104,6 +109,10 @@ production client configuration should omit it. Background authority is the
 default. With the operator's `--allow-foreground` grant, an individual
 `act` request can select foreground input with `foreground: true`. The
 background route remains the default for other calls.
+Visual-only coordinate clicks require the exact window to be foreground and
+unobscured at the click point. The runtime rechecks the selected pixels and
+window identity before dispatch. AX-backed input can raise its retained window
+and restore the previous focus under the existing foreground checks.
 
 Connect the client and call `capabilities` before protected operations. It uses
 preflight APIs and does not request permissions. Permission booleans are evidence
@@ -139,7 +148,7 @@ points still start v3; installing an archive does not migrate them automatically
 | `type_text` | `act` → `typeText` only on an explicit live AXSelectedText-settable element; no global typing or whole-value substitution. |
 | `mouse_click`, `click_text` | A foreground `click` step sends a left click after fresh pixel, window and focus checks. For text, obtain the point from an observation that includes OCR and its matching screenshot. |
 | `press_key` | A foreground `key` step on the exact focused AX reference. Supported keys are Return, Tab, Escape, Backspace and arrows. |
-| `scroll` | Unsupported. |
+| `scroll` | `act` → `scroll` on an observed `AXScrollArea` that advertises it. Select `vertical` or `horizontal` and a signed amount in thousandths of the full range. Positive moves down or right. Background delivery requires a readable, writable AX scrollbar and verifies movement. Observe again to locate newly revealed content. |
 | `launch_app`, `open_url`, `run_applescript` | Unsupported; use separate explicitly authorized setup when required. |
 | Cursor overlay | [On-screen feedback](runtime.md#on-screen-feedback) is built into the runtime and enabled per MCP connection with `CUA_VISUAL_FEEDBACK=1`. |
 

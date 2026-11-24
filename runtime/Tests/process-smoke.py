@@ -56,7 +56,12 @@ try:
     assert caps["body"]["data"]["mode"] == "backgroundRequired"
     permissions = caps["body"]["data"]["permissions"]
     assert all(isinstance(value, bool) for value in permissions.values())
-    assert set(caps["body"]["data"]["actions"]) == ({"setValue", "typeText", "press"} if permissions["accessibility"] else set())
+    expected_actions = (
+        {"setValue", "typeText", "press", "scroll", "scrollToVisible", "confirm", "showMenu", "cancel", "invokeMenu", "setWindowFrame", "windowAction"}
+        if permissions["accessibility"]
+        else set()
+    )
+    assert set(caps["body"]["data"]["actions"]) == expected_actions
     targets = call(process, request("targets", "targets", {"bundleId": None}, epoch))["body"]["data"]
     assert len(targets["targets"]) <= 256
     filtered = call(process, request("filtered", "targets", {"bundleId": "nonexistent.cua.fixture"}, epoch))
@@ -105,6 +110,8 @@ finally:
         process.wait()
 
 # Signal while the hello frame is buffered/being initialized; stdin remains open.
+# If SIGTERM lands before dyld enters main(), macOS terminates with -SIGTERM; once in main(),
+# cua-runtime traps SIGTERM and exits cleanly with 0. Either way it must exit promptly without hanging.
 process = launch()
 try:
     send(process, request("hello", "hello", {"clientName": "startup-signal", "supportedVersions": [1],
@@ -112,7 +119,7 @@ try:
     time.sleep(0.05)
     os.kill(process.pid, signal.SIGTERM)
     process.wait(timeout=5)
-    assert process.returncode == 0
+    assert process.returncode in (0, -signal.SIGTERM), f"unexpected startup SIGTERM exit: {process.returncode}"
     checks.append("SIGTERM during startup/hello with stdin open")
 finally:
     if process.poll() is None:

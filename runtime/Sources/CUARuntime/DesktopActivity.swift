@@ -12,6 +12,7 @@ struct DesktopActivity: Sendable {
         case written = "Text updated"
         case writingSent = "Text sent"
         case updated = "Control updated"
+        case scrolled = "Scrolled"
         case sent = "Action sent"
         case skipped = "Input skipped"
         case rechecking = "Rechecking target"
@@ -25,7 +26,7 @@ struct DesktopActivity: Sendable {
             case .updated: "Updated"
             case .skipped: "Skipped"
             case .rechecking: "Rechecking"
-            case .written, .writingSent, .sent, .check: rawValue
+            case .written, .writingSent, .scrolled, .sent, .check: rawValue
             }
         }
 
@@ -99,29 +100,48 @@ struct DesktopActivity: Sendable {
         var phase: Phase = .updated
         var elementRef: String?
         var point: CGPoint?
+        func mapScreen(_ input: Point, space: CoordinateSpace) -> CGPoint? {
+            let screen: CUAProtocol.Point?
+            switch space {
+            case .screenPoints: screen = input
+            case .windowPoints:
+                screen = .init(x: input.x + observation.windowBounds.x, y: input.y + observation.windowBounds.y)
+            case .imagePixels: screen = try? observation.visual?.frame?.imageToScreen.toScreen(input)
+            }
+            return screen.map { CGPoint(x: $0.x, y: $0.y) }
+        }
         switch step.operation {
         case .setValue(let input): elementRef = input.elementRef
         case .typeText(let input): elementRef = input.elementRef; phase = .written
-        case .press(let input): elementRef = input.elementRef; phase = .pressed
+        case .typeKeys(let input): elementRef = input.elementRef; phase = .written
+        case .press(let input), .confirm(let input), .showMenu(let input), .cancel(let input):
+            elementRef = input.elementRef; phase = .pressed
+        case .invokeMenu: phase = .pressed
+        case .setWindowFrame, .windowAction, .focusWindow: phase = .updated
         case .key(let input): elementRef = input.elementRef
-        case .click(let input):
+        case .hotkey(let input): elementRef = input.elementRef
+        case .click(let input), .doubleClick(let input), .rightClick(let input):
             phase = .pressed
-            let screen: CUAProtocol.Point?
-            switch input.space {
-            case .screenPoints: screen = input.point
-            case .windowPoints:
-                screen = .init(x: input.point.x + observation.windowBounds.x, y: input.point.y + observation.windowBounds.y)
-            case .imagePixels: screen = try? observation.visual?.frame?.imageToScreen.toScreen(input.point)
-            }
-            point = screen.map { CGPoint(x: $0.x, y: $0.y) }
-        case .scroll, .waitFor: return nil
+            point = mapScreen(input.point, space: input.space)
+        case .hover(let input):
+            phase = .movingToControl
+            point = mapScreen(input.point, space: input.space)
+        case .drag(let input):
+            phase = .pressed
+            point = mapScreen(input.to, space: input.space)
+        case .scrollWheel(let input):
+            phase = .scrolled
+            point = mapScreen(input.point, space: input.space)
+        case .scroll(let input): elementRef = input.elementRef; phase = .scrolled
+        case .scrollToVisible(let input): elementRef = input.elementRef; phase = .scrolled
+        case .waitFor: return nil
         }
         if let elementRef, let element = observation.elements.first(where: { $0.reference == elementRef }) {
             if case .setValue = step.operation, textRole(element.role) { phase = .written }
             point = anchor(control: element.bounds, window: observation.windowBounds, writing: phase.showsWriting)
         }
 
-        if receipt.verification == .unverified {
+        if receipt.verification == .unverified && phase != .scrolled {
             phase = phase.showsWriting ? .writingSent : .sent
         }
         return Self(target: observation.target, bounds: observation.windowBounds, phase: phase, point: point)

@@ -77,7 +77,9 @@ def smoke_host(command, directory, environment, ending):
         assert result["protocolVersion"] == "2025-11-25"
         send(process, {"jsonrpc": "2.0", "method": "notifications/initialized"})
         tools = call(2, "tools/list", {})["tools"]
-        assert {tool["name"] for tool in tools} == {"capabilities", "targets", "observe", "act", "waitFor"}
+        assert {tool["name"] for tool in tools} == {
+            "capabilities", "browser", "targets", "open", "clipboard", "observe", "act", "waitFor"
+        }
         epochs = set()
         ids = set()
         for ident in range(3, 6):

@@ -51,7 +51,7 @@ private final class EventFixture: AXReading, WindowCatalog, VisualCapturing, @un
             bounds: Rect(x: 20, y: 30, width: 160, height: 20), value: includeValue ? (id == "toast" ? text : noiseText) : nil)
     }
     func same(_ lhs: any AXObject, _ rhs: any AXObject) -> Bool { lhs === rhs }
-    func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult { try context.check(); lock.lock(); defer { lock.unlock() }; return TargetsResult(targets: [target], truncated: false) }
+    func targets(_ request: TargetsRequest, context: OperationContext) throws -> TargetsResult { try context.check(); lock.lock(); defer { lock.unlock() }; return TargetsResult(targets: [target], truncated: false) }
     func window(_ key: TargetKey, context: OperationContext) throws -> Target { try context.check(); lock.lock(); defer { lock.unlock() }; return target }
     func processWindows(pid: UInt32, context: OperationContext) throws -> [Target] { try context.check(); lock.lock(); defer { lock.unlock() }; return [target] }
     func capture(target: Target, crop: Rect?, maxDimension: Int, context: OperationContext) throws -> CapturedVisual { throw NativeFailure(.unsupported, "test has no visual channel") }

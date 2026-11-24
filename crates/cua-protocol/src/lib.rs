@@ -21,6 +21,9 @@ pub const MAX_TARGET_EVENTS: usize = 64;
 pub const MAX_TARGET_EVENT_BYTES: usize = 64 * 1024;
 pub const MAX_EVENT_CONTROLS: usize = 16;
 pub const MAX_EVENT_VALUE_BYTES: usize = 4096;
+pub const MAX_URL_BYTES: usize = 2048;
+pub const MAX_CLIPBOARD_BYTES: usize = 256 * 1024;
+pub const MAX_CLIPBOARD_TYPES: usize = 64;
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 macro_rules! record {
@@ -61,8 +64,37 @@ choices!(DeliveryRoute {
     AxSetValue,
     AxSelectedText,
     AxPress,
+    AxScroll,
+    AxScrollToVisible,
+    AxConfirm,
+    AxShowMenu,
+    AxCancel,
+    AxMenu,
+    AxWindowFrame,
+    AxWindowAction,
     ForegroundKey,
-    ForegroundClick
+    ForegroundClick,
+    ForegroundDoubleClick,
+    ForegroundRightClick,
+    ForegroundHover,
+    ForegroundDrag,
+    ForegroundScrollWheel,
+    ForegroundFocus,
+    ForegroundHotkey,
+    ForegroundTypeKeys
+});
+choices!(WindowActionKind { Minimize, Close });
+choices!(ClipboardAction { Read, Write, Clear });
+choices!(ObserveScope {
+    Window,
+    WebArea,
+    MenuBar
+});
+choices!(Modifier {
+    Command,
+    Control,
+    Option,
+    Shift
 });
 choices!(Coverage {
     Complete,
@@ -105,14 +137,24 @@ choices!(Key {
     Right,
     Up,
     Down,
-    SaveAs
+    SaveAs,
+    FocusAddressBar,
+    Reload,
+    NewTab,
+    CloseTab,
+    NavigateBack,
+    NavigateForward
 });
 choices!(ElementAction {
     Press,
     SetValue,
     TypeText,
     Key,
-    Scroll
+    Scroll,
+    ScrollToVisible,
+    Confirm,
+    ShowMenu,
+    Cancel
 });
 choices!(ActionKind {
     Press,
@@ -120,7 +162,22 @@ choices!(ActionKind {
     TypeText,
     Key,
     Scroll,
-    Click
+    ScrollToVisible,
+    Confirm,
+    ShowMenu,
+    Cancel,
+    InvokeMenu,
+    SetWindowFrame,
+    WindowAction,
+    Click,
+    DoubleClick,
+    RightClick,
+    Hover,
+    Drag,
+    ScrollWheel,
+    FocusWindow,
+    Hotkey,
+    TypeKeys
 });
 choices!(StopReason {
     Completed,
@@ -201,14 +258,68 @@ record!(Rect {
     height: f64
 });
 record!(Point { x: f64, y: f64 });
-record!(Target {
-    key: TargetKey,
-    bundle_id: String,
-    title: String,
-    bounds: Rect
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Target {
+    pub key: TargetKey,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+    pub title: String,
+    pub bounds: Rect,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_screen: Option<bool>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+    pub name: String,
+    pub running: bool,
+    pub active: bool,
+    pub hidden: bool,
+}
+record!(DisplayInfo {
+    display_id: u32,
+    bounds: Rect,
+    scale_factor: f64,
+    is_primary: bool
 });
-record!(TargetsRequest { bundle_id: Option<String> });
-record!(TargetsResult { targets: Vec<Target>, truncated: bool });
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TargetsRequest {
+    pub bundle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_contains: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_contains: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unbundled_only: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_offscreen: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_apps: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_displays: bool,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TargetsResult {
+    pub targets: Vec<Target>,
+    pub truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apps: Option<Vec<AppInfo>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub displays: Option<Vec<DisplayInfo>>,
+}
 record!(CollectionInterval {
     started_unix_ms: u64,
     finished_unix_ms: u64
@@ -272,6 +383,8 @@ pub struct Element {
     pub actions: Vec<ElementAction>,
     pub identifier: Option<String>,
     pub subrole: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 #[cfg(feature = "schema")]
@@ -297,6 +410,12 @@ pub struct ObserveRequest {
     pub ax_selectors: Option<Vec<Selector>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_history: Option<EventHistoryRequest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ObserveScope>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub interactive_only: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
 }
 fn is_false(value: &bool) -> bool {
     !value
@@ -320,7 +439,17 @@ pub struct Observation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub events: Option<Box<EventHistory>>,
 }
-record!(Selector { role: String, label: Option<String>, identifier: Option<String> });
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Selector {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    pub label: Option<String>,
+    pub identifier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_contains: Option<String>,
+}
 record!(AxSelectionEvidence { selectors: Vec<Selector>, coverage: Coverage, ambiguous: bool, visited_nodes: u32 });
 record!(EventCursor {
     generation: String,
@@ -343,10 +472,30 @@ record!(ValueCondition {
     element_ref: String,
     value: String
 });
+record!(ValueContainsCondition {
+    element_ref: String,
+    contains: String
+});
 record!(EnabledCondition {
     element_ref: String,
     enabled: bool
 });
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UrlCondition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element_ref: Option<String>,
+    pub contains: String,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OcrCondition {
+    pub contains: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop_window: Option<Rect>,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(
@@ -359,7 +508,10 @@ pub enum Condition {
     ElementExists(ElementCondition),
     ElementAbsent(ElementCondition),
     ValueEquals(ValueCondition),
+    ValueContains(ValueContainsCondition),
     Enabled(EnabledCondition),
+    UrlContains(UrlCondition),
+    OcrContains(OcrCondition),
     WindowAbsent(Empty),
 }
 record!(ElementOperation {
@@ -382,10 +534,54 @@ record!(ScrollOperation {
     axis: Axis,
     amount: i32
 });
+record!(InvokeMenuOperation { path: Vec<String> });
+record!(SetWindowFrameOperation { bounds: Rect });
+record!(WindowActionOperation {
+    action: WindowActionKind
+});
 record!(ClickOperation {
     point: Point,
     space: CoordinateSpace
 });
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DragOperation {
+    pub from: Point,
+    pub to: Point,
+    pub space: CoordinateSpace,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steps: Option<u8>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScrollWheelOperation {
+    pub point: Point,
+    pub space: CoordinateSpace,
+    #[serde(default)]
+    pub delta_x: i32,
+    #[serde(default)]
+    pub delta_y: i32,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HotkeyOperation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element_ref: Option<String>,
+    pub key: String,
+    #[serde(default)]
+    pub modifiers: Vec<Modifier>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TypeKeysOperation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element_ref: Option<String>,
+    pub text: String,
+}
 record!(WaitOperation {
     condition: Condition
 });
@@ -403,7 +599,22 @@ pub enum Operation {
     TypeText(TypeTextOperation),
     Key(KeyOperation),
     Scroll(ScrollOperation),
+    ScrollToVisible(ElementOperation),
+    Confirm(ElementOperation),
+    ShowMenu(ElementOperation),
+    Cancel(ElementOperation),
+    InvokeMenu(InvokeMenuOperation),
+    SetWindowFrame(SetWindowFrameOperation),
+    WindowAction(WindowActionOperation),
     Click(ClickOperation),
+    DoubleClick(ClickOperation),
+    RightClick(ClickOperation),
+    Hover(ClickOperation),
+    Drag(DragOperation),
+    ScrollWheel(ScrollWheelOperation),
+    FocusWindow(Empty),
+    Hotkey(HotkeyOperation),
+    TypeKeys(TypeKeysOperation),
     WaitFor(WaitOperation),
 }
 choices!(FeedbackState {
@@ -421,6 +632,52 @@ record!(ObservationFeedback {
 record!(ActionStep {
     action_id: String, operation: Operation, precondition: Option<Condition>, expect: Option<Condition>
 });
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ObserveAfter {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_screenshot: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_values: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_ocr: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr_query: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ObserveScope>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub interactive_only: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ax_selectors: Option<Vec<Selector>>,
+}
+impl ObserveAfter {
+    fn to_observe_request(&self, target: TargetKey) -> ObserveRequest {
+        ObserveRequest {
+            target,
+            include_screenshot: self.include_screenshot,
+            include_values: self.include_values,
+            include_ocr: self.include_ocr,
+            ocr_query: self.ocr_query.clone(),
+            crop_window: None,
+            max_image_dimension_px: None,
+            ax_selectors: self.ax_selectors.clone(),
+            event_history: None,
+            scope: self.scope,
+            interactive_only: self.interactive_only,
+            query: self.query.clone(),
+        }
+    }
+    fn validate(&self) -> Result<(), String> {
+        self.to_observe_request(TargetKey {
+            pid: 1,
+            window_id: 1,
+        })
+        .validate()
+    }
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -432,6 +689,8 @@ pub struct ActRequest {
     pub feedback: Option<FeedbackRequest>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub foreground: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observe_after: Option<ObserveAfter>,
 }
 record!(CheckEvidence {
     observation_id: String,
@@ -475,13 +734,81 @@ pub struct ActResult {
     pub feedback: Option<ObservationFeedback>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub foreground: Option<ForegroundEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<Box<Observation>>,
 }
-record!(WaitRequest {
-    observation_id: String,
-    target: TargetKey,
-    condition: Condition
-});
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WaitRequest {
+    pub observation_id: String,
+    pub target: TargetKey,
+    pub condition: Condition,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_values: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<ObserveScope>,
+}
 record!(WaitResult { outcome: WaitOutcome, already_satisfied: bool, observation: Option<Observation>, evidence: Option<Box<CheckEvidence>> });
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OpenRequest {
+    pub grant_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub new_instance: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub activate: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observe: Option<ObserveAfter>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OpenResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
+    pub activated: bool,
+    pub targets: Vec<Target>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<Box<Observation>>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClipboardRequest {
+    pub grant_id: String,
+    pub action: ClipboardAction,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_text: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_path: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClipboardResult {
+    pub change_count: u64,
+    pub types: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_bytes: Option<u32>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub truncated: bool,
+}
 record!(CancelRequest { request_id: String });
 record!(CancelResult {
     request_id: String,
@@ -507,6 +834,8 @@ pub enum RequestBody {
     Observe(ObserveRequest),
     Act(ActRequest),
     WaitFor(WaitRequest),
+    Open(OpenRequest),
+    Clipboard(ClipboardRequest),
     Cancel(CancelRequest),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -524,6 +853,8 @@ pub enum ResponseBody {
     Observe(Observation),
     Act(ActResult),
     WaitFor(WaitResult),
+    Open(OpenResult),
+    Clipboard(ClipboardResult),
     Cancel(CancelResult),
     Error(Failure),
 }
@@ -577,6 +908,22 @@ impl SessionContext {
                 "operator foreground authority is required",
             )?;
         }
+        if let RequestBody::Open(open) = &request.body {
+            require(
+                open.grant_id == self.authority.grant_id,
+                "unknown host authority grant",
+            )?;
+            require(
+                !open.activate || self.authority.mode == ExecutionMode::ForegroundAllowed,
+                "operator foreground authority is required",
+            )?;
+        }
+        if let RequestBody::Clipboard(clipboard) = &request.body {
+            require(
+                clipboard.grant_id == self.authority.grant_id,
+                "unknown host authority grant",
+            )?;
+        }
         Ok(())
     }
 }
@@ -626,6 +973,145 @@ fn channel_interval(
         "channel interval outside observation",
     )
 }
+fn is_foreground_route(route: DeliveryRoute) -> bool {
+    matches!(
+        route,
+        DeliveryRoute::ForegroundKey
+            | DeliveryRoute::ForegroundClick
+            | DeliveryRoute::ForegroundDoubleClick
+            | DeliveryRoute::ForegroundRightClick
+            | DeliveryRoute::ForegroundHover
+            | DeliveryRoute::ForegroundDrag
+            | DeliveryRoute::ForegroundScrollWheel
+            | DeliveryRoute::ForegroundFocus
+            | DeliveryRoute::ForegroundHotkey
+            | DeliveryRoute::ForegroundTypeKeys
+    )
+}
+fn is_foreground_operation(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Key(_)
+            | Operation::Click(_)
+            | Operation::DoubleClick(_)
+            | Operation::RightClick(_)
+            | Operation::Hover(_)
+            | Operation::Drag(_)
+            | Operation::ScrollWheel(_)
+            | Operation::FocusWindow(_)
+            | Operation::Hotkey(_)
+            | Operation::TypeKeys(_)
+    )
+}
+pub fn is_valid_hotkey_name(key: &str) -> bool {
+    matches!(
+        key,
+        "a" | "b"
+            | "c"
+            | "d"
+            | "e"
+            | "f"
+            | "g"
+            | "h"
+            | "i"
+            | "j"
+            | "k"
+            | "l"
+            | "m"
+            | "n"
+            | "o"
+            | "p"
+            | "q"
+            | "r"
+            | "s"
+            | "t"
+            | "u"
+            | "v"
+            | "w"
+            | "x"
+            | "y"
+            | "z"
+            | "0"
+            | "1"
+            | "2"
+            | "3"
+            | "4"
+            | "5"
+            | "6"
+            | "7"
+            | "8"
+            | "9"
+            | "minus"
+            | "equal"
+            | "leftBracket"
+            | "rightBracket"
+            | "backslash"
+            | "semicolon"
+            | "quote"
+            | "comma"
+            | "period"
+            | "slash"
+            | "grave"
+            | "space"
+            | "return"
+            | "tab"
+            | "escape"
+            | "backspace"
+            | "delete"
+            | "left"
+            | "right"
+            | "up"
+            | "down"
+            | "home"
+            | "end"
+            | "pageUp"
+            | "pageDown"
+            | "f1"
+            | "f2"
+            | "f3"
+            | "f4"
+            | "f5"
+            | "f6"
+            | "f7"
+            | "f8"
+            | "f9"
+            | "f10"
+            | "f11"
+            | "f12"
+    )
+}
+fn valid_open_url(url: &str) -> Result<(), String> {
+    require(
+        !url.is_empty()
+            && url.len() <= MAX_URL_BYTES
+            && !url.bytes().any(|b| b <= 0x20 || b == 0x7f),
+        "invalid open URL",
+    )?;
+    let Some((scheme, rest)) = url.split_once(':') else {
+        return Err("open URL requires a scheme".into());
+    };
+    let mut chars = scheme.chars();
+    require(
+        chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+            && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')),
+        "invalid open URL scheme",
+    )?;
+    let lower = scheme.to_ascii_lowercase();
+    require(
+        !matches!(lower.as_str(), "javascript" | "vbscript" | "data"),
+        "forbidden open URL scheme",
+    )?;
+    if matches!(lower.as_str(), "http" | "https") {
+        let Some(after) = rest.strip_prefix("//") else {
+            return Err("http(s) URL requires authority".into());
+        };
+        let host = after.split(['/', '?', '#']).next().unwrap_or("");
+        require(!host.is_empty(), "http(s) URL requires host")?;
+    } else {
+        require(!rest.is_empty(), "open URL requires target")?;
+    }
+    Ok(())
+}
 fn expectation(
     step: &ActionStep,
     receipt: &StepReceipt,
@@ -639,17 +1125,41 @@ fn expectation(
                 (Operation::SetValue(_), DeliveryRoute::AxSetValue)
                     | (Operation::TypeText(_), DeliveryRoute::AxSelectedText)
                     | (Operation::Press(_), DeliveryRoute::AxPress)
+                    | (Operation::Scroll(_), DeliveryRoute::AxScroll)
+                    | (
+                        Operation::ScrollToVisible(_),
+                        DeliveryRoute::AxScrollToVisible
+                    )
+                    | (Operation::Confirm(_), DeliveryRoute::AxConfirm)
+                    | (Operation::ShowMenu(_), DeliveryRoute::AxShowMenu)
+                    | (Operation::Cancel(_), DeliveryRoute::AxCancel)
+                    | (Operation::InvokeMenu(_), DeliveryRoute::AxMenu)
+                    | (Operation::SetWindowFrame(_), DeliveryRoute::AxWindowFrame)
+                    | (Operation::WindowAction(_), DeliveryRoute::AxWindowAction)
                     | (Operation::Key(_), DeliveryRoute::ForegroundKey)
                     | (Operation::Click(_), DeliveryRoute::ForegroundClick)
+                    | (
+                        Operation::DoubleClick(_),
+                        DeliveryRoute::ForegroundDoubleClick
+                    )
+                    | (
+                        Operation::RightClick(_),
+                        DeliveryRoute::ForegroundRightClick
+                    )
+                    | (Operation::Hover(_), DeliveryRoute::ForegroundHover)
+                    | (Operation::Drag(_), DeliveryRoute::ForegroundDrag)
+                    | (
+                        Operation::ScrollWheel(_),
+                        DeliveryRoute::ForegroundScrollWheel
+                    )
+                    | (Operation::FocusWindow(_), DeliveryRoute::ForegroundFocus)
+                    | (Operation::Hotkey(_), DeliveryRoute::ForegroundHotkey)
+                    | (Operation::TypeKeys(_), DeliveryRoute::ForegroundTypeKeys)
             ),
             "receipt route does not match operation",
         )?;
         require(
-            foreground
-                == matches!(
-                    route,
-                    DeliveryRoute::ForegroundKey | DeliveryRoute::ForegroundClick
-                ),
+            foreground == is_foreground_route(route),
             "receipt route does not match requested foreground mode",
         )?;
     }
@@ -737,9 +1247,36 @@ fn unique<'a>(values: impl Iterator<Item = &'a str>) -> Result<(), String> {
 impl Condition {
     fn validate(&self) -> Result<(), String> {
         match self {
-            Self::ElementExists(v) | Self::ElementAbsent(v) => id(&v.selector.role),
+            Self::ElementExists(v) | Self::ElementAbsent(v) => validate_selector(&v.selector),
             Self::ValueEquals(v) => id(&v.element_ref),
+            Self::ValueContains(v) => {
+                id(&v.element_ref)?;
+                require(
+                    !v.contains.is_empty() && v.contains.len() <= 4096,
+                    "invalid value substring condition",
+                )
+            }
             Self::Enabled(v) => id(&v.element_ref),
+            Self::UrlContains(v) => {
+                if let Some(element_ref) = &v.element_ref {
+                    id(element_ref)?;
+                }
+                require(
+                    !v.contains.is_empty() && v.contains.len() <= MAX_URL_BYTES,
+                    "invalid URL substring condition",
+                )
+            }
+            Self::OcrContains(v) => {
+                require(
+                    !v.contains.is_empty() && v.contains.len() <= MAX_OCR_QUERY_BYTES,
+                    "invalid OCR substring condition",
+                )?;
+                if let Some(crop) = &v.crop_window {
+                    rect(crop)?;
+                    require(crop.x >= 0.0 && crop.y >= 0.0, "invalid OCR condition crop")?;
+                }
+                Ok(())
+            }
             Self::WindowAbsent(_) => Ok(()),
         }
     }
@@ -781,6 +1318,10 @@ impl ObservationFeedback {
                     element.label.as_ref().is_none_or(|s| s.len() <= 1024)
                         && element.identifier.as_ref().is_none_or(|s| s.len() <= 1024)
                         && element.subrole.as_ref().is_none_or(|s| s.len() <= 1024)
+                        && element
+                            .url
+                            .as_ref()
+                            .is_none_or(|s| !s.is_empty() && s.len() <= MAX_URL_BYTES)
                         && element.value.as_ref().is_none_or(|s| s.len() <= 65_536),
                     "feedback projection exceeds string limit",
                 )?;
@@ -947,10 +1488,36 @@ impl ObserveRequest {
         if let Some(selectors) = &self.ax_selectors {
             validate_selectors(selectors)?;
         }
+        if let Some(query) = &self.query {
+            require(
+                !query.trim().is_empty() && query.len() <= 1024,
+                "invalid AX query",
+            )?;
+            require(
+                self.ax_selectors.is_none(),
+                "query cannot be combined with axSelectors",
+            )?;
+        }
+        if self.scope == Some(ObserveScope::MenuBar) {
+            require(
+                self.event_history.is_none()
+                    && !self.include_screenshot
+                    && !self.include_ocr
+                    && self.crop_window.is_none()
+                    && self.max_image_dimension_px.is_none(),
+                "menuBar scope does not support visual capture or event history",
+            )?;
+        }
         if let Some(history) = &self.event_history {
             require(
                 self.ax_selectors.is_some(),
                 "event history requires explicit AX selectors",
+            )?;
+            require(
+                self.scope.is_none_or(|s| s == ObserveScope::Window)
+                    && !self.interactive_only
+                    && self.query.is_none(),
+                "event history requires full window scope",
             )?;
             if let Some(cursor) = &history.cursor {
                 id(&cursor.generation)?;
@@ -982,18 +1549,37 @@ impl ObserveRequest {
         Ok(())
     }
 }
+fn validate_selector(selector: &Selector) -> Result<(), String> {
+    require(
+        selector.role.is_some()
+            || selector.label.is_some()
+            || selector.label_contains.is_some()
+            || selector.identifier.is_some(),
+        "AX selector requires at least one matching field",
+    )?;
+    if let Some(role) = &selector.role {
+        id(role)?;
+    }
+    require(
+        selector.label.as_ref().is_none_or(|s| s.len() <= 1024)
+            && selector.identifier.as_ref().is_none_or(|s| s.len() <= 1024),
+        "AX selector exceeds string limit",
+    )?;
+    if let Some(contains) = &selector.label_contains {
+        require(
+            !contains.is_empty() && contains.len() <= 1024,
+            "invalid AX selector labelContains",
+        )?;
+    }
+    Ok(())
+}
 fn validate_selectors(selectors: &[Selector]) -> Result<(), String> {
     require(
         !selectors.is_empty() && selectors.len() <= MAX_AX_SELECTORS,
         "invalid AX selector count",
     )?;
     for (index, selector) in selectors.iter().enumerate() {
-        id(&selector.role)?;
-        require(
-            selector.label.as_ref().is_none_or(|s| s.len() <= 1024)
-                && selector.identifier.as_ref().is_none_or(|s| s.len() <= 1024),
-            "AX selector exceeds string limit",
-        )?;
+        validate_selector(selector)?;
         require(
             !selectors[..index].contains(selector),
             "duplicate AX selector",
@@ -1002,22 +1588,40 @@ fn validate_selectors(selectors: &[Selector]) -> Result<(), String> {
     Ok(())
 }
 fn selector_matches(element: &Element, selector: &Selector) -> bool {
-    element.role == selector.role
+    selector
+        .role
+        .as_ref()
+        .is_none_or(|role| element.role == *role)
         && selector
             .label
             .as_ref()
             .is_none_or(|s| Some(s) == element.label.as_ref())
+        && selector.label_contains.as_ref().is_none_or(|sub| {
+            element
+                .label
+                .as_deref()
+                .is_some_and(|label| label.contains(sub.as_str()))
+        })
         && selector
             .identifier
             .as_ref()
             .is_none_or(|s| Some(s) == element.identifier.as_ref())
 }
 fn historical_matches(control: &EventControl, selector: &Selector) -> bool {
-    control.role == selector.role
+    selector
+        .role
+        .as_ref()
+        .is_none_or(|role| control.role == *role)
         && selector
             .label
             .as_ref()
             .is_none_or(|s| Some(s) == control.label.as_ref())
+        && selector.label_contains.as_ref().is_none_or(|sub| {
+            control
+                .label
+                .as_deref()
+                .is_some_and(|label| label.contains(sub.as_str()))
+        })
         && selector
             .identifier
             .as_ref()
@@ -1215,6 +1819,13 @@ impl Observation {
                 element.subrole.as_ref().is_none_or(|s| s.len() <= 1024),
                 "element subrole exceeds string limit",
             )?;
+            require(
+                element
+                    .url
+                    .as_ref()
+                    .is_none_or(|s| !s.is_empty() && s.len() <= MAX_URL_BYTES),
+                "element URL exceeds string limit",
+            )?;
         }
         if let Some(selection) = &self.ax_selection {
             validate_selectors(&selection.selectors)?;
@@ -1340,6 +1951,104 @@ impl Observation {
         Ok(())
     }
 }
+impl OpenRequest {
+    fn validate(&self) -> Result<(), String> {
+        id(&self.grant_id)?;
+        require(
+            self.bundle_id.is_some() || self.app_name.is_some() || self.url.is_some(),
+            "open requires bundleId, appName, or url",
+        )?;
+        require(
+            !(self.bundle_id.is_some() && self.app_name.is_some()),
+            "specify either bundleId or appName, not both",
+        )?;
+        if let Some(bundle_id) = &self.bundle_id {
+            id(bundle_id)?;
+        }
+        if let Some(app_name) = &self.app_name {
+            require(
+                !app_name.trim().is_empty()
+                    && app_name.len() <= 256
+                    && !app_name.contains('/')
+                    && !app_name.contains('\\')
+                    && !app_name.contains("..")
+                    && !app_name.bytes().any(|b| b < 0x20 || b == 0x7f),
+                "invalid app name",
+            )?;
+        }
+        if let Some(url) = &self.url {
+            valid_open_url(url)?;
+        }
+        if self.new_instance {
+            require(
+                self.bundle_id.is_some() || self.app_name.is_some(),
+                "newInstance requires bundleId or appName",
+            )?;
+        }
+        if let Some(observe) = &self.observe {
+            observe.validate()?;
+        }
+        Ok(())
+    }
+}
+fn valid_clipboard_path(path: &str) -> Result<(), String> {
+    require(
+        !path.is_empty()
+            && path.len() <= 2048
+            && path.starts_with('/')
+            && !path.bytes().any(|b| b < 0x20 || b == 0x7f)
+            && !path.split('/').any(|seg| seg == ".."),
+        "invalid clipboard file path",
+    )
+}
+impl ClipboardRequest {
+    fn validate(&self) -> Result<(), String> {
+        id(&self.grant_id)?;
+        match self.action {
+            ClipboardAction::Read => {
+                require(
+                    self.text.is_none() && self.file_path.is_none() && self.image_path.is_none(),
+                    "clipboard read cannot carry write payloads",
+                )?;
+            }
+            ClipboardAction::Write => {
+                require(
+                    !self.include_text,
+                    "includeText is only valid for clipboard read",
+                )?;
+                let payload_count = usize::from(self.text.is_some())
+                    + usize::from(self.file_path.is_some())
+                    + usize::from(self.image_path.is_some());
+                require(
+                    payload_count == 1,
+                    "clipboard write requires exactly one of text, filePath, or imagePath",
+                )?;
+                if let Some(text) = &self.text {
+                    require(
+                        text.len() <= MAX_CLIPBOARD_BYTES && !text.bytes().any(|b| b == 0),
+                        "invalid clipboard text",
+                    )?;
+                }
+                if let Some(path) = &self.file_path {
+                    valid_clipboard_path(path)?;
+                }
+                if let Some(path) = &self.image_path {
+                    valid_clipboard_path(path)?;
+                }
+            }
+            ClipboardAction::Clear => {
+                require(
+                    !self.include_text
+                        && self.text.is_none()
+                        && self.file_path.is_none()
+                        && self.image_path.is_none(),
+                    "clipboard clear cannot carry read or write options",
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
 impl ActRequest {
     fn validate(&self) -> Result<(), String> {
         id(&self.grant_id)?;
@@ -1353,20 +2062,22 @@ impl ActRequest {
         if self.foreground {
             require(
                 self.steps.iter().all(|step| {
-                    matches!(
-                        step.operation,
-                        Operation::Key(_) | Operation::Click(_) | Operation::WaitFor(_)
-                    )
+                    is_foreground_operation(&step.operation)
+                        || matches!(step.operation, Operation::WaitFor(_))
                 }) && self
                     .steps
                     .iter()
-                    .any(|step| matches!(step.operation, Operation::Key(_) | Operation::Click(_))),
-                "foreground sequences require a key or click and may include waits",
+                    .any(|step| is_foreground_operation(&step.operation)),
+                "foreground sequences require a foreground action and may include waits",
             )?;
         }
         for step in &self.steps {
             match &step.operation {
-                Operation::Press(v) => id(&v.element_ref)?,
+                Operation::Press(v)
+                | Operation::ScrollToVisible(v)
+                | Operation::Confirm(v)
+                | Operation::ShowMenu(v)
+                | Operation::Cancel(v) => id(&v.element_ref)?,
                 Operation::SetValue(v) => id(&v.element_ref)?,
                 Operation::TypeText(v) => {
                     id(&v.element_ref)?;
@@ -1380,10 +2091,76 @@ impl ActRequest {
                         "invalid scroll amount",
                     )?;
                 }
-                Operation::Click(v) => require(
+                Operation::InvokeMenu(v) => {
+                    require(
+                        (2..=6).contains(&v.path.len()),
+                        "menu path requires 2 to 6 segments",
+                    )?;
+                    for segment in &v.path {
+                        require(
+                            !segment.trim().is_empty() && segment.len() <= 256,
+                            "invalid menu path segment",
+                        )?;
+                    }
+                }
+                Operation::SetWindowFrame(v) => rect(&v.bounds)?,
+                Operation::WindowAction(_) | Operation::FocusWindow(_) => (),
+                Operation::Click(v)
+                | Operation::DoubleClick(v)
+                | Operation::RightClick(v)
+                | Operation::Hover(v) => require(
                     v.point.x.is_finite() && v.point.y.is_finite(),
                     "invalid point",
                 )?,
+                Operation::Drag(v) => {
+                    require(
+                        v.from.x.is_finite()
+                            && v.from.y.is_finite()
+                            && v.to.x.is_finite()
+                            && v.to.y.is_finite()
+                            && v.from != v.to,
+                        "invalid drag endpoints",
+                    )?;
+                    if let Some(steps) = v.steps {
+                        require((1..=50).contains(&steps), "invalid drag step count")?;
+                    }
+                }
+                Operation::ScrollWheel(v) => {
+                    require(
+                        v.point.x.is_finite() && v.point.y.is_finite(),
+                        "invalid point",
+                    )?;
+                    require(
+                        (v.delta_x != 0 || v.delta_y != 0)
+                            && (-2000..=2000).contains(&v.delta_x)
+                            && (-2000..=2000).contains(&v.delta_y),
+                        "invalid scroll wheel delta",
+                    )?;
+                }
+                Operation::Hotkey(v) => {
+                    if let Some(element_ref) = &v.element_ref {
+                        id(element_ref)?;
+                    }
+                    require(is_valid_hotkey_name(&v.key), "invalid hotkey name")?;
+                    require(v.modifiers.len() <= 4, "too many modifiers")?;
+                    for (index, modifier) in v.modifiers.iter().enumerate() {
+                        require(
+                            !v.modifiers[..index].contains(modifier),
+                            "duplicate modifier",
+                        )?;
+                    }
+                }
+                Operation::TypeKeys(v) => {
+                    if let Some(element_ref) = &v.element_ref {
+                        id(element_ref)?;
+                    }
+                    require(
+                        !v.text.is_empty()
+                            && v.text.len() <= 4096
+                            && !v.text.bytes().any(|b| b == 0),
+                        "invalid foreground text",
+                    )?;
+                }
                 Operation::WaitFor(v) => {
                     v.condition.validate()?;
                     require(
@@ -1405,6 +2182,9 @@ impl ActRequest {
                 "too many feedback references",
             )?;
             unique(feedback.element_refs.iter().map(String::as_str))?;
+        }
+        if let Some(after) = &self.observe_after {
+            after.validate()?;
         }
         Ok(())
     }
@@ -1513,6 +2293,9 @@ impl ActResult {
         if let Some(feedback) = &self.feedback {
             feedback.validate()?;
         }
+        if let Some(observation) = &self.observation {
+            observation.validate()?;
+        }
         Ok(())
     }
 }
@@ -1526,6 +2309,7 @@ impl Frame {
                 ActResult {
                     feedback: None,
                     foreground: None,
+                    observation: None,
                     observation_id: progress.observation_id.clone(),
                     steps: progress.steps.clone(),
                     remaining_steps: 0,
@@ -1552,13 +2336,33 @@ impl Frame {
                     id(request.epoch.as_deref().ok_or("epoch required")?)?;
                 }
                 match &request.body {
+                    RequestBody::Targets(v) => {
+                        if let Some(title) = &v.title_contains {
+                            require(
+                                !title.trim().is_empty() && title.len() <= 1024,
+                                "invalid title filter",
+                            )?;
+                        }
+                        if let Some(owner) = &v.owner_contains {
+                            require(
+                                !owner.trim().is_empty() && owner.len() <= 1024,
+                                "invalid owner filter",
+                            )?;
+                        }
+                    }
                     RequestBody::Observe(v) => v.validate()?,
                     RequestBody::Act(v) => v.validate()?,
                     RequestBody::WaitFor(v) => {
                         id(&v.observation_id)?;
                         target(&v.target)?;
                         v.condition.validate()?;
+                        require(
+                            v.scope != Some(ObserveScope::MenuBar),
+                            "menuBar scope is not supported for waitFor",
+                        )?;
                     }
+                    RequestBody::Open(v) => v.validate()?,
+                    RequestBody::Clipboard(v) => v.validate()?,
                     RequestBody::Cancel(v) => {
                         id(&v.request_id)?;
                         require(v.request_id != request.id, "cancel cannot target itself")?;
@@ -1582,8 +2386,47 @@ impl Frame {
                         require(v.targets.len() <= MAX_TARGETS, "too many targets")?;
                         for t in &v.targets {
                             target(&t.key)?;
-                            id(&t.bundle_id)?;
+                            if let Some(bundle_id) = &t.bundle_id {
+                                id(bundle_id)?;
+                            }
+                            if let Some(owner_name) = &t.owner_name {
+                                require(
+                                    !owner_name.trim().is_empty() && owner_name.len() <= 1024,
+                                    "invalid target owner name",
+                                )?;
+                            }
                             rect(&t.bounds)?;
+                        }
+                        if let Some(apps) = &v.apps {
+                            require(apps.len() <= MAX_TARGETS, "too many apps")?;
+                            for app in apps {
+                                if let Some(pid) = app.pid {
+                                    require(pid > 0, "app pid must be positive")?;
+                                }
+                                if let Some(bundle_id) = &app.bundle_id {
+                                    id(bundle_id)?;
+                                }
+                                require(
+                                    !app.name.trim().is_empty() && app.name.len() <= 1024,
+                                    "invalid app name",
+                                )?;
+                                require(
+                                    app.running
+                                        || (app.pid.is_none() && !app.active && !app.hidden),
+                                    "non-running app cannot carry running state",
+                                )?;
+                            }
+                        }
+                        if let Some(displays) = &v.displays {
+                            require(displays.len() <= 32, "too many displays")?;
+                            for display in displays {
+                                require(display.display_id > 0, "display ID must be positive")?;
+                                rect(&display.bounds)?;
+                                require(
+                                    display.scale_factor.is_finite() && display.scale_factor > 0.0,
+                                    "invalid display scale factor",
+                                )?;
+                            }
                         }
                     }
                     ResponseBody::Observe(v) => v.validate()?,
@@ -1610,6 +2453,57 @@ impl Frame {
                         if let Some(o) = &v.observation {
                             o.validate()?;
                         }
+                    }
+                    ResponseBody::Open(v) => {
+                        if let Some(pid) = v.pid {
+                            require(pid > 0, "open pid must be positive")?;
+                        }
+                        if let Some(bundle_id) = &v.bundle_id {
+                            id(bundle_id)?;
+                        }
+                        require(v.targets.len() <= MAX_TARGETS, "too many targets")?;
+                        for t in &v.targets {
+                            target(&t.key)?;
+                            if let Some(bundle_id) = &t.bundle_id {
+                                id(bundle_id)?;
+                            }
+                            if let Some(owner_name) = &t.owner_name {
+                                require(
+                                    !owner_name.trim().is_empty() && owner_name.len() <= 1024,
+                                    "invalid target owner name",
+                                )?;
+                            }
+                            rect(&t.bounds)?;
+                        }
+                        if let Some(observation) = &v.observation {
+                            observation.validate()?;
+                        }
+                    }
+                    ResponseBody::Clipboard(v) => {
+                        require(
+                            v.change_count <= MAX_SAFE_INTEGER,
+                            "clipboard change count exceeds safe integer range",
+                        )?;
+                        require(
+                            v.types.len() <= MAX_CLIPBOARD_TYPES,
+                            "too many clipboard types",
+                        )?;
+                        for item in &v.types {
+                            require(
+                                !item.trim().is_empty() && item.len() <= 256,
+                                "invalid clipboard type",
+                            )?;
+                        }
+                        if let Some(text) = &v.text {
+                            require(
+                                text.len() <= MAX_CLIPBOARD_BYTES,
+                                "clipboard text exceeds payload limit",
+                            )?;
+                        }
+                        require(
+                            !v.truncated || v.text.is_some(),
+                            "truncated clipboard requires text",
+                        )?;
                     }
                     ResponseBody::Cancel(v) => id(&v.request_id)?,
                     ResponseBody::Error(v) => {
@@ -1675,12 +2569,30 @@ impl Response {
         match (&request.body, &self.body) {
             (_, ResponseBody::Error(_))
             | (RequestBody::Hello(_), ResponseBody::Hello(_))
-            | (RequestBody::Capabilities(_), ResponseBody::Capabilities(_))
-            | (RequestBody::Targets(_), ResponseBody::Targets(_)) => Ok(()),
+            | (RequestBody::Capabilities(_), ResponseBody::Capabilities(_)) => Ok(()),
+            (RequestBody::Targets(request), ResponseBody::Targets(result)) => {
+                require(
+                    request.include_apps == result.apps.is_some(),
+                    "apps inclusion does not match request",
+                )?;
+                require(
+                    request.include_displays == result.displays.is_some(),
+                    "displays inclusion does not match request",
+                )
+            }
             (RequestBody::Observe(request), ResponseBody::Observe(observation)) => {
                 require(
                     request.target == observation.target,
                     "observation target mismatch",
+                )?;
+                let scoped = matches!(
+                    request.scope,
+                    Some(ObserveScope::WebArea | ObserveScope::MenuBar)
+                ) || request.interactive_only
+                    || request.query.is_some();
+                require(
+                    !scoped || observation.accessibility != Coverage::Complete,
+                    "scoped observation cannot imply a complete window",
                 )?;
                 require(
                     request.include_values
@@ -1831,7 +2743,17 @@ impl Response {
                     request.foreground || result.foreground.is_none(),
                     "unrequested foreground evidence",
                 )?;
-                correlate_feedback(request, result)
+                correlate_feedback(request, result)?;
+                require(
+                    request.observe_after.is_some() || result.observation.is_none(),
+                    "act includes unrequested post-action observation",
+                )?;
+                if let (Some(after), Some(observation)) =
+                    (&request.observe_after, &result.observation)
+                {
+                    validate_observe_after(after, &request.target, observation)?;
+                }
+                Ok(())
             }
             (RequestBody::WaitFor(request), ResponseBody::WaitFor(result)) => {
                 if let Some(evidence) = &result.evidence {
@@ -1867,12 +2789,41 @@ impl Response {
                         "wait observation target mismatch",
                     )?;
                     require(
-                        observation.elements.iter().all(|e| e.value.is_none()),
+                        request.include_values
+                            || observation.elements.iter().all(|e| e.value.is_none()),
                         "wait observation includes private values",
+                    )?;
+                    require(
+                        request.scope != Some(ObserveScope::WebArea)
+                            || observation.accessibility != Coverage::Complete,
+                        "scoped wait observation cannot imply a complete window",
                     )?;
                 }
                 Ok(())
             }
+            (RequestBody::Open(request), ResponseBody::Open(result)) => {
+                require(
+                    request.activate || !result.activated,
+                    "unrequested foreground activation",
+                )?;
+                require(
+                    request.observe.is_some() || result.observation.is_none(),
+                    "open includes unrequested observation",
+                )?;
+                if let (Some(after), Some(observation)) = (&request.observe, &result.observation) {
+                    require(
+                        result.targets.iter().any(|t| t.key == observation.target),
+                        "open observation target is not among opened targets",
+                    )?;
+                    validate_observe_after(after, &observation.target, observation)?;
+                }
+                Ok(())
+            }
+            (RequestBody::Clipboard(request), ResponseBody::Clipboard(result)) => require(
+                (request.action == ClipboardAction::Read && request.include_text)
+                    || result.text.is_none(),
+                "clipboard includes unrequested text",
+            ),
             (RequestBody::Cancel(request), ResponseBody::Cancel(result)) => require(
                 request.request_id == result.request_id,
                 "cancel target mismatch",
@@ -1880,6 +2831,53 @@ impl Response {
             _ => Err("response method mismatch".into()),
         }
     }
+}
+
+fn validate_observe_after(
+    after: &ObserveAfter,
+    expected_target: &TargetKey,
+    observation: &Observation,
+) -> Result<(), String> {
+    require(
+        observation.target == *expected_target,
+        "post-action observation target mismatch",
+    )?;
+    let scoped = matches!(
+        after.scope,
+        Some(ObserveScope::WebArea | ObserveScope::MenuBar)
+    ) || after.interactive_only
+        || after.query.is_some();
+    require(
+        !scoped || observation.accessibility != Coverage::Complete,
+        "scoped observation cannot imply a complete window",
+    )?;
+    require(
+        after.include_values || observation.elements.iter().all(|e| e.value.is_none()),
+        "observation includes unrequested values",
+    )?;
+    require(
+        after.ax_selectors.as_ref() == observation.ax_selection.as_ref().map(|s| &s.selectors),
+        "AX selection does not match request",
+    )?;
+    require(
+        after.include_screenshot || observation.screenshot.is_none(),
+        "observation includes unrequested image",
+    )?;
+    require(
+        after.include_screenshot || after.include_ocr || observation.visual.is_none(),
+        "observation includes unrequested visual evidence",
+    )?;
+    require(
+        !after.include_ocr || observation.visual.is_some(),
+        "requested visual evidence is missing",
+    )?;
+    if let Some(visual) = &observation.visual {
+        require(
+            after.include_ocr == visual.ocr.is_some(),
+            "OCR inclusion does not match request",
+        )?;
+    }
+    Ok(())
 }
 
 /// Decode exactly one JSONL frame, excluding the optional final LF. Embedded newlines are rejected.

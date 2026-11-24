@@ -39,7 +39,7 @@ private final class BlockingActionSystem: NativeSystem, AXReading, AXMutating, W
         return Permissions(accessibility: true, screenRecording: false, inputPosting: false)
     }
     func supportedActions(permissions: Permissions) -> [ActionKind] { [.setValue] }
-    func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult {
+    func targets(_ request: TargetsRequest, context: OperationContext) throws -> TargetsResult {
         try context.check(); return TargetsResult(targets: [integrationTarget], truncated: false)
     }
     func window(_ key: TargetKey, context: OperationContext) throws -> Target { try context.check(); return integrationTarget }

@@ -5,7 +5,7 @@ struct CUASetup {
     @MainActor
     static func main() {
         let app = NSApplication.shared
-        let window = SetupWindow(configuration: configuration())
+        let window = SetupWindow(hostURL: hostURL())
         app.setActivationPolicy(.regular)
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -13,16 +13,20 @@ struct CUASetup {
         withExtendedLifetime(window) { app.run() }
     }
 
-    private static func configuration() -> String? {
+    private static func hostURL() -> URL? {
         guard let executable = Bundle.main.executableURL else { return nil }
         let host = executable.deletingLastPathComponent().appendingPathComponent("cua-host")
-        guard FileManager.default.isExecutableFile(atPath: host.path) else { return nil }
+        return FileManager.default.isExecutableFile(atPath: host.path) ? host : nil
+    }
 
+    static func configuration(hostURL: URL?, allowForeground: Bool) -> String? {
+        guard let host = hostURL else { return nil }
+        let args = allowForeground ? ["--allow-foreground"] : [String]()
         let value = [
             "mcpServers": [
-                "macos-computer-use-native": [
+                "macos-computer-use": [
                     "command": host.path,
-                    "args": [String](),
+                    "args": args,
                     "env": ["CUA_VISUAL_FEEDBACK": "1", "CUA_LIVE_PREVIEW": "1"],
                 ] as [String: Any],
             ],
@@ -36,12 +40,17 @@ struct CUASetup {
 @MainActor
 private final class SetupWindow: NSWindow, NSWindowDelegate {
     private static let skillName = "macos-computer-use-native"
-    private let configuration: String?
+    private let hostURL: URL?
+    private let allowForegroundToggle = NSButton(
+        checkboxWithTitle: "Allow temporary foreground fallback (file pickers, canvas, hotkeys)",
+        target: nil,
+        action: nil
+    )
     private let status = NSTextField(labelWithString: "")
 
-    init(configuration: String?) {
-        self.configuration = configuration
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 510, height: 195),
+    init(hostURL: URL?) {
+        self.hostURL = hostURL
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 560, height: 245),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
         title = "macOS Computer Use"
         delegate = self
@@ -57,26 +66,32 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
         let heading = NSTextField(labelWithString: "Connect your MCP client")
         heading.font = .systemFont(ofSize: 21, weight: .semibold)
         let help = NSTextField(wrappingLabelWithString:
-            "Add the copied configuration to your MCP client and reconnect. It enables background control, the agent pointer, and the live preview.")
+            "Add the copied configuration to your MCP client and reconnect. Runs background-first with optional temporary foreground escalation and the MV3 Chromium browser accelerator.")
         help.font = .systemFont(ofSize: 13)
         help.textColor = .secondaryLabelColor
+        allowForegroundToggle.state = .on
+        allowForegroundToggle.font = .systemFont(ofSize: 12)
         status.textColor = .secondaryLabelColor
-        if configuration == nil { status.stringValue = "The bundled MCP server is missing." }
+        status.lineBreakMode = .byTruncatingMiddle
+        if hostURL == nil { status.stringValue = "The bundled MCP server is missing." }
 
-        let copy = NSButton(title: "Copy MCP Configuration", target: self, action: #selector(copyConfiguration))
+        let copy = NSButton(title: "Copy MCP Config", target: self, action: #selector(copyConfiguration))
         copy.bezelStyle = .rounded
-        copy.isEnabled = configuration != nil
+        copy.isEnabled = hostURL != nil
         copy.keyEquivalent = "\r"
-        let install = NSButton(title: "Install Claude Code Skill…", target: self, action: #selector(chooseSkillProject))
+        let bridge = NSButton(title: "Install Browser Bridge", target: self, action: #selector(installBrowserBridge))
+        bridge.bezelStyle = .rounded
+        bridge.isEnabled = hostURL != nil
+        let install = NSButton(title: "Install Skill…", target: self, action: #selector(chooseSkillProject))
         install.bezelStyle = .rounded
         let done = NSButton(title: "Done", target: self, action: #selector(close))
         done.bezelStyle = .rounded
         done.keyEquivalent = "\u{1b}"
-        let buttons = NSStackView(views: [done, install, copy])
+        let buttons = NSStackView(views: [done, install, bridge, copy])
         buttons.spacing = 8
 
         let content = NSView()
-        for view in [icon, heading, help, status, buttons] {
+        for view in [icon, heading, help, allowForegroundToggle, status, buttons] {
             view.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(view)
         }
@@ -86,16 +101,19 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
             icon.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             icon.widthAnchor.constraint(equalToConstant: 64),
             icon.heightAnchor.constraint(equalTo: icon.widthAnchor),
-            heading.topAnchor.constraint(equalTo: content.topAnchor, constant: 25),
+            heading.topAnchor.constraint(equalTo: content.topAnchor, constant: 22),
             heading.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 14),
-            help.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 10),
+            help.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 8),
             help.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
-            help.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
-            status.topAnchor.constraint(equalTo: help.bottomAnchor, constant: 14),
+            help.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -22),
+            allowForegroundToggle.topAnchor.constraint(equalTo: help.bottomAnchor, constant: 10),
+            allowForegroundToggle.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
+            allowForegroundToggle.trailingAnchor.constraint(equalTo: help.trailingAnchor),
+            status.topAnchor.constraint(equalTo: allowForegroundToggle.bottomAnchor, constant: 10),
             status.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
             status.trailingAnchor.constraint(equalTo: help.trailingAnchor),
             buttons.trailingAnchor.constraint(equalTo: help.trailingAnchor),
-            buttons.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -19),
+            buttons.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -18),
         ])
     }
 
@@ -104,11 +122,43 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
     }
 
     @objc private func copyConfiguration() {
-        guard let configuration else { return }
+        let allowForeground = allowForegroundToggle.state == .on
+        guard let configuration = CUASetup.configuration(hostURL: hostURL, allowForeground: allowForeground) else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         let copied = pasteboard.setString(configuration, forType: .string)
-        showStatus(copied ? "Configuration copied" : "The clipboard could not be updated.")
+        let modeNote = allowForeground ? "background-first + foreground fallback" : "background-only"
+        showStatus(copied ? "Copied MCP config (\(modeNote))." : "The clipboard could not be updated.")
+    }
+
+    @objc private func installBrowserBridge() {
+        guard let hostURL else { return }
+        let process = Process()
+        process.executableURL = hostURL
+        process.arguments = ["--install-browser-bridge"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                showStatus("Failed to install Native Messaging manifest (exit \(process.terminationStatus)).")
+                return
+            }
+            let unpackedDir = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/macOS Computer Use/browser-extension")
+            if FileManager.default.fileExists(atPath: unpackedDir.path) {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(unpackedDir.path, forType: .string)
+                showStatus("Bridge installed. Extension path copied — press ⌘⇧G in Load unpacked and paste.")
+            } else {
+                showStatus("Native Messaging bridge installed.")
+            }
+        } catch {
+            showStatus("Could not run cua-host --install-browser-bridge.")
+        }
     }
 
     @objc private func chooseSkillProject() {

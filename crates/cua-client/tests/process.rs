@@ -31,6 +31,7 @@ fn act(count: usize) -> RequestBody {
         grant_id: "model-must-not-select-this-grant".into(),
         foreground: false,
         feedback: None,
+        observe_after: None,
         observation_id: "observation-1".into(),
         target: TargetKey {
             pid: 42,
@@ -87,12 +88,10 @@ async fn one_persistent_peer_uses_host_authority_and_rejects_public_control() {
     assert_eq!(client.epoch(), "helper-epoch-test");
     let pid = client.helper_pid();
     for expected in ["call-1", "call-2"] {
-        let ResponseBody::Targets(targets) = call(
-            &client,
-            RequestBody::Targets(TargetsRequest { bundle_id: None }),
-        )
-        .await
-        .body
+        let ResponseBody::Targets(targets) =
+            call(&client, RequestBody::Targets(TargetsRequest::default()))
+                .await
+                .body
         else {
             panic!()
         };
@@ -226,6 +225,8 @@ async fn a_correlated_wait_timeout_survives_host_deadline_reconciliation_but_lat
                 element_ref: "element-1".into(),
                 value: "ready".into(),
             }),
+            include_values: false,
+            scope: None,
         });
         let result = client
             .call(request, Duration::from_millis(25), CancellationToken::new())
@@ -258,6 +259,8 @@ async fn host_deadline_classifies_cooperative_wait_cancellation_without_losing_e
                     window_id: 7,
                 },
                 condition: condition.clone(),
+                include_values: false,
+                scope: None,
             }),
             Duration::from_millis(50),
             CancellationToken::new(),
@@ -322,6 +325,8 @@ async fn explicit_user_wait_cancellation_remains_cancelled_and_reusable() {
                     element_ref: "element-1".into(),
                     value: "ready".into(),
                 }),
+                include_values: false,
+                scope: None,
             }),
             Duration::from_secs(1),
             cancellation,
@@ -573,12 +578,10 @@ async fn queued_deadline_expires_without_waiting_for_another_call_or_dispatching
     assert_eq!(result.steps[0].delivery, Delivery::NotDispatched);
     assert_eq!(result.stop_reason, StopReason::DeadlineExceeded);
     assert!(active.await.unwrap().is_ok());
-    let ResponseBody::Targets(targets) = call(
-        &client,
-        RequestBody::Targets(TargetsRequest { bundle_id: None }),
-    )
-    .await
-    .body
+    let ResponseBody::Targets(targets) =
+        call(&client, RequestBody::Targets(TargetsRequest::default()))
+            .await
+            .body
     else {
         panic!()
     };
@@ -608,12 +611,10 @@ async fn precancelled_and_invalid_requests_never_reach_native_dispatch() {
         .unwrap_err();
     assert_eq!(error.kind, ClientErrorKind::InvalidRequest);
     assert!(error.uncertainty.is_none());
-    let ResponseBody::Targets(targets) = call(
-        &client,
-        RequestBody::Targets(TargetsRequest { bundle_id: None }),
-    )
-    .await
-    .body
+    let ResponseBody::Targets(targets) =
+        call(&client, RequestBody::Targets(TargetsRequest::default()))
+            .await
+            .body
     else {
         panic!()
     };

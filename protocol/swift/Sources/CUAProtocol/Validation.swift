@@ -30,14 +30,73 @@ private func channelInterval(_ channel: CollectionInterval, within total: Collec
     try require(channel.startedUnixMs >= total.startedUnixMs && channel.finishedUnixMs <= total.finishedUnixMs,
                 "channel interval outside observation")
 }
+private func isForegroundRoute(_ route: DeliveryRoute) -> Bool {
+    switch route {
+    case .foregroundKey, .foregroundClick, .foregroundDoubleClick, .foregroundRightClick,
+         .foregroundHover, .foregroundDrag, .foregroundScrollWheel, .foregroundFocus,
+         .foregroundHotkey, .foregroundTypeKeys:
+        return true
+    default:
+        return false
+    }
+}
+private func isForegroundOperation(_ operation: Operation) -> Bool {
+    switch operation {
+    case .key, .click, .doubleClick, .rightClick, .hover, .drag, .scrollWheel, .focusWindow,
+         .hotkey, .typeKeys:
+        return true
+    default:
+        return false
+    }
+}
+public func isValidHotkeyName(_ key: String) -> Bool {
+    let valid: Set<String> = [
+        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+        "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+        "minus", "equal", "leftBracket", "rightBracket", "backslash", "semicolon",
+        "quote", "comma", "period", "slash", "grave", "space",
+        "return", "tab", "escape", "backspace", "delete",
+        "left", "right", "up", "down", "home", "end", "pageUp", "pageDown",
+        "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+    ]
+    return valid.contains(key)
+}
+private func validOpenUrl(_ url: String) throws {
+    try require(!url.isEmpty && url.utf8.count <= Limits.maxUrlBytes && !url.utf8.contains { $0 <= 0x20 || $0 == 0x7f },
+                "invalid open URL")
+    guard let colon = url.firstIndex(of: ":") else { throw ContractError("open URL requires a scheme") }
+    let scheme = url[..<colon]
+    let rest = url[url.index(after: colon)...]
+    guard let first = scheme.utf8.first, (65...90).contains(first) || (97...122).contains(first),
+          scheme.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 43 || $0 == 45 || $0 == 46 }) else {
+        throw ContractError("invalid open URL scheme")
+    }
+    let lower = scheme.lowercased()
+    try require(lower != "javascript" && lower != "vbscript" && lower != "data", "forbidden open URL scheme")
+    if lower == "http" || lower == "https" {
+        guard rest.hasPrefix("//") else { throw ContractError("http(s) URL requires authority") }
+        let after = rest.dropFirst(2)
+        let host = after.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+        try require(!host.isEmpty, "http(s) URL requires host")
+    } else {
+        try require(!rest.isEmpty, "open URL requires target")
+    }
+}
 private func expectation(_ step: ActionStep, _ receipt: StepReceipt, settled: Bool, foreground: Bool) throws {
     if let route = receipt.route {
         switch (step.operation, route) {
-        case (.setValue, .axSetValue), (.typeText, .axSelectedText), (.press, .axPress),
-             (.key, .foregroundKey), (.click, .foregroundClick): break
+        case (.setValue, .axSetValue), (.typeText, .axSelectedText), (.press, .axPress), (.scroll, .axScroll),
+             (.scrollToVisible, .axScrollToVisible), (.confirm, .axConfirm), (.showMenu, .axShowMenu),
+             (.cancel, .axCancel), (.invokeMenu, .axMenu),
+             (.setWindowFrame, .axWindowFrame), (.windowAction, .axWindowAction),
+             (.key, .foregroundKey), (.click, .foregroundClick), (.doubleClick, .foregroundDoubleClick),
+             (.rightClick, .foregroundRightClick), (.hover, .foregroundHover), (.drag, .foregroundDrag),
+             (.scrollWheel, .foregroundScrollWheel), (.focusWindow, .foregroundFocus),
+             (.hotkey, .foregroundHotkey), (.typeKeys, .foregroundTypeKeys): break
         default: throw ContractError("receipt route does not match operation")
         }
-        try require(foreground == (route == .foregroundKey || route == .foregroundClick),
+        try require(foreground == isForegroundRoute(route),
                     "receipt route does not match requested foreground mode")
     }
     var required: [Condition] = []
@@ -76,9 +135,21 @@ private func expectation(_ step: ActionStep, _ receipt: StepReceipt, settled: Bo
 extension Condition {
     func validate() throws {
         switch self {
-        case .elementExists(let value), .elementAbsent(let value): try identifier(value.selector.role)
+        case .elementExists(let value), .elementAbsent(let value): try validateSelector(value.selector)
         case .valueEquals(let value): try identifier(value.elementRef)
+        case .valueContains(let value):
+            try identifier(value.elementRef)
+            try require(!value.contains.isEmpty && value.contains.utf8.count <= 4096, "invalid value substring condition")
         case .enabled(let value): try identifier(value.elementRef)
+        case .urlContains(let value):
+            if let ref = value.elementRef { try identifier(ref) }
+            try require(!value.contains.isEmpty && value.contains.utf8.count <= Limits.maxUrlBytes, "invalid URL substring condition")
+        case .ocrContains(let value):
+            try require(!value.contains.isEmpty && value.contains.utf8.count <= Limits.maxOcrQueryBytes, "invalid OCR substring condition")
+            if let crop = value.cropWindow {
+                try validRect(crop)
+                try require(crop.x >= 0 && crop.y >= 0, "invalid OCR condition crop")
+            }
         case .windowAbsent: break
         }
     }
@@ -106,6 +177,7 @@ extension ObservationFeedback {
                 try validRect(element.bounds)
                 try require((element.label?.utf8.count ?? 0) <= 1024 && (element.identifier?.utf8.count ?? 0) <= 1024
                             && (element.subrole?.utf8.count ?? 0) <= 1024
+                            && (element.url.map { !$0.isEmpty && $0.utf8.count <= Limits.maxUrlBytes } ?? true)
                             && (element.value?.utf8.count ?? 0) <= 65_536, "feedback projection exceeds string limit")
             }
         }
@@ -181,8 +253,17 @@ extension ObserveRequest {
     func validate() throws {
         try validTarget(target)
         if let selectors = axSelectors { try validateSelectors(selectors) }
+        if let query {
+            try require(!query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && query.utf8.count <= 1024, "invalid AX query")
+            try require(axSelectors == nil, "query cannot be combined with axSelectors")
+        }
+        if scope == .menuBar {
+            try require(eventHistory == nil && !includeScreenshot && !includeOcr && cropWindow == nil && maxImageDimensionPx == nil,
+                        "menuBar scope does not support visual capture or event history")
+        }
         if let history = eventHistory {
             try require(axSelectors != nil, "event history requires explicit AX selectors")
+            try require((scope == nil || scope == .window) && !interactiveOnly && query == nil, "event history requires full window scope")
             if let cursor = history.cursor {
                 try identifier(cursor.generation)
                 try require(cursor.sequence <= 9_007_199_254_740_991, "event cursor exceeds safe integer range")
@@ -200,21 +281,33 @@ extension ObserveRequest {
         }
     }
 }
+private func validateSelector(_ selector: Selector) throws {
+    try require(selector.role != nil || selector.label != nil || selector.labelContains != nil || selector.identifier != nil,
+                "AX selector requires at least one matching field")
+    if let role = selector.role { try identifier(role) }
+    try require((selector.label?.utf8.count ?? 0) <= 1024 && (selector.identifier?.utf8.count ?? 0) <= 1024,
+                "AX selector exceeds string limit")
+    if let contains = selector.labelContains {
+        try require(!contains.isEmpty && contains.utf8.count <= 1024, "invalid AX selector labelContains")
+    }
+}
 private func validateSelectors(_ selectors: [Selector]) throws {
     try require(!selectors.isEmpty && selectors.count <= Limits.maxAxSelectors, "invalid AX selector count")
     for (index, selector) in selectors.enumerated() {
-        try identifier(selector.role)
-        try require((selector.label?.utf8.count ?? 0) <= 1024 && (selector.identifier?.utf8.count ?? 0) <= 1024,
-                    "AX selector exceeds string limit")
+        try validateSelector(selector)
         try require(!selectors.prefix(index).contains(selector), "duplicate AX selector")
     }
 }
 private func selectorMatches(_ element: Element, _ selector: Selector) -> Bool {
-    element.role == selector.role && (selector.label == nil || selector.label == element.label) &&
+    (selector.role == nil || element.role == selector.role) &&
+        (selector.label == nil || selector.label == element.label) &&
+        (selector.labelContains == nil || (element.label?.contains(selector.labelContains!) == true)) &&
         (selector.identifier == nil || selector.identifier == element.identifier)
 }
 private func historicalMatches(_ control: EventControl, _ selector: Selector) -> Bool {
-    control.role == selector.role && (selector.label == nil || selector.label == control.label) &&
+    (selector.role == nil || control.role == selector.role) &&
+        (selector.label == nil || selector.label == control.label) &&
+        (selector.labelContains == nil || (control.label?.contains(selector.labelContains!) == true)) &&
         (selector.identifier == nil || selector.identifier == control.identifier)
 }
 extension EventHistory {
@@ -299,6 +392,7 @@ extension Observation {
             try identifier(element.role)
             try validRect(element.bounds)
             try require((element.subrole?.utf8.count ?? 0) <= 1024, "element subrole exceeds string limit")
+            try require(element.url.map { !$0.isEmpty && $0.utf8.count <= Limits.maxUrlBytes } ?? true, "element URL exceeds string limit")
         }
         if let selection = axSelection {
             try validateSelectors(selection.selectors)
@@ -351,6 +445,79 @@ extension Observation {
     }
 }
 
+extension ObserveAfter {
+    func validate() throws {
+        try toObserveRequest(target: TargetKey(pid: 1, windowId: 1)).validate()
+    }
+}
+
+private func validateObserveAfter(_ after: ObserveAfter, expectedTarget: TargetKey, observation: Observation) throws {
+    try require(observation.target == expectedTarget, "post-action observation target mismatch")
+    let scoped = after.scope == .webArea || after.scope == .menuBar || after.interactiveOnly || after.query != nil
+    try require(!scoped || observation.accessibility != .complete, "scoped observation cannot imply a complete window")
+    try require(after.includeValues || observation.elements.allSatisfy { $0.value == nil },
+                "observation includes unrequested values")
+    try require(after.axSelectors == observation.axSelection?.selectors, "AX selection does not match request")
+    try require(after.includeScreenshot || observation.screenshot == nil, "observation includes unrequested image")
+    try require(after.includeScreenshot || after.includeOcr || observation.visual == nil,
+                "observation includes unrequested visual evidence")
+    try require(!after.includeOcr || observation.visual != nil, "requested visual evidence is missing")
+    if let visual = observation.visual {
+        try require(after.includeOcr == (visual.ocr != nil), "OCR inclusion does not match request")
+    }
+}
+
+extension OpenRequest {
+    func validate() throws {
+        try identifier(grantId)
+        try require(bundleId != nil || appName != nil || url != nil, "open requires bundleId, appName, or url")
+        try require(!(bundleId != nil && appName != nil), "specify either bundleId or appName, not both")
+        if let bundleId { try identifier(bundleId) }
+        if let appName {
+            try require(!appName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        && appName.utf8.count <= 256
+                        && !appName.contains("/") && !appName.contains("\\") && !appName.contains("..")
+                        && !appName.utf8.contains { $0 < 0x20 || $0 == 0x7f }, "invalid app name")
+        }
+        if let url { try validOpenUrl(url) }
+        if newInstance {
+            try require(bundleId != nil || appName != nil, "newInstance requires bundleId or appName")
+        }
+        try observe?.validate()
+    }
+}
+
+private func validClipboardPath(_ path: String) throws {
+    try require(!path.isEmpty && path.utf8.count <= 2048 && path.hasPrefix("/")
+                && !path.utf8.contains { $0 < 0x20 || $0 == 0x7f }
+                && !path.split(separator: "/").contains(".."),
+                "invalid clipboard file path")
+}
+
+extension ClipboardRequest {
+    func validate() throws {
+        try identifier(grantId)
+        switch action {
+        case .read:
+            try require(text == nil && filePath == nil && imagePath == nil,
+                        "clipboard read cannot carry write payloads")
+        case .write:
+            try require(!includeText, "includeText is only valid for clipboard read")
+            let count = (text != nil ? 1 : 0) + (filePath != nil ? 1 : 0) + (imagePath != nil ? 1 : 0)
+            try require(count == 1, "clipboard write requires exactly one of text, filePath, or imagePath")
+            if let text {
+                try require(text.utf8.count <= Limits.maxClipboardBytes && !text.utf8.contains(0),
+                            "invalid clipboard text")
+            }
+            if let filePath { try validClipboardPath(filePath) }
+            if let imagePath { try validClipboardPath(imagePath) }
+        case .clear:
+            try require(!includeText && text == nil && filePath == nil && imagePath == nil,
+                        "clipboard clear cannot carry read or write options")
+        }
+    }
+}
+
 extension ActRequest {
     func validate() throws {
         try identifier(grantId)
@@ -360,14 +527,15 @@ extension ActRequest {
         try unique(steps.map(\.actionId))
         if foreground {
             try require(steps.allSatisfy {
-                switch $0.operation { case .key, .click, .waitFor: true; default: false }
-            } && steps.contains {
-                switch $0.operation { case .key, .click: true; default: false }
-            }, "foreground sequences require a key or click and may include waits")
+                if case .waitFor = $0.operation { return true }
+                return isForegroundOperation($0.operation)
+            } && steps.contains { isForegroundOperation($0.operation) },
+            "foreground sequences require a foreground action and may include waits")
         }
         for step in steps {
             switch step.operation {
-            case .press(let value): try identifier(value.elementRef)
+            case .press(let value), .scrollToVisible(let value), .confirm(let value), .showMenu(let value), .cancel(let value):
+                try identifier(value.elementRef)
             case .setValue(let value): try identifier(value.elementRef)
             case .typeText(let value):
                 try identifier(value.elementRef)
@@ -376,8 +544,40 @@ extension ActRequest {
             case .scroll(let value):
                 try identifier(value.elementRef)
                 try require(value.amount != 0 && (-1000...1000).contains(value.amount), "invalid scroll amount")
-            case .click(let value):
+            case .invokeMenu(let value):
+                try require((2...6).contains(value.path.count), "menu path requires 2 to 6 segments")
+                for segment in value.path {
+                    try require(!segment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && segment.utf8.count <= 256,
+                                "invalid menu path segment")
+                }
+            case .setWindowFrame(let value):
+                try validRect(value.bounds)
+            case .windowAction, .focusWindow:
+                break
+            case .click(let value), .doubleClick(let value), .rightClick(let value), .hover(let value):
                 try require(value.point.x.isFinite && value.point.y.isFinite, "invalid point")
+            case .drag(let value):
+                try require(value.from.x.isFinite && value.from.y.isFinite && value.to.x.isFinite && value.to.y.isFinite
+                            && value.from != value.to, "invalid drag endpoints")
+                if let count = value.steps {
+                    try require((1...50).contains(count), "invalid drag step count")
+                }
+            case .scrollWheel(let value):
+                try require(value.point.x.isFinite && value.point.y.isFinite, "invalid point")
+                try require((value.deltaX != 0 || value.deltaY != 0)
+                            && (-2000...2000).contains(value.deltaX)
+                            && (-2000...2000).contains(value.deltaY), "invalid scroll wheel delta")
+            case .hotkey(let value):
+                if let ref = value.elementRef { try identifier(ref) }
+                try require(isValidHotkeyName(value.key), "invalid hotkey name")
+                try require(value.modifiers.count <= 4, "too many modifiers")
+                for (index, modifier) in value.modifiers.enumerated() {
+                    try require(!value.modifiers.prefix(index).contains(modifier), "duplicate modifier")
+                }
+            case .typeKeys(let value):
+                if let ref = value.elementRef { try identifier(ref) }
+                try require(!value.text.isEmpty && value.text.utf8.count <= 4096 && !value.text.utf8.contains(0),
+                            "invalid foreground text")
             case .waitFor(let value):
                 try value.condition.validate()
                 try require(step.precondition == nil && step.expect == nil, "wait steps cannot carry guards or expectations")
@@ -389,6 +589,7 @@ extension ActRequest {
             try require(feedback.elementRefs.count <= Limits.maxElements, "too many feedback references")
             try unique(feedback.elementRefs)
         }
+        try observeAfter?.validate()
     }
 }
 
@@ -447,6 +648,7 @@ extension ActResult {
             }, "completed sequence cannot include rejected steps")
         }
         try feedback?.validate()
+        try observation?.validate()
     }
 }
 
@@ -473,12 +675,24 @@ extension Frame {
                 try identifier(epoch)
             }
             switch request.body {
+            case .targets(let value):
+                if let title = value.titleContains {
+                    try require(!title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && title.utf8.count <= 1024,
+                                "invalid title filter")
+                }
+                if let owner = value.ownerContains {
+                    try require(!owner.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && owner.utf8.count <= 1024,
+                                "invalid owner filter")
+                }
             case .observe(let value): try value.validate()
             case .act(let value): try value.validate()
             case .waitFor(let value):
                 try identifier(value.observationId)
                 try validTarget(value.target)
                 try value.condition.validate()
+                try require(value.scope != .menuBar, "menuBar scope is not supported for waitFor")
+            case .open(let value): try value.validate()
+            case .clipboard(let value): try value.validate()
             case .cancel(let value):
                 try identifier(value.requestId)
                 try require(value.requestId != request.id, "cancel cannot target itself")
@@ -496,8 +710,32 @@ extension Frame {
                 try require(value.targets.count <= Limits.maxTargets, "too many targets")
                 for target in value.targets {
                     try validTarget(target.key)
-                    try identifier(target.bundleId)
+                    if let bundleId = target.bundleId { try identifier(bundleId) }
+                    if let ownerName = target.ownerName {
+                        try require(!ownerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    && ownerName.utf8.count <= 1024, "invalid target owner name")
+                    }
                     try validRect(target.bounds)
+                }
+                if let apps = value.apps {
+                    try require(apps.count <= Limits.maxTargets, "too many apps")
+                    for app in apps {
+                        if let pid = app.pid { try require(pid > 0, "app pid must be positive") }
+                        if let bundleId = app.bundleId { try identifier(bundleId) }
+                        try require(!app.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    && app.name.utf8.count <= 1024, "invalid app name")
+                        try require(app.running || (app.pid == nil && !app.active && !app.hidden),
+                                    "non-running app cannot carry running state")
+                    }
+                }
+                if let displays = value.displays {
+                    try require(displays.count <= 32, "too many displays")
+                    for display in displays {
+                        try require(display.displayId > 0, "display ID must be positive")
+                        try validRect(display.bounds)
+                        try require(display.scaleFactor.isFinite && display.scaleFactor > 0,
+                                    "invalid display scale factor")
+                    }
                 }
             case .observe(let value): try value.validate()
             case .act(let value): try value.validate()
@@ -507,6 +745,31 @@ extension Frame {
                 let closed = value.evidence.map { if case .windowAbsent = $0.condition { return $0.matched && $0.collected != nil }; return false } ?? false
                 try require(value.outcome != .satisfied || value.observation != nil || closed, "satisfied wait needs observation or timed window-absence evidence")
                 try value.observation?.validate()
+            case .open(let value):
+                if let pid = value.pid { try require(pid > 0, "open pid must be positive") }
+                if let bundleId = value.bundleId { try identifier(bundleId) }
+                try require(value.targets.count <= Limits.maxTargets, "too many targets")
+                for target in value.targets {
+                    try validTarget(target.key)
+                    if let bundleId = target.bundleId { try identifier(bundleId) }
+                    if let ownerName = target.ownerName {
+                        try require(!ownerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    && ownerName.utf8.count <= 1024, "invalid target owner name")
+                    }
+                    try validRect(target.bounds)
+                }
+                try value.observation?.validate()
+            case .clipboard(let value):
+                try require(value.changeCount <= 9_007_199_254_740_991, "clipboard change count exceeds safe integer range")
+                try require(value.types.count <= Limits.maxClipboardTypes, "too many clipboard types")
+                for item in value.types {
+                    try require(!item.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                && item.utf8.count <= 256, "invalid clipboard type")
+                }
+                if let text = value.text {
+                    try require(text.utf8.count <= Limits.maxClipboardBytes, "clipboard text exceeds payload limit")
+                }
+                try require(!value.truncated || value.text != nil, "truncated clipboard requires text")
             case .cancel(let value): try identifier(value.requestId)
             case .error(let value): try require(!value.message.isEmpty, "empty error message")
             case .capabilities: break
@@ -559,9 +822,14 @@ extension Response {
             try require(request.epoch == expectedEpoch, "pending request epoch mismatch")
         }
         switch (request.body, body) {
-        case (_, .error), (.hello, .hello), (.capabilities, .capabilities), (.targets, .targets): break
+        case (_, .error), (.hello, .hello), (.capabilities, .capabilities): break
+        case (.targets(let request), .targets(let result)):
+            try require(request.includeApps == (result.apps != nil), "apps inclusion does not match request")
+            try require(request.includeDisplays == (result.displays != nil), "displays inclusion does not match request")
         case (.observe(let request), .observe(let observation)):
             try require(request.target == observation.target, "observation target mismatch")
+            let scoped = request.scope == .webArea || request.scope == .menuBar || request.interactiveOnly || request.query != nil
+            try require(!scoped || observation.accessibility != .complete, "scoped observation cannot imply a complete window")
             try require(request.includeValues || observation.elements.allSatisfy { $0.value == nil },
                         "observation includes unrequested values")
             try require(request.axSelectors == observation.axSelection?.selectors, "AX selection does not match request")
@@ -619,6 +887,11 @@ extension Response {
             }
             try require(request.foreground || result.foreground == nil, "unrequested foreground evidence")
             try correlateFeedback(request, result)
+            try require(request.observeAfter != nil || result.observation == nil,
+                        "act includes unrequested post-action observation")
+            if let after = request.observeAfter, let observation = result.observation {
+                try validateObserveAfter(after, expectedTarget: request.target, observation: observation)
+            }
         case (.waitFor(let request), .waitFor(let result)):
             if let evidence = result.evidence {
                 try require(evidence.condition == request.condition, "wait evidence condition mismatch")
@@ -634,8 +907,20 @@ extension Response {
             }
             if let observation = result.observation {
                 try require(request.target == observation.target, "wait observation target mismatch")
-                try require(observation.elements.allSatisfy { $0.value == nil }, "wait observation includes private values")
+                try require(request.includeValues || observation.elements.allSatisfy { $0.value == nil }, "wait observation includes private values")
+                try require(request.scope != .webArea || observation.accessibility != .complete, "scoped wait observation cannot imply a complete window")
             }
+        case (.open(let request), .open(let result)):
+            try require(request.activate || !result.activated, "unrequested foreground activation")
+            try require(request.observe != nil || result.observation == nil, "open includes unrequested observation")
+            if let after = request.observe, let observation = result.observation {
+                try require(result.targets.contains(where: { $0.key == observation.target }),
+                            "open observation target is not among opened targets")
+                try validateObserveAfter(after, expectedTarget: observation.target, observation: observation)
+            }
+        case (.clipboard(let request), .clipboard(let result)):
+            try require((request.action == .read && request.includeText) || result.text == nil,
+                        "clipboard includes unrequested text")
         case (.cancel(let request), .cancel(let result)):
             try require(request.requestId == result.requestId, "cancel target mismatch")
         default: throw ContractError("response method mismatch")
@@ -655,6 +940,13 @@ public struct SessionContext: Sendable {
         if case .act(let act) = request.body {
             try require(act.grantId == authority.grantId, "unknown host authority grant")
             try require(!act.foreground || authority.mode == .foregroundAllowed, "operator foreground authority is required")
+        }
+        if case .open(let open) = request.body {
+            try require(open.grantId == authority.grantId, "unknown host authority grant")
+            try require(!open.activate || authority.mode == .foregroundAllowed, "operator foreground authority is required")
+        }
+        if case .clipboard(let clipboard) = request.body {
+            try require(clipboard.grantId == authority.grantId, "unknown host authority grant")
         }
     }
 }

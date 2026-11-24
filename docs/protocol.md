@@ -107,15 +107,17 @@ sends no input; mixed sequences preserve the same boundary before later mutation
 | Method | Contract |
 | --- | --- |
 | `capabilities` | Read-only permission booleans, installed mode, and actual supported action kinds. It does not request permission. |
-| `targets` | Optionally filter by bundle ID; return exact window/process keys, titles, and logical bounds. `truncated` makes the bound visible. |
-| `observe` | Exact target; explicit value, screenshot, and OCR inclusion flags; optional exact `axSelectors` and `eventHistory` cursor. Visual collection accepts a window-local crop and image dimension limit. |
-| `act` | Installed grant, observation, exact target, and 1–16 ordered steps. No arbitrary scripts or execution-mode override. |
-| `waitFor` | Evaluate a typed condition for the same exact target within the request deadline. It never mutates. |
+| `targets` | Return exact window/process keys, titles, logical bounds, and bundle ID and owner name when available. Optional filters are exact `bundleId`, case-insensitive `titleContains` and `ownerContains`, and `unbundledOnly`. Optional discovery flags are `includeOffscreen` (includes minimized/hidden/other-Space windows with an `onScreen` flag), `includeApps` (running and installed apps), and `includeDisplays` (active displays in top-left logical coordinates with `scaleFactor` and `isPrimary`). All supplied filters must match before the result cap applies. `truncated` makes the bound visible. |
+| `open` | Installed grant plus `bundleId` or `appName` and/or validated `url`, with optional `newInstance` and `activate` (default `false`; `activate: true` requires `foregroundAllowed`). Returns optional `pid`, `bundleId`, `activated`, and bounded visible `targets`. |
+| `clipboard` | Installed grant plus `action` (`read`, `write`, `clear`). Privacy-gated: `read` returns `changeCount`, UTI `types`, and optional `textBytes` without `text` unless `includeText: true` is set. `write` requires exactly one of `text` (bounded to 256 KiB), `filePath`, or `imagePath` (absolute local path without `..`). `clear` empties the pasteboard. |
+| `observe` | Exact target; explicit value, screenshot, and OCR inclusion flags; optional `scope` (`window`, `webArea`, `menuBar`), `interactiveOnly`, case-insensitive free-text `query` (searching label, identifier, subrole, url, and value only when `includeValues: true`), role-optional `axSelectors` (requiring at least one of `role`, `label`, `labelContains`, `identifier`), and `eventHistory` cursor. Visual collection accepts a window-local crop and image dimension limit. Scoped or filtered observations never claim `complete` window coverage. |
+| `act` | Installed grant, observation, exact target, and 1–16 ordered steps (`setValue`, `typeText`, `press`, `confirm`, `showMenu`, `cancel`, `invokeMenu`, `setWindowFrame`, `windowAction`, `scroll`, `scrollToVisible`, `waitFor` in background; `click`, `doubleClick`, `rightClick`, `hover`, `drag`, `scrollWheel`, `focusWindow`, `key`, `hotkey`, `typeKeys`, `waitFor` under `foreground: true` with `foregroundAllowed`). No arbitrary scripts or execution-mode override. |
+| `waitFor` | Evaluate a typed condition (`elementExists`, `elementAbsent`, `valueEquals`, `valueContains`, `enabled`, `urlContains`, `ocrContains`, `windowAbsent`) for the same exact target within the request deadline, with optional `includeValues` and `scope` (`window` or `webArea`) for the returned observation. `ocrContains` and `windowAbsent` also work on visual-only observations when AX is unavailable. It never mutates. |
 
 The current runtime implements AX and opt-in visual `observe` and bounded linear
-`act` sequences combining `setValue`, `typeText`, `press`, and a read-only `waitFor`
-operation. Every step shares the exact target, original observation/refs, and
-whole-request budget. There are no branches, nested sequences, or target switches.
+`act` sequences combining `setValue`, `typeText`, `press`, `scroll`, and a read-only
+`waitFor` operation. Every step shares the exact target, original observation/refs,
+and whole-request budget. There are no branches, nested sequences, or target switches.
 Presence checks do not create new action refs inside a sequence.
 
 `axSelectors` contains 1–16 unique selectors. Selected observations keep window
@@ -134,25 +136,36 @@ and `expect` must be omitted or null. Standalone waits, mutation guards, and
 mutation expectations support `elementExists`, `elementAbsent`, `valueEquals`,
 `enabled`, and `windowAbsent`.
 
-The action enum also represents supported keys, semantic scroll, and coordinate
-click. Coordinate click carries an explicit coordinate
-space. It does not authorize global pointer input: background delivery still needs
-an exact semantic target; unsupported targeting must fail without silent fallback.
-The foreground key set includes return/tab/escape/backspace/arrows and `saveAs`
-(⌥⇧⌘S). Scroll amounts
-are signed nonzero units in `[-1000,1000]`; runtime determines support and delivery.
+`ScrollOperation` is `{elementRef, axis, amount}`. Use a live `AXScrollArea`
+reference that advertises `scroll`. `axis` is `vertical` or `horizontal`, and
+`amount` is a nonzero integer in `[-1000,1000]`. Positive values move down or
+right. An amount of `250` requests 25% of the scrollbar's full range, capped at
+the available movement. The background route requires a readable, writable AX
+scrollbar for the requested axis. It reads back the scrollbar position to verify
+movement in the requested direction. An unavailable scrollbar returns
+`unsupported`. A scrollbar already at the requested boundary returns
+`verificationFailed` with `not_dispatched`. Observe again after scrolling to get
+fresh content and geometry.
+
+Coordinate click carries an explicit coordinate space. The foreground key set
+includes return/tab/escape/backspace/arrows and `saveAs` (⌥⇧⌘S).
 The `key` and `click` paths are explicitly selected via `act.foreground: true`.
 The host and helper enforce the installed foreground grant. The opt-in sequence
-must contain at least one key or click and may include predicate waits. Semantic
-scroll remains unavailable. Background action requests omit the foreground flag.
+must contain at least one key or click and may include predicate waits. Scroll
+uses the background route exclusively, without wheel or keyboard fallback.
+Background action requests omit the foreground flag.
 Overall `ActionKind` discovery is separate from each element's `ElementAction`
 affordances. Coordinate click capability requires an operator-authorized session and the
 necessary permissions. A click also needs fresh relevant mapped image evidence
 and exact focused-window validation.
+When AX is unavailable, a captured screenshot can authorize coordinate clicks
+on the exact already-foreground window. This route binds the process generation,
+PID, window ID, bounds, and pixels, and checks the window is topmost at the
+destination immediately before dispatch. Keys and AX conditions still require
+a semantic observation. A frame that disagrees with known AX geometry is stale
+for coordinate input.
 
-Existence selectors require a role and may constrain label
-or identifier. They are conditions, not action locators. Actions use retained refs
-or explicitly mapped points; an existence check does not resolve ambiguous labels.
+Existence and selection selectors require at least one of `role`, `label`, `labelContains`, or `identifier`. They are conditions and filters, not action locators. Actions use retained refs or explicitly mapped points; an existence check does not resolve ambiguous labels.
 There is no expression language, branching DSL, or rollback API.
 
 `windowAbsent` uses `params: {}` and refers to the request's exact `(pid, windowId)`.
@@ -185,15 +198,25 @@ boundary and does not query a Mac.
 The current runtime associates AX windows using unique PID, exact logical bounds,
 and titles when available, rejecting ties in AX candidates and CG siblings. Public
 AX provides no OS-attested `CGWindowID` association or atomic snapshot guarantee.
-Catalog calls use one running-application bundle map for every CG row; missing
-metadata cannot silently remove a process sibling during association. Exact CG
-absence is distinguished from unavailable process metadata.
+Catalog calls verify the live owner of each CG window. Unfiltered discovery can
+return a window with no bundle ID, including windows owned by launcher child
+processes. Such a target uses the actual owner PID and CG window ID, with
+`ownerName` present when available. A bundle ID filter matches only the actual
+owner's bundle ID. Window association retains all of the owner's CG siblings,
+and exact CG absence remains distinct from unavailable process identity.
+
+For a window without a bundle ID, `observe` probes the verified window owner
+for AX controls. If AX is unavailable, screenshot and OCR can use a unique
+ScreenCaptureKit match on the exact window ID and owner PID. Capture checks the
+live process generation and window geometry before returning visual evidence.
 Each reference retains an actual object plus observed role, subrole and raw identifier;
 live `CFEqual` tree/window membership, ownership and identity metadata are checked
 before use. Changed labels, values, or control positions do not remap the reference.
 Unchanged identity metadata is not a native object-generation guarantee.
 
-Observation traversal is bounded to 1,024 nodes/depth 32 and 256 returned elements.
+Observation traversal is bounded to 1,024 nodes and 256 returned elements.
+Full observations can reach depth 32 and selected observations depth 48.
+Explicit observations prioritize visible branches before clipped descendants.
 Unreadability, unknown enabled states, traversal bounds, or omitted oversized
 exports produce partial coverage. `Element.enabled` is required and nullable:
 `null` discloses unavailable state, not false. Optional `Element.subrole` carries
@@ -293,8 +316,8 @@ are fabricated for the closed window. `alreadySatisfied` on standalone waits use
 the same first-check meaning.
 
 `StepReceipt.route` is optional. The current executor records `axSetValue`,
-`axSelectedText`, or `axPress` at the dispatch boundary; an absent route does not
-invent a native method. `typeText` uses targeted `AXSelectedText` replacement of
+`axSelectedText`, `axPress`, or `axScroll` for semantic dispatch. `typeText` uses
+targeted `AXSelectedText` replacement of
 the current UTF-16 selection, not a whole-value rewrite, keyboard fallback, or
 selection-changing operation. It requires the advertised settable attribute.
 
@@ -306,6 +329,9 @@ An exact resulting value can be exposed as evidence only if values were included
 in the originating observation or the caller supplied that exact expectation.
 Otherwise delivery can succeed with unverified public evidence even when internal
 readback matches. A press with no expectation likewise does not prove its effect.
+`scroll` requires intrinsic directional readback and evaluates any caller-supplied
+`expect` using the normal step verification rules. Without an `expect`, a completed
+scroll has an `unverified` public receipt because the position check is internal.
 
 `ActResult.steps` is the processed prefix, including a rejected final step when
 applicable. `remainingSteps` counts steps never processed. Correlation checks require

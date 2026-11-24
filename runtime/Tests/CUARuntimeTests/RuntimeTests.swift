@@ -35,7 +35,7 @@ private final class FakeSystem: NativeSystem, @unchecked Sendable {
         try context.check()
         return Permissions(accessibility: true, screenRecording: false, inputPosting: false)
     }
-    func targets(bundleId: String?, context: OperationContext) throws -> TargetsResult {
+    func targets(_ request: TargetsRequest, context: OperationContext) throws -> TargetsResult {
         calls.increment(); try context.check()
         return TargetsResult(targets: [testTarget], truncated: false)
     }

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>macOS Computer Use Bridge</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; width: 260px; margin: 12px; color: #1d1d1f; }
+    h3 { margin: 0 0 8px; font-size: 14px; }
+    .row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 8px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #8e8e93; }
+    .dot.ok { background: #28a745; }
+    code { font-size: 11px; background: #f2f2f7; padding: 2px 5px; border-radius: 4px; word-break: break-all; }
+    button { margin-top: 8px; padding: 5px 10px; font-size: 12px; border-radius: 6px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h3>macOS Computer Use</h3>
+  <div class="row"><span id="dot" class="dot"></span><span id="status">Checking bridge…</span></div>
+  <div class="row">ID: <code id="ext-id"></code></div>
+  <button id="reconnect" type="button">Reconnect Bridge</button>
+  <script src="popup.js"></script>
+</body>
+</html>
