@@ -21,11 +21,14 @@ For a drag-and-drop local install, see the [native disk image and setup instruct
 
 | Rust runtime tool | Implemented scope |
 | --- | --- |
-| `capabilities` | Permission preflight and supported action kinds without permission prompts. |
-| `targets` | Exact process/window keys for visible application windows. |
-| `observe` | Bounded AX controls with retained refs, optional selected scope and bounded selected-state history; on-demand window capture/OCR. AX values are private by default. |
-| `act` | Up to 16 semantic actions or waits per request with separate delivery and verification receipts. An explicitly authorized foreground sequence can use keys or clicks with waits. |
-| `waitFor` | Wait for presence, absence, enabled state, exact value, or exact window-key absence; closed-window proof needs no new observation. |
+| `capabilities` | Permission preflight, browser bridge status, and supported action kinds without permission prompts. |
+| `browser` | Fast zero-focus-stealing Chromium tab/DOM automation via Chrome Native Messaging (`status`, `listTabs`, `openTab`, `navigate`, `snapshot`, `act`, `batchRead`, `closeTab`). |
+| `targets` | Exact process/window keys for visible application windows (including unbundled processes, with filtering). |
+| `open` | Launch applications or open URLs/files, with optional immediate post-launch `observe`. |
+| `clipboard` | Read, write, or clear the macOS pasteboard (text, HTML, or file paths). |
+| `observe` | Bounded AX controls with short generation-scoped refs, query/roleless selectors, menu bar and sheet support, Electron auto-AX, optional screenshots/OCR, and compact dual-channel output. AX values are private by default. |
+| `act` | Up to 16 semantic actions, window operations, or waits per request with separate delivery/verification receipts and optional compound `observeAfter`. Explicitly authorized foreground sequences (`--allow-foreground`) support clicks, keys, hotkeys, drags, and scroll wheel. |
+| `waitFor` | Wait for element presence/absence, enabled state, exact value, URL substring, OCR text, or exact window-key absence. |
 
 The runtime associates CG and AX windows through a unique PID, exact logical bounds, and available titles. Each action revalidates the retained AX object, owning window, observed role and subrole, and raw AX identifier. On macOS 14+, opt-in screenshots and Vision OCR return mapped visual evidence. macOS 13 supports the semantic route. Foreground keys and clicks require an operator grant and explicit per-sequence selection.
 

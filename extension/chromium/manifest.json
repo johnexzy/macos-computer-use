@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "macOS Computer Use — Browser Accelerator",
-  "version": "0.1.0",
+  "version": "4.0.0",
   "description": "Fast, zero-focus-stealing DOM/tab bridge for macOS Computer Use over Chrome Native Messaging.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0/P5YpNirH5om0ZgDjzdi6K+I5Od2GDJzaLIYR9jS+vDfPbvYtYvwNUVr0nG1kHQ6E9JTQMcPQ7wh7SwVWSHHQ4HOAVdpDr+487u2uHd4PjlUMuM3bfs9p1ArXETBg8Jm7DBd95xkya3l/3/vhpl0D0aXu5jZP+RKzn/XGxoH59DIfUUck1t2+3k4PP+rGCvpaHyvXXYlQrkf5VwX1hQKnR5tIash3bf7neiBCsYb5drLOh5S8wEu6ogtMqjiNenhTrqElzH1NY/XzOgNhE5CExt+UCv/QnrdIB4bFncXcuozPRzCJymF3C1Z48IhlwqEFldd4+fgTCf4GEyHvvpcQIDAQAB",
   "permissions": [

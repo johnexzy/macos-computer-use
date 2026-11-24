@@ -167,7 +167,7 @@ suffix. Do not translate an uncertain v3 result into a known native rejection.
 ```sh
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
 sh scripts/package-native.sh .artifacts/native-review
-python3 test/distribution/package-smoke.py .artifacts/native-review/cua-native-0.1.0-macos-universal.tar.gz
+python3 test/distribution/package-smoke.py .artifacts/native-review/cua-native-4.0.0-macos-universal.tar.gz
 ```
 
 The smoke extracts only the archive into a clean path containing spaces, uses a
