@@ -56,7 +56,7 @@ const report = { schemaVersion: 2, evaluationPolicy, campaignId: randomUUID(), s
     "PolicyV2 requires an available, untruncated independent activation monitor through cleanup. Fixture callbacks and endpoint equality are diagnostics and cannot prove no transient activation. Confirmed means observed state, not causal proof.",
     "Claude CLI-reported cost estimates are retained; provider billing and reasoning tokens are not independently established. Token totals sum all per-model usage, including auxiliary calls. Missing usage/cost stays null.",
     "Budget checks occur before calls; Claude's per-call USD guard may only stop after a provider request. Any reported overshoot stops the remaining campaign."], episodes: [] };
-for (const file of [".artifacts/runtime-install/cua-host", ".artifacts/runtime-install/cua-runtime", "native_helper", "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture",
+for (const file of [".artifacts/runtime-install/useui", ".artifacts/runtime-install/useui-runtime", "native_helper", "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture",
   "test/runtime/support/foreground-monitor.mjs", "test/runtime/support/foreground-monitor.swift"]) {
   try { report.source[file] = hash(await fs.readFile(path.join(root, file))); } catch { report.source[file] = null; }
 }

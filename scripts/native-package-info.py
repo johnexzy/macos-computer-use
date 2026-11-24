@@ -14,14 +14,14 @@ def run(*args):
 
 stage, root = map(Path, sys.argv[1:])
 files = {}
-for name in ("cua-host", "cua-runtime"):
+for name in ("useui", "useui-runtime"):
     binary = stage / "bin" / name
     architectures = run("xcrun", "lipo", "-archs", str(binary)).split()
     assert set(architectures) == {"arm64", "x86_64"}, architectures
     run("codesign", "--verify", "--strict", "--all-architectures", str(binary))
     signature = run("codesign", "-d", "--verbose=4", str(binary))
     identifier = re.search(r"^Identifier=(.+)$", signature, re.M).group(1)
-    assert identifier == f"com.johnoba.cua.{name}", identifier
+    assert identifier == f"com.johnoba.useui.{name}", identifier
     assert "adhoc" in signature, "Review package must be explicitly ad-hoc signed"
     slices = {}
     for architecture in architectures:

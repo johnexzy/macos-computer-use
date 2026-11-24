@@ -1,4 +1,4 @@
-# macOS Computer Use brand kit
+# UseUI brand kit
 
 Background control you can follow.
 

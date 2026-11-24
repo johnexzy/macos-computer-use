@@ -7,7 +7,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-export const host = path.join(root, ".artifacts/runtime-install/cua-host");
+export const host = path.join(root, ".artifacts/runtime-install/useui");
 export const deadline = async (promise, ms = 5000) => {
   let timer;
   try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("process test deadline exceeded")), ms); })]); }

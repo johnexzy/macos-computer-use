@@ -20,7 +20,7 @@ const nativeData = (response, kind) => {
 const hashFile = async file => createHash("sha256").update(await fs.readFile(path.join(root, file))).digest("hex");
 
 export async function nativeProvenance() {
-  const files = [".artifacts/runtime-install/cua-host", ".artifacts/runtime-install/cua-runtime",
+  const files = [".artifacts/runtime-install/useui", ".artifacts/runtime-install/useui-runtime",
     "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture"];
   return { revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
     dirty: Boolean(execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).trim()),
@@ -92,7 +92,7 @@ export async function runNative(caseId, seed, policy, provenance, monitorBinary)
       operation: { kind: "setValue", params: { elementRef: warmControl.reference, value: `${seed}-warmup` } } }] };
     const warm = nativeData(await tool("act", warmRequest), "act");
     const scope = { bundleId: "com.johnoba.cua.fixture", appVersion: provenance.sha256["test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture"],
-      runtimeVersion: provenance.sha256[".artifacts/runtime-install/cua-runtime"], osVersion: provenance.osVersion,
+      runtimeVersion: provenance.sha256[".artifacts/runtime-install/useui-runtime"], osVersion: provenance.osVersion,
       instanceId: state.runNonce, pid: state.pid, windowId: target.windowId };
     const routes = new RouteEvidence();
     if (!routes.record({ scope, control: warmControl, observationId: ready.observationId, receipt: warm.steps[0], now: performance.now() })) throw new Error("Actual semantic route warmup was not confirmed");

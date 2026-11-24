@@ -56,7 +56,7 @@ class Connection {
   constructor(traceMetadata) { this.traceMetadata = traceMetadata; this.phase = "setup"; }
   async connect() {
     const [{ Client }, { StdioClientTransport }] = await Promise.all([import("@modelcontextprotocol/sdk/client/index.js"), import("@modelcontextprotocol/sdk/client/stdio.js")]);
-    this.transport = new StdioClientTransport({ command: path.join(root, ".artifacts/runtime-install/cua-host"), args: [], cwd: root, stderr: "pipe" });
+    this.transport = new StdioClientTransport({ command: path.join(root, ".artifacts/runtime-install/useui"), args: [], cwd: root, stderr: "pipe" });
     const send = this.transport.send.bind(this.transport);
     this.transport.send = async (message) => {
       await this.traceMetadata({ phase: this.phase, event: "mcp_request", id: message.id ?? null, method: message.method, tool: message.params?.name ?? null });
@@ -113,13 +113,13 @@ export async function runCampaign(config) {
     app: await textEditAvailability(), model: { runs: false, requested: config.mode === "model" ? config.model : null, resolved: null, probe: null,
       accounting: "Global summary includes the pin probe once; per-lane summaries contain task calls only" }, episodes,
     notes: ["Public model context excludes private expected outputs and unrelated TextEdit windows.", "Setup uses public open -g -n only; all graded mutations use the actual typed MCP API. No Save or OS-script fallback exists.", "File bytes are an independent persistence oracle. Separate read-only MCP decoy inspection and post-cleanup bytes supplement them; they do not make AX readback an independent observer.", "Foreground policy requires a known continuous monitor with no new controlled-target activation; unrelated app changes are diagnostics.", "Model decisions, CLI turns, tool calls, typed receipts and physical file writes are different measures. CLI costs are estimates, not invoices or hard provider caps."] };
-  for (const file of [".artifacts/runtime-install/cua-host", ".artifacts/runtime-install/cua-runtime", "test/realworld/dataset.mjs", "test/realworld/workspace.mjs", "test/realworld/oracle.mjs", "test/realworld/controller.mjs", "test/realworld/run.mjs", "test/evaluation/model.mjs", "test/evaluation/adapters.mjs", "test/runtime/support/foreground-monitor.swift"]) {
+  for (const file of [".artifacts/runtime-install/useui", ".artifacts/runtime-install/useui-runtime", "test/realworld/dataset.mjs", "test/realworld/workspace.mjs", "test/realworld/oracle.mjs", "test/realworld/controller.mjs", "test/realworld/run.mjs", "test/evaluation/model.mjs", "test/evaluation/adapters.mjs", "test/runtime/support/foreground-monitor.swift"]) {
     try { report.source[file] = hash(await fs.readFile(path.join(root, file))); }
     catch { report.source[file] = null; }
   }
   const budget = config.mode === "model" ? new ModelBudget(config.budgetUsd, config.perCallUsd) : null;
   let modelEnv, globalBlocked = !report.app.available ? "TextEdit metadata unavailable" :
-    report.source[".artifacts/runtime-install/cua-host"] == null || report.source[".artifacts/runtime-install/cua-runtime"] == null ? "Installed runtime pair unavailable" : null, monitorBinary;
+    report.source[".artifacts/runtime-install/useui"] == null || report.source[".artifacts/runtime-install/useui-runtime"] == null ? "Installed runtime pair unavailable" : null, monitorBinary;
   const probeTurns = [];
   for (const episode of episodes) {
     let workspace, connection, monitor, boundary, started, documents, finalMonitor;

@@ -14,7 +14,7 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-BINARY = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / ".build/debug/cua-runtime"
+BINARY = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else ROOT / ".build/debug/useui-runtime"
 
 
 def launch():
@@ -64,7 +64,7 @@ try:
     assert set(caps["body"]["data"]["actions"]) == expected_actions
     targets = call(process, request("targets", "targets", {"bundleId": None}, epoch))["body"]["data"]
     assert len(targets["targets"]) <= 256
-    filtered = call(process, request("filtered", "targets", {"bundleId": "nonexistent.cua.fixture"}, epoch))
+    filtered = call(process, request("filtered", "targets", {"bundleId": "nonexistent.useui.fixture"}, epoch))
     assert filtered["body"]["data"]["targets"] == []
     # Do not inspect arbitrary user windows in this read-only lifecycle smoke.
     target = {"pid": 2147483647, "windowId": 4294967295}
@@ -111,7 +111,7 @@ finally:
 
 # Signal while the hello frame is buffered/being initialized; stdin remains open.
 # If SIGTERM lands before dyld enters main(), macOS terminates with -SIGTERM; once in main(),
-# cua-runtime traps SIGTERM and exits cleanly with 0. Either way it must exit promptly without hanging.
+# useui-runtime traps SIGTERM and exits cleanly with 0. Either way it must exit promptly without hanging.
 process = launch()
 try:
     send(process, request("hello", "hello", {"clientName": "startup-signal", "supportedVersions": [1],
@@ -130,7 +130,7 @@ for data in (b'{"kind":"request"', b'not-json-secret-value\n', b'{}\r\n', b'A' *
     completed = subprocess.run([str(BINARY)], input=data, capture_output=True, timeout=5)
     assert completed.returncode == 64
     assert completed.stdout == b""
-    assert completed.stderr == b"cua-runtime: invalid_input\n"
+    assert completed.stderr == b"useui-runtime: invalid_input\n"
 checks.append("truncated/malformed/CRLF/oversized frames; bounded fixed diagnostics")
 print(json.dumps({"checks": checks, "permissions": permissions, "targets": len(targets["targets"]),
                   "mutations": 0, "permissionRequests": 0}))

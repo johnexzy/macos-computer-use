@@ -1,14 +1,14 @@
 <img src="brand/app-icon.svg" width="76" height="76" alt="">
 
-# macOS Computer Use
+# UseUI
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20(Apple%20Silicon%20%26%20Intel)-lightgrey.svg)]()
 [![Model Context Protocol](https://img.shields.io/badge/MCP-Standard%20Compatible-green.svg)](https://modelcontextprotocol.io)
 
-A native **Model Context Protocol (MCP)** server for macOS inspection and desktop automation.
+A native **Model Context Protocol (MCP)** server for background-first desktop and browser automation — starting with macOS.
 
-The Rust + Swift rebuild runs alongside the existing Node/Swift server. It now supports semantic observations and a narrow background action path. The [native installation and migration guide](docs/native-delivery.md) covers the standalone universal archive, client configuration, compatibility gaps, rollback and release checks; its end-user binaries require no Node or local compiler.
+The Rust + Swift runtime (`useui` + `useui-runtime`) runs alongside the legacy Node/Swift server. It provides semantic observations, background actions, opt-in temporary foreground escalation, and a Chrome Native Messaging browser accelerator. The [native installation and migration guide](docs/native-delivery.md) covers the standalone universal archive, client configuration, compatibility gaps, rollback and release checks; its end-user binaries require no Node or local compiler.
 
 For a drag-and-drop local install, see the [native disk image and setup instructions](docs/native-delivery.md#install-from-a-disk-image). The [brand kit](brand/README.md) contains the logo and usage guide.
 
@@ -39,7 +39,7 @@ npm run build:runtime
 npm run start:rust
 ```
 
-Set `CUA_VISUAL_FEEDBACK=1` to show a window marker, agent pointer, and writing cues while the native server works. Set `CUA_LIVE_PREVIEW=1` to watch the selected window and its attached sheet in a local floating panel. See [on-screen feedback](docs/runtime.md#on-screen-feedback) and [live preview](docs/runtime.md#live-preview) for MCP setup.
+Set `USEUI_VISUAL_FEEDBACK=1` to show a window marker, agent pointer, and writing cues while the native server works. Set `USEUI_LIVE_PREVIEW=1` to watch the selected window and its attached sheet in a local floating panel. See [on-screen feedback](docs/runtime.md#on-screen-feedback) and [live preview](docs/runtime.md#live-preview) for MCP setup.
 
 For automated checks, run `npm run test:runtime`. To exercise the installed pair against only the disposable fixture:
 
@@ -143,8 +143,8 @@ The default configuration exposes semantic background automation and read-only i
 
 ### 2. Clone & Build
 ```bash
-git clone https://github.com/johnexzy/macos-computer-use.git
-cd macos-computer-use
+git clone https://github.com/johnexzy/useui.git
+cd useui
 npm install
 npm run build
 ```

@@ -1,6 +1,6 @@
 # Rust–Swift protocol v1
 
-This is the internal contract for the rebuild, implemented in `crates/cua-protocol`
+This is the internal contract for the rebuild, implemented in `crates/useui-protocol`
 and the Foundation-only `protocol/swift` package. The standalone Rust host and
 persistent Swift runtime use it for semantic observation and a narrow background
 action path; see [runtime.md](runtime.md) for build/run commands and implemented
@@ -411,7 +411,7 @@ authority/epochs, response correlation, framing bounds, and coordinate conversio
 cargo fmt --all --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-swift test --package-path protocol/swift --scratch-path /tmp/macos-cua-protocol-swift-build
+swift test --package-path protocol/swift --scratch-path /tmp/useui-protocol-swift-build
 ```
 
 These checks establish the contract and decoding behavior. Runtime/injected tests

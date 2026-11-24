@@ -140,7 +140,7 @@ def main():
     args = parser.parse_args()
     subprocess.run(["/usr/bin/shasum", "-a", "256", "-c", args.archive.name + ".sha256"],
                    cwd=args.archive.resolve().parent, check=True, capture_output=True)
-    with tempfile.TemporaryDirectory(prefix="CUA package smoke ") as temporary:
+    with tempfile.TemporaryDirectory(prefix="UseUI package smoke ") as temporary:
         temporary = Path(temporary)
         installation = temporary / "Clean Install With Spaces"
         installation.mkdir()
@@ -162,7 +162,7 @@ def main():
         installed = roots[0]
         manifest = json.loads((installed / "manifest.json").read_text())
         subprocess.run(["/usr/bin/shasum", "-a", "256", "-c", "SHA256SUMS"], cwd=installed, check=True, capture_output=True)
-        for name in ("cua-host", "cua-runtime"):
+        for name in ("useui", "useui-runtime"):
             binary = installed / "bin" / name
             assert hashlib.sha256(binary.read_bytes()).hexdigest() == manifest["files"][f"bin/{name}"]["sha256"]
             subprocess.run(["/usr/bin/codesign", "--verify", "--strict", "--all-architectures", str(binary)], check=True, capture_output=True)
@@ -172,8 +172,8 @@ def main():
         home.mkdir()
         environment = {"PATH": "/usr/bin:/bin", "HOME": str(home), "LANG": "en_US.UTF-8"}
         prefix = [] if args.architecture == "native" else ["/usr/bin/arch", f"-{args.architecture}"]
-        host = str(installed / "bin/cua-host")
-        runtime = str(installed / "bin/cua-runtime")
+        host = str(installed / "bin/useui")
+        runtime = str(installed / "bin/useui-runtime")
         version = subprocess.check_output(prefix + [host, "--version"], cwd=work, env=environment, text=True).strip()
         smoke_runtime(prefix + [runtime], work, environment)
         checks = [smoke_host(prefix + [host], work, environment, ending)

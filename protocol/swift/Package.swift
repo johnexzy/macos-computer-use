@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "CUAProtocol",
+    name: "UseUIProtocol",
     platforms: [.macOS(.v13)],
-    products: [.library(name: "CUAProtocol", targets: ["CUAProtocol"])],
+    products: [.library(name: "UseUIProtocol", targets: ["UseUIProtocol"])],
     targets: [
-        .target(name: "CUAProtocol"),
-        .testTarget(name: "CUAProtocolTests", dependencies: ["CUAProtocol"]),
+        .target(name: "UseUIProtocol"),
+        .testTarget(name: "UseUIProtocolTests", dependencies: ["UseUIProtocol"]),
     ]
 )

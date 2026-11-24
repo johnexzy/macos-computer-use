@@ -37,7 +37,7 @@
     "test:evaluation": "node --test test/evaluation/*.test.mjs",
     "test:composition:live": "npm run build:runtime && sh test/fixtures/macos/build.sh && node test/runtime/composition-live.mjs",
     "evaluate:scripted": "node test/evaluation/run.mjs --mode scripted",
-    "start:rust": "./.artifacts/runtime-install/cua-host",
+    "start:rust": "./.artifacts/runtime-install/useui",
     "baseline:build": "npm run build && sh test/fixtures/macos/build.sh",
     "baseline:preflight": "node test/baseline/run.mjs --preflight",
     "baseline": "node test/baseline/run.mjs",
@@ -67,12 +67,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/johnexzy/macos-computer-use.git"
+    "url": "git+https://github.com/johnexzy/useui.git"
   },
   "bugs": {
-    "url": "https://github.com/johnexzy/macos-computer-use/issues"
+    "url": "https://github.com/johnexzy/useui/issues"
   },
-  "homepage": "https://github.com/johnexzy/macos-computer-use#readme",
+  "homepage": "https://github.com/johnexzy/useui#readme",
   "publishConfig": {
     "access": "public"
   },

@@ -83,10 +83,10 @@ const report = {
     revision: git("rev-parse", "HEAD"),
     dirty: Boolean(git("status", "--porcelain")),
     hostSha256: await hash(
-      path.join(root, ".artifacts/runtime-install/cua-host"),
+      path.join(root, ".artifacts/runtime-install/useui"),
     ),
     helperSha256: await hash(
-      path.join(root, ".artifacts/runtime-install/cua-runtime"),
+      path.join(root, ".artifacts/runtime-install/useui-runtime"),
     ),
     fixtureSha256: await hash(
       path.join(
@@ -163,7 +163,7 @@ for (let repeat = 0; repeat < repetitions; repeat++)
         const wrapper = markerPrefix + ".relay";
         const program = path.join(
           root,
-          ".artifacts/runtime-install/cua-runtime",
+          ".artifacts/runtime-install/useui-runtime",
         );
         const relay = path.join(root, "test/runtime/support/native-relay.py");
         await fs.writeFile(
@@ -410,7 +410,7 @@ for (let repeat = 0; repeat < repetitions; repeat++)
             [
               "-u",
               "-c",
-              "import os,pwd,fcntl,sys; p=os.path.join(pwd.getpwuid(os.geteuid()).pw_dir,'Library/Caches/macos-computer-use'); os.makedirs(p,mode=0o700,exist_ok=True); f=open(os.path.join(p,'mutation.lock'),'a'); fcntl.flock(f,fcntl.LOCK_EX); print('locked',flush=True); sys.stdin.read()",
+              "import os,pwd,fcntl,sys; p=os.path.join(pwd.getpwuid(os.geteuid()).pw_dir,'Library/Caches/useui'); os.makedirs(p,mode=0o700,exist_ok=True); f=open(os.path.join(p,'mutation.lock'),'a'); fcntl.flock(f,fcntl.LOCK_EX); print('locked',flush=True); sys.stdin.read()",
             ],
             { stdio: ["pipe", "pipe", "pipe"] },
           );

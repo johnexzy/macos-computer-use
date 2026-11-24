@@ -63,8 +63,8 @@ const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8"
 const hash = async (file) => createHash("sha256").update(await fs.readFile(file)).digest("hex");
 const report = { schemaVersion: 1, startedAt: new Date().toISOString(), repetitions,
   source: { revision: git("rev-parse", "HEAD"), dirty: Boolean(git("status", "--porcelain")),
-    hostSha256: await hash(path.join(root, ".artifacts/runtime-install/cua-host")),
-    helperSha256: await hash(path.join(root, ".artifacts/runtime-install/cua-runtime")),
+    hostSha256: await hash(path.join(root, ".artifacts/runtime-install/useui")),
+    helperSha256: await hash(path.join(root, ".artifacts/runtime-install/useui-runtime")),
     fixtureSha256: await hash(path.join(root, "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture")) },
   environment: { macOS: execFileSync("sw_vers", ["-productVersion"], { encoding: "utf8" }).trim(), cpu: os.cpus()[0].model, architecture: os.arch() },
   budgets: { nativeRequestMs: 3000, registrationMs: 3000, oracleMs: 3000 },

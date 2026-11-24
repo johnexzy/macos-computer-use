@@ -12,8 +12,8 @@ import { distribution } from "../baseline/metrics.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const output = path.resolve(process.argv[2] || path.join(root, ".artifacts/runtime-timing.json"));
-const host = path.join(root, ".artifacts/runtime-install/cua-host");
-const helper = path.join(root, ".artifacts/runtime-install/cua-runtime");
+const host = path.join(root, ".artifacts/runtime-install/useui");
+const helper = path.join(root, ".artifacts/runtime-install/useui-runtime");
 const child = spawn(host, [], { cwd: os.tmpdir(), stdio: ["pipe", "pipe", "pipe"] });
 const exited = once(child, "exit");
 const pending = new Map();

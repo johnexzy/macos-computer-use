@@ -1,0 +1,20 @@
+[package]
+name = "useui-host"
+version = "1.0.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "useui"
+path = "src/main.rs"
+
+[dependencies]
+useui-client = { path = "../useui-client" }
+useui-protocol = { path = "../useui-protocol", features = ["schema"] }
+rmcp.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true

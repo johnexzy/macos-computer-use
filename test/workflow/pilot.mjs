@@ -198,7 +198,7 @@ async function main(argv) {
     Object.assign(env, await apiKeyEnvironment(values["api-key-file"]));
   }
   const budget = new ModelBudget(budgetUsd, perTrialUsd);
-  const files = [fixtureBinary, "native_helper", ".artifacts/runtime-install/cua-host", ".artifacts/runtime-install/cua-runtime",
+  const files = [fixtureBinary, "native_helper", ".artifacts/runtime-install/useui", ".artifacts/runtime-install/useui-runtime",
     "test/fixtures/macos/WorkflowFixture.swift", "test/workflow/task.mjs", "test/workflow/session-lane.mjs", "test/workflow/session-gateway.mjs",
     "test/workflow/session-relay.mjs", "test/workflow/session-model.mjs", "test/workflow/session-metrics.mjs", "test/workflow/campaign-plan.mjs",
     "test/workflow/pilot.mjs", ...(stage === "main" ? [userActiveSource, "test/workflow/support/user-active.mjs"] : [])];

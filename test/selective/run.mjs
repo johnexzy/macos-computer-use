@@ -23,8 +23,8 @@ const hash = async (file) => createHash("sha256").update(await fs.readFile(file)
 const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 const report = { schemaVersion: 1, startedAt: new Date().toISOString(), repetitions, lanes: ["full", "selected", "retained"],
   source: { revision: git("rev-parse", "HEAD"), dirty: Boolean(git("status", "--porcelain")),
-    hostSha256: await hash(path.join(root, ".artifacts/runtime-install/cua-host")),
-    helperSha256: await hash(path.join(root, ".artifacts/runtime-install/cua-runtime")), fixtureSha256: await hash(fixtureBinary),
+    hostSha256: await hash(path.join(root, ".artifacts/runtime-install/useui")),
+    helperSha256: await hash(path.join(root, ".artifacts/runtime-install/useui-runtime")), fixtureSha256: await hash(fixtureBinary),
     monitorSha256: await hash(monitorBinary) },
   budgets: { requestMs: 3000, setupMs: 5000, turnAfterScenarioMs: 700 },
   model: { providerCalls: 0, actualTokens: null, actualCostUsd: null },

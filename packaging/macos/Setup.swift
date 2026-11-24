@@ -1,7 +1,7 @@
 import AppKit
 
 @main
-struct CUASetup {
+struct UseUISetup {
     @MainActor
     static func main() {
         let app = NSApplication.shared
@@ -15,7 +15,7 @@ struct CUASetup {
 
     private static func hostURL() -> URL? {
         guard let executable = Bundle.main.executableURL else { return nil }
-        let host = executable.deletingLastPathComponent().appendingPathComponent("cua-host")
+        let host = executable.deletingLastPathComponent().appendingPathComponent("useui")
         return FileManager.default.isExecutableFile(atPath: host.path) ? host : nil
     }
 
@@ -24,10 +24,10 @@ struct CUASetup {
         let args = allowForeground ? ["--allow-foreground"] : [String]()
         let value = [
             "mcpServers": [
-                "macos-computer-use": [
+                "useui": [
                     "command": host.path,
                     "args": args,
-                    "env": ["CUA_VISUAL_FEEDBACK": "1", "CUA_LIVE_PREVIEW": "1"],
+                    "env": ["USEUI_VISUAL_FEEDBACK": "1", "USEUI_LIVE_PREVIEW": "1"],
                 ] as [String: Any],
             ],
         ]
@@ -39,7 +39,7 @@ struct CUASetup {
 
 @MainActor
 private final class SetupWindow: NSWindow, NSWindowDelegate {
-    private static let skillName = "macos-computer-use-native"
+    private static let skillName = "useui"
     private let hostURL: URL?
     private let allowForegroundToggle = NSButton(
         checkboxWithTitle: "Allow temporary foreground fallback (file pickers, canvas, hotkeys)",
@@ -52,7 +52,7 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
         self.hostURL = hostURL
         super.init(contentRect: NSRect(x: 0, y: 0, width: 560, height: 245),
                    styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        title = "macOS Computer Use"
+        title = "UseUI"
         delegate = self
         isReleasedWhenClosed = false
 
@@ -123,7 +123,7 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
 
     @objc private func copyConfiguration() {
         let allowForeground = allowForegroundToggle.state == .on
-        guard let configuration = CUASetup.configuration(hostURL: hostURL, allowForeground: allowForeground) else { return }
+        guard let configuration = UseUISetup.configuration(hostURL: hostURL, allowForeground: allowForeground) else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         let copied = pasteboard.setString(configuration, forType: .string)
@@ -147,7 +147,7 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
                 return
             }
             let unpackedDir = FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/macOS Computer Use/browser-extension")
+                .appendingPathComponent("Library/Application Support/UseUI/browser-extension")
             if FileManager.default.fileExists(atPath: unpackedDir.path) {
                 let pb = NSPasteboard.general
                 pb.clearContents()
@@ -157,7 +157,7 @@ private final class SetupWindow: NSWindow, NSWindowDelegate {
                 showStatus("Native Messaging bridge installed.")
             }
         } catch {
-            showStatus("Could not run cua-host --install-browser-bridge.")
+            showStatus("Could not run useui --install-browser-bridge.")
         }
     }
 

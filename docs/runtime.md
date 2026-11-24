@@ -21,10 +21,10 @@ The build installs a matching-architecture pair under `.artifacts/runtime-instal
 It can run outside the checkout without Node or a SwiftPM working directory:
 
 ```sh
-/absolute/path/to/.artifacts/runtime-install/cua-host
+/absolute/path/to/.artifacts/runtime-install/useui
 ```
 
-The host locates `cua-runtime` beside itself. `--helper PATH` overrides that location.
+The host locates `useui-runtime` beside itself. `--helper PATH` overrides that location.
 Background execution is the default. Only the operator's `--allow-foreground` flag
 installs a foreground grant; MCP arguments cannot install or upgrade authority.
 The [native archive and client migration guide](native-delivery.md) covers
@@ -101,15 +101,15 @@ and [Vision text range boxes](https://developer.apple.com/documentation/vision/r
 
 ## On-screen feedback
 
-Set `CUA_VISUAL_FEEDBACK=1` in the environment for the native MCP server.
+Set `USEUI_VISUAL_FEEDBACK=1` in the environment for the native MCP server.
 Use the same tool calls as usual after reconnecting the client.
 
 ```json
 {
   "mcpServers": {
-    "cua": {
-      "command": "/absolute/path/to/cua-host",
-      "env": { "CUA_VISUAL_FEEDBACK": "1" }
+    "useui": {
+      "command": "/absolute/path/to/useui",
+      "env": { "USEUI_VISUAL_FEEDBACK": "1" }
     }
   }
 }
@@ -133,16 +133,16 @@ entry and reconnect to turn feedback off.
 
 ## Live preview
 
-Set `CUA_LIVE_PREVIEW=1` in the same native server environment and reconnect
+Set `USEUI_LIVE_PREVIEW=1` in the same native server environment and reconnect
 to open a small floating preview beside your client. Screen Recording access
 and macOS 14.2 or later are required. Drag the title bar to place the preview,
 use **Pause** to stop capture temporarily, or close it for the session.
 
-The preview follows the latest published CUA window observation. When the
+The preview follows the latest published UseUI window observation. When the
 Accessibility tree identifies one attached sheet and ScreenCaptureKit matches
 it to a unique window owned by that app, the preview includes the sheet. It
 shows **Window unavailable** if the capture cannot be safely resolved. The
-frames stay inside the native helper. Set `CUA_VISUAL_FEEDBACK=1` too to show
+frames stay inside the native helper. Set `USEUI_VISUAL_FEEDBACK=1` too to show
 the pre-action pointer glide.
 
 ## Foreground input
@@ -352,7 +352,7 @@ preserves completed delivery/proof and may return null feedback.
 
 ## Coordination and cleanup
 
-`cua-client` is the reusable typed Rust boundary. `Client::spawn(Config)` installs
+`useui-client` is the reusable typed Rust boundary. `Client::spawn(Config)` installs
 the authority and handshake; `call(body, budget, cancellation)` generates request
 IDs and overwrites internal act grants. Public caller control messages are rejected.
 The host uses `spawn_with_cancellation` so EOF or signals during the handshake

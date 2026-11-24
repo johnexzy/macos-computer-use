@@ -1,6 +1,6 @@
-const NATIVE_HOST_NAME = "com.johnoba.cua.browser";
+const NATIVE_HOST_NAME = "com.johnoba.useui.browser";
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
-const KEEPALIVE_ALARM = "cua_bridge_keepalive";
+const KEEPALIVE_ALARM = "useui_bridge_keepalive";
 
 let port = null;
 let connected = false;

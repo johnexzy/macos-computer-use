@@ -6,8 +6,8 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 output=${1:-"$root/.artifacts/dmg-dist"}
 mkdir -p "$output"
 output=$(CDPATH= cd -- "$output" && pwd)
-version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$root/crates/cua-host/Cargo.toml")
-image_name="macos-computer-use-$version-macos-universal.dmg"
+version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$root/crates/useui-host/Cargo.toml")
+image_name="useui-$version-macos-universal.dmg"
 image="$output/$image_name"
 if [ -e "$image" ] || [ -e "$image.sha256" ]; then
   printf '%s\n' "Review image already exists; use a new output directory: $image" >&2
@@ -18,20 +18,20 @@ temporary=$(mktemp -d "$output/.dmg-package.XXXXXX")
 trap 'rm -rf -- "$temporary"' EXIT
 trap 'exit 1' HUP INT TERM
 sh "$root/scripts/package-native.sh" "$temporary"
-native_name="cua-native-$version-macos-universal"
+native_name="useui-native-$version-macos-universal"
 tar -xzf "$temporary/$native_name.tar.gz" -C "$temporary"
 native="$temporary/$native_name"
 
 stage="$temporary/image"
-app_name="macOS Computer Use"
+app_name="UseUI"
 bundle="$stage/$app_name.app"
 executables="$bundle/Contents/MacOS"
 resources="$bundle/Contents/Resources"
 mkdir -p "$executables" "$resources"
-install -m 755 "$native/bin/cua-host" "$native/bin/cua-runtime" "$executables/"
+install -m 755 "$native/bin/useui" "$native/bin/useui-runtime" "$executables/"
 install -m 644 "$native/LICENSE" "$resources/LICENSE"
 install -m 644 "$native/manifest.json" "$resources/native-manifest.json"
-skill=macos-computer-use-native
+skill=useui
 mkdir -p "$resources/skills/$skill"
 install -m 644 "$root/skills/$skill/SKILL.md" "$resources/skills/$skill/SKILL.md"
 if [ -d "$root/extension/chromium" ]; then
@@ -56,10 +56,10 @@ install -m 644 "$root/packaging/macos/Info.plist" "$plist"
 
 for architecture in arm64 x86_64; do
   xcrun --sdk macosx swiftc -O -parse-as-library -target "$architecture-apple-macosx13.0" \
-    "$root/packaging/macos/Setup.swift" -o "$temporary/cua-setup-$architecture"
+    "$root/packaging/macos/Setup.swift" -o "$temporary/useui-setup-$architecture"
 done
-xcrun lipo -create "$temporary/cua-setup-arm64" "$temporary/cua-setup-x86_64" -output "$executables/cua-setup"
-setup_architectures=$(xcrun lipo -archs "$executables/cua-setup")
+xcrun lipo -create "$temporary/useui-setup-arm64" "$temporary/useui-setup-x86_64" -output "$executables/useui-setup"
+setup_architectures=$(xcrun lipo -archs "$executables/useui-setup")
 case "$setup_architectures" in
   "arm64 x86_64"|"x86_64 arm64") ;;
   *)

@@ -109,41 +109,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cua-client"
-version = "1.0.0"
-dependencies = [
- "cua-protocol",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "cua-host"
-version = "1.0.0"
-dependencies = [
- "cua-client",
- "cua-protocol",
- "rmcp",
- "schemars",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "cua-protocol"
-version = "1.0.0"
-dependencies = [
- "base64 0.22.1",
- "schemars",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "darling"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -788,6 +753,41 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "useui-client"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "useui-protocol",
+]
+
+[[package]]
+name = "useui-host"
+version = "1.0.0"
+dependencies = [
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "useui-client",
+ "useui-protocol",
+]
+
+[[package]]
+name = "useui-protocol"
+version = "1.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "schemars",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "uuid"

@@ -14,7 +14,7 @@ import { buildForegroundMonitor, ForegroundMonitor } from "../runtime/support/fo
 import { gradeWorkflow, makeTask, workflowVariants } from "./task.mjs";
 import { buildUserActiveActors, userActiveSource, UserActiveActivity } from "./support/user-active.mjs";
 
-const host = path.join(root, ".artifacts/runtime-install/cua-host");
+const host = path.join(root, ".artifacts/runtime-install/useui");
 const fixturePath = "test/fixtures/macos/.build/CUAFixture.app/Contents/MacOS/CUAFixture";
 const budgetMs = 3000;
 const absent = { kind: "windowAbsent", params: {} };
@@ -255,7 +255,7 @@ const plan = options.task.flatMap((task, i) => options.variant.flatMap((variant,
   ({ task, variant, lane: options.lane[(i + j + k) % options.lane.length], seed: `workflow-${task}-1` }))));
 const actorBinaries = options.variant.includes("user-active") ? await buildUserActiveActors() : null;
 const evidenceFiles = [fixturePath, ...(options.lane.includes("legacy") ? ["native_helper"] : []),
-  ...(options.lane.some(lane => lane !== "legacy") ? [".artifacts/runtime-install/cua-host", ".artifacts/runtime-install/cua-runtime"] : []),
+  ...(options.lane.some(lane => lane !== "legacy") ? [".artifacts/runtime-install/useui", ".artifacts/runtime-install/useui-runtime"] : []),
   "test/fixtures/macos/WorkflowFixture.swift", "test/workflow/scripted.mjs", "test/workflow/task.mjs",
   ...(actorBinaries ? [userActiveSource, "test/workflow/support/user-active.mjs", ...actorBinaries.flatMap(binary =>
     [path.relative(root, binary), path.relative(root, path.join(path.dirname(binary), "../Info.plist"))])] : [])];

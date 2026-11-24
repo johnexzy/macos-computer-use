@@ -7,11 +7,11 @@ import test from "node:test";
 import { Session, root, host, alive, deadline } from "./mcp-session.mjs";
 
 async function fakeHelper(mode) {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "cua-mcp-test-"));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "useui-mcp-test-"));
   const program = path.join(directory, "helper");
   const pidFile = path.join(directory, "pid");
   const handoffFile = path.join(directory, "act-started");
-  const source = path.join(root, "crates/cua-client/tests/support/fake_helper.py");
+  const source = path.join(root, "crates/useui-client/tests/support/fake_helper.py");
   await fs.writeFile(program, `#!/usr/bin/env python3
 import json, runpy, sys
 source = ${JSON.stringify(source)}

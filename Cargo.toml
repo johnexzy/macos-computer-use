@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/cua-protocol", "crates/cua-client", "crates/cua-host"]
+members = ["crates/useui-protocol", "crates/useui-client", "crates/useui-host"]
 resolver = "3"
 
 [workspace.package]

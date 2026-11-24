@@ -16,7 +16,7 @@ const refuse = (message) => ({ ...jsonText({ code: "fixture_boundary", delivery:
 
 export async function connectLane(lane) {
   const transport = new StdioClientTransport({
-    command: lane === "legacy" ? process.execPath : path.join(root, ".artifacts/runtime-install/cua-host"),
+    command: lane === "legacy" ? process.execPath : path.join(root, ".artifacts/runtime-install/useui"),
     args: lane === "legacy" ? [path.join(root, "server.mjs")] : [], cwd: root, stderr: "pipe", env: { MACOS_COMPUTER_USE_UNSAFE: "0" },
   });
   transport.stderr?.resume();

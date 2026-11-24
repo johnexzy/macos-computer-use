@@ -197,7 +197,7 @@ export class LaneAdapter {
   async connect() {
     const [{ Client }, { StdioClientTransport }] = await Promise.all([
       import("@modelcontextprotocol/sdk/client/index.js"), import("@modelcontextprotocol/sdk/client/stdio.js")]);
-    this.transport = new StdioClientTransport({ command: this.lane === "legacy" ? process.execPath : path.join(root, ".artifacts/runtime-install/cua-host"),
+    this.transport = new StdioClientTransport({ command: this.lane === "legacy" ? process.execPath : path.join(root, ".artifacts/runtime-install/useui"),
       args: this.lane === "legacy" ? [path.join(root, "server.mjs")] : [], cwd: root, stderr: "pipe",
       env: { ...process.env, MACOS_COMPUTER_USE_UNSAFE: "0" } });
     const send = this.transport.send.bind(this.transport);

@@ -1,30 +1,30 @@
 # Native macOS installation and migration
 
-The native archive contains `bin/cua-host` and its sibling `bin/cua-runtime`.
+The native archive contains `bin/useui` and its sibling `bin/useui-runtime`.
 End users need neither Node.js, Rust, Swift nor a local compiler. Keep the pair
-together and configure the absolute path to `cua-host`; its working directory can
+together and configure the absolute path to `useui`; its working directory can
 be anywhere, including a path containing spaces. Installation does not start a
 daemon or replace the existing npm server.
 
 ## Install from a disk image
 
-Open the local review DMG and drag **macOS Computer Use.app** into
+Open the local review DMG and drag **UseUI.app** into
 **Applications**. Double-click the installed app and choose **Copy MCP
-Configuration**. Merge the copied server entry into your MCP client
+Config**. Merge the copied server entry into your MCP client
 configuration and reconnect the client. The setup window uses the app's actual
 installed path and enables the activity badge and live preview. The MCP client
 launches the runtime when it connects.
 
-In Claude Code Desktop, use **Install Claude Code Skill…** and select the folder
+In Claude Code Desktop, use **Install Skill…** and select the folder
 you open as your local project. The setup window copies the bundled
-`macos-computer-use-native` skill into that project's `.claude/skills/`
+`useui` skill into that project's `.claude/skills/`
 directory. Start or reopen a local Code session in that folder and choose
-`/macos-computer-use-native` from the slash menu to invoke it with a task.
+`/useui` from the slash menu to invoke it with a task.
 Claude Code can also choose the skill when relevant.
 [Claude Code Desktop skills](https://code.claude.com/docs/en/desktop#use-skills)
 
 The command in the copied configuration is typically
-`/Applications/macOS Computer Use.app/Contents/MacOS/cua-host`. The helper
+`/Applications/UseUI.app/Contents/MacOS/useui`. The helper
 ships next to it inside the app. Permission preflight runs in the MCP client's
 launch context. See the permission guidance below if a capability is unavailable.
 
@@ -84,9 +84,9 @@ directory, and verify its contents with `shasum -a 256 -c SHA256SUMS` from insid
 that directory. Both binaries can also be checked with:
 
 ```sh
-codesign --verify --strict --all-architectures /absolute/path/bin/cua-host
-codesign --verify --strict --all-architectures /absolute/path/bin/cua-runtime
-/absolute/path/bin/cua-host --version
+codesign --verify --strict --all-architectures /absolute/path/bin/useui
+codesign --verify --strict --all-architectures /absolute/path/bin/useui-runtime
+/absolute/path/bin/useui --version
 ```
 
 Use `mcp-config.example.json`, replacing its placeholder path:
@@ -94,8 +94,8 @@ Use `mcp-config.example.json`, replacing its placeholder path:
 ```json
 {
   "mcpServers": {
-    "macos-computer-use-native": {
-      "command": "/absolute/path/with spaces/cua-native/bin/cua-host",
+    "useui": {
+      "command": "/absolute/path/with spaces/useui-native/bin/useui",
       "args": []
     }
   }
@@ -150,7 +150,7 @@ points still start v3; installing an archive does not migrate them automatically
 | `press_key` | A foreground `key` step on the exact focused AX reference. Supported keys are Return, Tab, Escape, Backspace and arrows. |
 | `scroll` | `act` → `scroll` on an observed `AXScrollArea` that advertises it. Select `vertical` or `horizontal` and a signed amount in thousandths of the full range. Positive moves down or right. Background delivery requires a readable, writable AX scrollbar and verifies movement. Observe again to locate newly revealed content. |
 | `launch_app`, `open_url`, `run_applescript` | Unsupported; use separate explicitly authorized setup when required. |
-| Cursor overlay | [On-screen feedback](runtime.md#on-screen-feedback) is built into the runtime and enabled per MCP connection with `CUA_VISUAL_FEEDBACK=1`. |
+| Cursor overlay | [On-screen feedback](runtime.md#on-screen-feedback) is built into the runtime and enabled per MCP connection with `USEUI_VISUAL_FEEDBACK=1`. |
 
 For transient selected state, opt in to `eventHistory` on `observe`.
 History includes a cursor and coverage evidence. Use refs from the current
@@ -167,7 +167,7 @@ suffix. Do not translate an uncertain v3 result into a known native rejection.
 ```sh
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
 sh scripts/package-native.sh .artifacts/native-review
-python3 test/distribution/package-smoke.py .artifacts/native-review/cua-native-1.0.0-macos-universal.tar.gz
+python3 test/distribution/package-smoke.py .artifacts/native-review/useui-native-1.0.0-macos-universal.tar.gz
 ```
 
 The smoke extracts only the archive into a clean path containing spaces, uses a
