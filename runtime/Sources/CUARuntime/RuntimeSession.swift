@@ -134,7 +134,7 @@ public final class RuntimeSession: @unchecked Sendable {
             guard session == nil else { reject(request, code: .authorityDenied, "session already initialized"); return }
             guard context.interruption == nil else { respond(request, interruptedBody(request, .deadlineExceeded)); return }
             session = SessionContext(epoch: epoch, authority: hello.authority)
-            respond(request, .hello(HelloResult(helperVersion: "4.0.0", selectedVersion: Limits.version)))
+            respond(request, .hello(HelloResult(helperVersion: "1.0.0", selectedVersion: Limits.version)))
             return
         }
         guard let session else { reject(request, code: .authorityDenied, "host hello is required"); return }

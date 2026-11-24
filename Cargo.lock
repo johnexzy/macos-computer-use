@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "cua-client"
-version = "4.0.0"
+version = "1.0.0"
 dependencies = [
  "cua-protocol",
  "serde",
@@ -121,7 +121,7 @@ dependencies = [
 
 [[package]]
 name = "cua-host"
-version = "4.0.0"
+version = "1.0.0"
 dependencies = [
  "cua-client",
  "cua-protocol",
@@ -135,7 +135,7 @@ dependencies = [
 
 [[package]]
 name = "cua-protocol"
-version = "4.0.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "schemars",
